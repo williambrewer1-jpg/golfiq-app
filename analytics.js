@@ -220,6 +220,7 @@ export function parseRoundBundle(bundle) {
     garmin_handicapped_strokes: int(first(sc, 'handicappedStrokes')),
     garmin_player_handicap: num(first(sc, 'playerHandicap', 'courseHandicap')),
     score_type: first(sc, 'scoreType', 'scoringType'), in_progress: first(sc, 'roundInProgress') ? 1 : 0,
+    origin: bundle.source === 'manual_entry' ? 'manual' : 'garmin',
   };
   if (round.in_progress) issue('warning', 'in_progress', 'Garmin marks this round as still in progress');
   const course_holes = (course_id && pars) ? pars.slice(0, 18).map((p, i) => ({ hole: i + 1, par: p, stroke_index: si && i < si.length ? si[i] : null })) : [];
@@ -342,11 +343,64 @@ export function buildDataset(state, opts = {}) {
   holes = holes.filter((h) => ids.has(h.round_id));
   shots = shots.filter((s) => ids.has(s.round_id));
   holes = buildHoles(holes, rounds, base.chole);
+  if (opts.estimateIndex) estimateIndexes(rounds, holes);
   shots = buildShots(shots, holes, clubs);
   holeChain(holes, shots);
   roundMetrics(rounds, holes, shots);
   rounds.sort((a, b) => (a.start_time_local || '').localeCompare(b.start_time_local || ''));
   return { rounds, holes, shots, clubs, base, issues: base.issues };
+}
+
+// ---- WHS Handicap Index from score differentials (Rules of Handicapping 5.2a table).
+// Not applied: PCC, soft/hard caps, exceptional-score reduction, 9-hole score combination.
+export function whsIndex(diffs) {
+  const d = diffs.filter(isNum).slice(-20), n = d.length;
+  if (n < 3) return null;
+  const [k, adj] = n === 3 ? [1, -2] : n === 4 ? [1, -1] : n === 5 ? [1, 0] : n === 6 ? [2, -1] : n <= 8 ? [2, 0] : n <= 11 ? [3, 0]
+    : n <= 14 ? [4, 0] : n <= 16 ? [5, 0] : n <= 18 ? [6, 0] : n === 19 ? [7, 0] : [8, 0];
+  const low = [...d].sort((x, y) => x - y).slice(0, k);
+  return Math.min(54, Math.round((low.reduce((x, y) => x + y, 0) / k + adj) * 10) / 10);
+}
+export function whsCounting(diffs) {           // which of the last 20 differentials count
+  const d = diffs.slice(-20), n = d.filter(isNum).length; if (n < 3) return new Set();
+  const k = n <= 5 ? 1 : n <= 8 ? 2 : n <= 11 ? 3 : n <= 14 ? 4 : n <= 16 ? 5 : n <= 18 ? 6 : n === 19 ? 7 : 8;
+  return new Set(d.map((v, i) => [v, i]).filter(([v]) => isNum(v)).sort((x, y) => x[0] - y[0]).slice(0, k).map(([, i]) => i));
+}
+// Expected 9-hole score differential for a given Handicap Index. The WHS does not publish its exact table;
+// this is the widely published linear approximation of it (0.52 x HI + 1.197).
+export const expectedNineDifferential = (hi) => 0.52 * hi + 1.197;
+// Walk rounds in date order: where no official index is known for a round, use the index computed
+// from your earlier rounds, so Stableford/differentials can be reconstructed for the whole history.
+function estimateIndexes(rounds, holes) {
+  const byR = groupBy(holes, (h) => h.round_id), diffs = [];
+  const order = [...rounds].sort((a, b) => (a.start_time_local || '').localeCompare(b.start_time_local || ''));
+  for (const r of order) {
+    const hs = byR.get(r.round_id) || [];
+    r.index_before = whsIndex(diffs);
+    if (r.hi === null && r.index_before !== null) {
+      r.hi = r.index_before; r.hi_source = 'GolfIQ estimate (from your earlier rounds)';
+      hs.forEach((h) => { h.hi = r.hi; applyHandicap(h); });
+    }
+    let d = null;
+    const rated = isNum(r.slope) && isNum(r.course_rating) && hs.every((h) => h.par !== null);
+    const ags = () => (hs.every((h) => h.ags_hole !== null) ? sum(hs.map((h) => h.ags_hole)) : null);
+    if (hs.length === 18 && rated) {
+      if (ags() !== null) d = 113 / r.slope * (ags() - r.course_rating);
+      else { d = 113 / r.slope * (sum(hs.map((h) => Math.min(h.strokes, h.par + 5))) - r.course_rating); r.differential_provisional = d; }
+    } else if (hs.length === 9 && rated && isNum(r.hi)) {
+      // WHS (2024): a 9-hole score becomes an 18-hole differential by adding the player's EXPECTED differential
+      // for the nine not played, which depends only on their Handicap Index at the time.
+      const cr9 = r.course_rating > 50 ? r.course_rating / 2 : r.course_rating;      // Garmin gives the 18-hole rating
+      const played = ags() !== null ? ags() : sum(hs.map((h) => Math.min(h.strokes, h.par + 5)));
+      r.differential_9 = 113 / r.slope * (played - cr9);
+      r.expected_9 = expectedNineDifferential(r.hi);
+      d = r.differential_9 + r.expected_9;
+      r.differential_nine_hole = d;
+    }
+    r.differential_for_index = d;
+    if (d !== null) diffs.push(d);
+    r.index_after = whsIndex(diffs);
+  }
 }
 
 function buildClubs(list) {
@@ -374,6 +428,25 @@ function buildRoundsBase(rounds, base) {
     r.excluded = !!r.excluded;
   }
   return rounds;
+}
+
+// Handicap-dependent hole fields (course/playing handicap, strokes received, Stableford, net double bogey cap).
+function applyHandicap(h) {
+  const hp = h.holes_played ?? 18;
+  if ([h.hi, h.slope, h.course_rating, h.par_total].every(isNum)) {
+    if (hp <= 9) h.ch = courseHandicap(h.hi / 2, h.slope, h.course_rating > 50 ? h.course_rating / 2 : h.course_rating, h.par_total);
+    else if (hp < 18) h.ch = courseHandicap(h.hi, h.slope, h.course_rating, pyRound(h.par_total * 18 / hp));
+    else h.ch = courseHandicap(h.hi, h.slope, h.course_rating, h.par_total);
+  } else h.ch = null;
+  h.ph = h.ch !== null ? playingHandicap(h.ch, T.stableford_allowance) : null;
+  h.ph_source = h.ph !== null ? 'computed (WHS)' : null;
+  if (h.ph === null && h.garmin_player_handicap !== null) { h.ph = pyRound(h.garmin_player_handicap); h.ph_source = 'garmin recorded'; }
+  const n = hp > 9 ? 18 : 9;
+  h.strokes_rec = h.ph !== null && isNum(h.si_rank) ? strokesReceived(h.ph, h.si_rank, n) : null;
+  h.net = h.strokes_rec !== null ? h.strokes - h.strokes_rec : null;
+  h.stableford = h.strokes_rec !== null && h.par !== null ? stablefordPoints(h.strokes, h.par, h.strokes_rec) : null;
+  h.ch_strokes = h.ch !== null && isNum(h.si_rank) ? strokesReceived(pyRound(h.ch), h.si_rank, n) : null;
+  h.ags_hole = h.ch_strokes !== null ? Math.min(h.strokes, h.par + 2 + h.ch_strokes) : null;
 }
 
 function buildHoles(holes, rounds, chole) {
@@ -412,21 +485,7 @@ function buildHoles(holes, rounds, chole) {
     h.gir_source = ug !== null ? 'user' : comp !== null ? 'computed' : null;
     if (h.par === 3) h.fairway = 'NA';
     h.fw_hit = h.fairway === 'HIT' ? 1 : ['LEFT', 'RIGHT', 'SHORT', 'LONG', 'MISS'].includes(h.fairway) ? 0 : null;
-    const hp = h.holes_played ?? 18;
-    if ([h.hi, h.slope, h.course_rating, h.par_total].every(isNum)) {
-      if (hp <= 9) h.ch = courseHandicap(h.hi / 2, h.slope, h.course_rating > 50 ? h.course_rating / 2 : h.course_rating, h.par_total);
-      else if (hp < 18) h.ch = courseHandicap(h.hi, h.slope, h.course_rating, pyRound(h.par_total * 18 / hp));
-      else h.ch = courseHandicap(h.hi, h.slope, h.course_rating, h.par_total);
-    } else h.ch = null;
-    h.ph = h.ch !== null ? playingHandicap(h.ch, T.stableford_allowance) : null;
-    h.ph_source = h.ph !== null ? 'computed (WHS)' : null;
-    if (h.ph === null && h.garmin_player_handicap !== null) { h.ph = pyRound(h.garmin_player_handicap); h.ph_source = 'garmin recorded'; }
-    const n = hp > 9 ? 18 : 9;
-    h.strokes_rec = h.ph !== null && isNum(h.si_rank) ? strokesReceived(h.ph, h.si_rank, n) : null;
-    h.net = h.strokes_rec !== null ? h.strokes - h.strokes_rec : null;
-    h.stableford = h.strokes_rec !== null && h.par !== null ? stablefordPoints(h.strokes, h.par, h.strokes_rec) : null;
-    h.ch_strokes = h.ch !== null && isNum(h.si_rank) ? strokesReceived(pyRound(h.ch), h.si_rank, n) : null;
-    h.ags_hole = h.ch_strokes !== null ? Math.min(h.strokes, h.par + 2 + h.ch_strokes) : null;
+    applyHandicap(h);
     h.blowup = h.to_par !== null && h.to_par >= 3 ? 1 : 0;
     h.excluded = h.excluded === true || h.excluded === 1;
   }
@@ -560,7 +619,9 @@ function roundMetrics(rounds, holes, shots) {
     r.stableford_round = r.stableford_complete ? r.stableford : null;
     r.stableford_source = r.stableford_complete ? 'reconstructed: ' + (r.ph_source || '') : null;
     const ok = r.format === '18' && r.ags_holes === 18 && r.slope !== null && r.course_rating !== null;
-    r.differential = ok ? (113 / r.slope) * (r.ags - r.course_rating) : null;
+    r.differential = ok ? (113 / r.slope) * (r.ags - r.course_rating) : (r.differential_provisional ?? null);
+    r.differential_source = ok ? 'WHS (net double bogey cap)' : isNum(r.differential_provisional) ? 'provisional (par+5 cap: no handicap or stroke index yet)' : null;
+    if (r.format === '9' && isNum(r.differential_nine_hole)) { r.differential = r.differential_nine_hole; r.differential_source = '9 holes played + expected score for the other 9 (WHS)'; }
     r.chain_coverage = r.holes_played ? r.chain_complete_holes / r.holes_played : null;
     r.shots_tracked = s.length; r.shots_with_club = s.filter((x) => x.club_id).length;
     r.label = `${r.date} · ${r.course_name ?? '?'} (${r.gross})`;
@@ -698,13 +759,19 @@ export function blowupSummary(holes, rounds) {
 }
 
 // ------------------------------------------------------------------ ball striking
-const BANDS = [27, 50, 75, 100, 125, 150, 175, 200, 250, 600];
-const bandLabel = (i) => (BANDS[i + 1] < 600 ? `${BANDS[i]}-${BANDS[i + 1]} m` : `${BANDS[i]}+ m`);
-export function approachShots(shots) {
+// Approach distance bands. Edges are defined in the display unit so labels are round numbers.
+const BAND_SETS = { m: [27, 50, 75, 100, 125, 150, 175, 200, 250, 600], yd: [30, 50, 75, 100, 125, 150, 175, 200, 250, 650] };
+const unitFactor = (unit) => (unit === 'yd' ? M_PER_YD : unit === 'ft' ? M_PER_FT : 1);
+function bandSet(unit = 'm') {
+  const e = BAND_SETS[unit] || BAND_SETS.m, f = unitFactor(unit);
+  return { edgesM: e.map((x) => x * f), lo: e, label: (i) => (i + 2 < e.length ? `${e[i]}-${e[i + 1]} ${unit}` : `${e[i]}+ ${unit}`) };
+}
+export function approachShots(shots, unit = 'm') {
+  const B = bandSet(unit), E = B.edgesM;
   return shots.filter((s) => s.category === 'approach' && !s.excluded && s.start_to_pin !== null).map((s) => {
     const d = Math.round(s.start_to_pin * 1000) / 1000;   // mm rounding: no float noise at band edges
-    const i = BANDS.findIndex((b, k) => k < BANDS.length - 1 && d > b && d <= BANDS[k + 1]);
-    return { ...s, band: i >= 0 ? bandLabel(i) : null, band_i: i };
+    const i = E.findIndex((b, k) => k < E.length - 1 && d > b && d <= E[k + 1] + (unit === 'm' ? 0 : 1e-6));
+    return { ...s, band: i >= 0 ? B.label(i) : null, band_i: i };
   });
 }
 function approachAgg(g) {
@@ -713,9 +780,9 @@ function approachAgg(g) {
     mean_long_short_m: mean(ls), sd_long_short_m: std(ls), mean_lateral_m: mean(g.map((s) => s.lateral_m)), sd_lateral_m: std(g.map((s) => s.lateral_m)),
     short_pct: ls.length ? 100 * ls.filter((x) => x < -10).length / ls.length : null, long_pct: ls.length ? 100 * ls.filter((x) => x > 10).length / ls.length : null };
 }
-export function approachByBand(shots) {
-  const a = approachShots(shots).filter((s) => s.band);
-  return [...groupBy(a, (s) => s.band_i)].sort((x, y) => x[0] - y[0]).map(([i, g]) => ({ band: bandLabel(i), band_lo: BANDS[i], ...approachAgg(g) }));
+export function approachByBand(shots, unit = 'm') {
+  const a = approachShots(shots, unit).filter((s) => s.band), B = bandSet(unit);
+  return [...groupBy(a, (s) => s.band_i)].sort((x, y) => x[0] - y[0]).map(([i, g]) => ({ band: B.label(i), band_lo: B.lo[i], band_lo_m: B.edgesM[i], ...approachAgg(g) }));
 }
 export function approachByClub(shots) {
   const a = approachShots(shots).filter((s) => s.club_id);
@@ -748,7 +815,7 @@ export function contrast(holes, flag, mask) {
 }
 
 // ------------------------------------------------------------------ putting
-const PB = [0, 1, 2, 3, 5, 8, 12, 20, 60];
+const PUTT_SETS = { m: [0, 1, 2, 3, 5, 8, 12, 20, 60], ft: [0, 3, 6, 10, 15, 25, 40, 60, 200] };
 export function puttingSummary(holes, rounds) {
   const h = holes.filter((x) => x.putts_eff !== null), n = h.length, gir = h.filter((x) => x.gir_eff === 1);
   const share = (f) => (n ? 100 * h.filter(f).length / n : null);
@@ -764,12 +831,12 @@ export function puttsPerHoleDistribution(holes) {
   const out = [0, 1, 2, 3, 4].map((k) => ({ putts: k === 4 ? '4+' : String(k), holes: p.filter((x) => x === k).length })).filter((o) => o.holes);
   out.forEach((o) => { o.pct = 100 * o.holes / p.length; }); return out;
 }
-export function byFirstPuttDistance(holes, source = 'user') {
+export function byFirstPuttDistance(holes, source = 'user', unit = 'm') {
   const h = holes.filter((x) => x.first_putt_eff_m !== null && x.putts_eff > 0 && String(x.first_putt_source).startsWith(source));
-  const out = [];
+  const PB = PUTT_SETS[unit] || PUTT_SETS.m, f = unitFactor(unit), out = [];
   for (let i = 0; i < PB.length - 1; i++) {
-    const g = h.filter((x) => x.first_putt_eff_m > PB[i] && x.first_putt_eff_m <= PB[i + 1]); if (!g.length) continue;
-    out.push({ band: `${PB[i]}-${PB[i + 1]} m`, holes: g.length, avg_putts: mean(g.map((x) => x.putts_eff)),
+    const g = h.filter((x) => x.first_putt_eff_m > PB[i] * f && x.first_putt_eff_m <= PB[i + 1] * f + 1e-9); if (!g.length) continue;
+    out.push({ band: `${PB[i]}-${PB[i + 1]} ${unit}`, holes: g.length, avg_putts: mean(g.map((x) => x.putts_eff)),
       make_pct: 100 * g.filter((x) => x.putts_eff === 1).length / g.length, three_putt_pct: 100 * g.filter((x) => x.putts_eff >= 3).length / g.length });
   }
   return out;
@@ -996,7 +1063,9 @@ function consistencyText(v, target, hib) {
 const conf = (n) => (n >= 20 ? 'high' : n >= 10 ? 'medium' : 'low');
 const f1 = (v, d = 1) => (isNum(v) ? v.toFixed(d) : '–');
 const sgn = (v) => (isNum(v) ? (v >= 0 ? '+' : '') + v.toFixed(2) : '–');
-export function findings(ds) {
+export function findings(ds, unit = 'm') {
+  const DU = (m, d = 0) => (isNum(m) ? `${(m / unitFactor(unit)).toFixed(d)} ${unit}` : '–');
+  const PUT = unit === 'yd' ? 'ft' : 'm', DP = (m) => (isNum(m) ? `${(m / unitFactor(PUT)).toFixed(0)} ${PUT}` : '–');
   const r = ds.rounds.filter((x) => x.format === '18').sort((a, b) => (a.start_time_local || '').localeCompare(b.start_time_local || ''));
   const ids = new Set(r.map((x) => x.round_id)), h = ds.holes.filter((x) => ids.has(x.round_id)), s = ds.shots.filter((x) => ids.has(x.round_id));
   const out = []; if (r.length < MIN_ROUNDS) return out; const n = r.length;
@@ -1024,10 +1093,10 @@ export function findings(ds) {
     const cur = mean(tp), tgt = bestQuartile(tp, false), gir = h.filter((x) => x.gir_eff === 1);
     const ev = [`${f1(cur)} three-putts/round (best-quartile rounds: ${f1(tgt)})`, gir.length ? `Putts per GIR: ${f1(mean(gir.map((x) => x.putts_eff)), 2)}` : 'No GIR holes with putts'];
     const est = h.filter((x) => x.first_putt_eff_m !== null && x.putts_eff >= 3);
-    if (est.length >= 5) ev.push(`Median first-putt distance on 3-putt holes: ${f1(median(est.map((x) => x.first_putt_eff_m)), 0)} m (${est.every((x) => x.first_putt_source === 'user') ? 'entered' : 'partly GPS-estimated'})`);
+    if (est.length >= 5) ev.push(`Median first-putt distance on 3-putt holes: ${DP(median(est.map((x) => x.first_putt_eff_m)))} (${est.every((x) => x.first_putt_source === 'user') ? 'entered' : 'partly GPS-estimated'})`);
     out.push({ key: 'three_putts', title: 'Three-putts (lag putting)', strokes_per_round: cur - tgt, current: cur, target: tgt, unit: '/round', evidence: ev,
       why: 'A three-putt costs a stroke versus a two-putt, and is usually a lag-distance problem rather than holing out.',
-      focus: 'Lag drills from 10-20 m: ladder drill to a 1 m circle; finish every session with 3 x 10 balls from 1-1.5 m.',
+      focus: `Lag drills from ${DP(10).split(' ')[0]}-${DP(20)}: ladder drill to a ${DP(1)} circle; finish every session with 3 x 10 balls from ${DP(1).split(' ')[0]}-${DP(1.5)}.`,
       target_text: `<= ${f1(tgt)} three-putts/round (rolling 10)`, tracking: '3-putt % and 3-putts/round on Putting page',
       consistency: consistencyText(tp, tgt, false), confidence: conf(n), extra: {} });
   }
@@ -1052,14 +1121,14 @@ export function findings(ds) {
     const cur = mean(gir), tgt = bestQuartile(gir, true);
     const ev = [`GIR ${f1(cur, 0)}% (best-quartile rounds: ${f1(tgt, 0)}%)`,
       `You average ${sgn(c.to_par_yes)} to par on GIR holes vs ${sgn(c.to_par_no)} when missing (${f1(c.delta, 2)} per missed green; includes short-game effect)`];
-    const sel = approachByBand(s).filter((b) => b.shots >= 8 && b.band_lo >= 75 && b.band_lo < 200);
+    const sel = approachByBand(s, unit).filter((b) => b.shots >= 8 && b.band_lo_m >= 68 && b.band_lo_m < 183);
     if (sel.length) ev.push('Greens hit by approach distance: ' + sel.map((b) => `${b.band} ${f1(b.green_hit_pct, 0)}% (n=${b.shots})`).join(', '));
     const miss = greenMissDirections(s); let focus = 'Approach play';
     if (miss.length && sum(miss.map((m) => m.count)) >= 10) {
       const top = [...miss].sort((a, b) => b.count - a.count)[0]; const dir = top.direction.toLowerCase();
       ev.push(`Missed greens are most often ${dir} (${f1(top.pct, 0)}% of misses)`);
       focus = ['Short', 'Long'].includes(top.direction)
-        ? `Distance control: your dominant green miss is ${dir}. Practise to known stock distances (use your GPS medians on the Clubs page, not book yardages) and club up/down accordingly.`
+        ? `Distance control: your dominant green miss is ${dir}. Practise to known stock distances (use your GPS medians on the Clubs page, not book numbers) and club up/down accordingly.`
         : `Direction control: your dominant green miss is ${dir}. Work on start line with irons (gate drill) and aim away from the ${dir} side of greens.`;
     }
     out.push({ key: 'gir', title: 'Greens in regulation / approach', strokes_per_round: (tgt - cur) / 100 * 18 * c.delta, current: cur, target: tgt, unit: '%', evidence: ev,
@@ -1077,7 +1146,7 @@ export function findings(ds) {
     if (ag.length >= 10) ev.push(`Tracked around-the-green shots ending on the green: ${f1(pct(ag.map((x) => x.on_green_end)), 0)}%`);
     out.push({ key: 'scrambling', title: 'Short game (scrambling)', strokes_per_round: (tgt - cur) / 100 * per, current: cur, target: tgt, unit: '%', evidence: ev,
       why: 'Converting more missed greens into pars directly removes bogeys.',
-      focus: 'Up-and-down games from mixed lies within 25 m: 9 balls, score par/bogey, chip to a 2 m circle then hole out.',
+      focus: `Up-and-down games from mixed lies within ${DU(25)}: 9 balls, score par/bogey, chip to a ${DP(2)} circle then hole out.`,
       target_text: `Scrambling >= ${f1(tgt, 0)}% (rolling 10)`, tracking: 'Scrambling on Coaching page', consistency: consistencyText(pr, tgt, true), confidence: conf(pr.length), extra: {} });
   }
   // blow-ups
@@ -1095,11 +1164,12 @@ export function findings(ds) {
   }
   return out.sort((a, b) => (isNum(b.strokes_per_round) ? b.strokes_per_round : -9) - (isNum(a.strokes_per_round) ? a.strokes_per_round : -9));
 }
-export function clubAttention(ds, top = 3) {
+export function clubAttention(ds, top = 3, unit = 'm') {
+  const DU = (m) => (isNum(m) ? (m / unitFactor(unit)).toFixed(0) : '–');
   const t = clubTable(ds.shots, ds.clubs); if (!t.length) return [];
   const medCv = median(t.filter((r) => r.sample !== 'insufficient').map((r) => r.cv_pct));
   return attentionRanking(t).slice(0, top).map((r) => ({ club: r.club, score: r.score, evidence: [
-    `Stock distance median ${f1(r.median_m, 0)} m, IQR ${f1(r.p25_m, 0)}-${f1(r.p75_m, 0)} m (n=${r.shots_stock}, ${r.sample})`,
+    `Stock distance median ${DU(r.median_m)} ${unit}, IQR ${DU(r.p25_m)}-${DU(r.p75_m)} ${unit} (n=${r.shots_stock}, ${r.sample})`,
     `Distance variability (CV) ${f1(r.cv_pct)}% vs bag median ${f1(medCv)}%`, `Partial/mishit rate ${f1(r.partial_pct, 0)}% of full-swing attempts`,
-    ...(isNum(r.lateral_sd_m) ? [`Lateral spread SD ${f1(r.lateral_sd_m, 0)} m`] : [])] }));
+    ...(isNum(r.lateral_sd_m) ? [`Lateral spread SD ${DU(r.lateral_sd_m)} ${unit}`] : [])] }));
 }
