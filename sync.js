@@ -1,6 +1,7 @@
 // Cloud sync: read the files the GitHub Actions job writes to your PRIVATE data repo.
 // Uses a fine-grained, read-only token stored only on this phone.
-import { mergeBundles, setClubsBundle, saveSync } from './store.js';
+import { mergeBundles, setClubsBundle, saveSync, saveJournal, addCoachNotes } from './store.js';
+import { parseCoachNotes } from './features.js';
 
 function api(cfg, path) {
   const p = [cfg.path || 'data', path].filter(Boolean).join('/');
@@ -36,10 +37,16 @@ export async function syncFromGitHub(state, progress = () => {}) {
     await setClubsBundle(state, await getRaw(cfg, 'clubs_latest.json'));
     cfg.clubs_sha = idx.clubs_sha;
   }
+  // optional: coach notes Claude (or you) committed to the repo at <folder>/coach/notes.json
+  let notesAdded = 0;
+  try {
+    const r = await fetch(api(cfg, 'coach/notes.json'), { headers: { Authorization: `Bearer ${cfg.token}`, Accept: 'application/vnd.github.raw', 'X-GitHub-Api-Version': '2022-11-28' }, cache: 'no-store' });
+    if (r.ok) { const parsed = parseCoachNotes(await r.text()); notesAdded = addCoachNotes(state, parsed, 'claude (repo)'); if (notesAdded) await saveJournal(state); }
+  } catch { /* notes are optional */ }
   const res = await mergeBundles(state, bundles, 'cloud sync', want);
   cfg.last_sync = new Date().toISOString(); cfg.last_job = idx.job || null;
   state.sync = cfg; await saveSync(state);
-  return { ...res, job: idx.job || null, remote_rounds: Object.keys(want).length };
+  return { ...res, notesAdded, job: idx.job || null, remote_rounds: Object.keys(want).length };
 }
 
 // A Fernet key (32 random bytes, url-safe base64) for the GOLFIQ_STATE_KEY secret.

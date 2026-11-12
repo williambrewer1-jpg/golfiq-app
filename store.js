@@ -1,6 +1,6 @@
 // On-device storage (IndexedDB). Raw Garmin bundles in 'raw'; everything else in 'kv'.
 // Nothing here ever leaves the phone except via an explicit backup file the user saves.
-import { parseRoundBundle } from './analytics.js';
+import { parseRoundBundle, parseClubsBundle } from './analytics.js';
 
 const DB_NAME = 'golfiq', VERSION = 1;
 let dbp = null;
@@ -29,12 +29,16 @@ export async function clearAll() { await tx('raw', 'readwrite', (s) => { s.clear
 export async function requestPersistence() { try { return await navigator.storage?.persist?.(); } catch { return false; } }
 
 export const DEFAULT_SETTINGS = () => ({ clubs: {}, tees: {}, holes: {}, handicaps: [] });
+// Things you write yourself (not from Garmin): practice, coach notes, swing thoughts, wedge matrix, timeline markers.
+export const DEFAULT_JOURNAL = () => ({ games: [], results: [], sessions: [], notes: [], thoughts: [], wedge: { lengths: ['7:30', '9:00', '10:30'], entries: [] }, markers: [] });
 
 export async function loadState() {
-  const [bundles, clubsBundle, settings, corrections, manualShots, audit, rawmeta, importLog, sync] = await Promise.all([
+  const [bundles, clubsBundle, settings, corrections, manualShots, audit, rawmeta, importLog, sync, journal, weather, osm] = await Promise.all([
     rawAll(), kvGet('clubsBundle', {}), kvGet('settings', DEFAULT_SETTINGS()), kvGet('corrections', []), kvGet('manualShots', []),
-    kvGet('audit', []), kvGet('rawmeta', {}), kvGet('importLog', []), kvGet('sync', {})]);
-  return { bundles, clubsBundle, settings: { ...DEFAULT_SETTINGS(), ...settings }, corrections, manualShots, audit, rawmeta, importLog, sync };
+    kvGet('audit', []), kvGet('rawmeta', {}), kvGet('importLog', []), kvGet('sync', {}), kvGet('journal', {}), kvGet('weather', {}), kvGet('osm', {})]);
+  const dj = DEFAULT_JOURNAL();
+  return { bundles, clubsBundle, settings: { ...DEFAULT_SETTINGS(), ...settings }, corrections, manualShots, audit, rawmeta, importLog, sync,
+    journal: { ...dj, ...journal, wedge: { ...dj.wedge, ...(journal.wedge || {}) } }, weather, osm };
 }
 
 const now = () => new Date().toISOString().slice(0, 19) + 'Z';
@@ -103,7 +107,7 @@ export async function importJson(state, json, source) {
 // ---------------------------------------------------------------- backup / restore
 export function backupObject(state) {
   return { golfiq_backup: 1, created_at: now(), origin: 'iphone', bundles: state.bundles, clubsBundle: state.clubsBundle,
-    settings: state.settings, corrections: state.corrections, manualShots: state.manualShots, audit: state.audit,
+    settings: state.settings, corrections: state.corrections, manualShots: state.manualShots, audit: state.audit, journal: state.journal, weather: state.weather,
     sync: { ...state.sync, token: undefined } };
 }
 export async function restoreBackup(state, b) {
@@ -113,7 +117,7 @@ export async function restoreBackup(state, b) {
   const rawmeta = {};
   for (const x of b.bundles || []) { const id = bundleId(x); if (id) rawmeta[id] = { hash: await sha256(JSON.stringify(strip({ ...x, scorecard_id: id }))), imported_at: now(), source: 'restore' }; }
   await Promise.all([kvSet('clubsBundle', b.clubsBundle || {}), kvSet('settings', { ...DEFAULT_SETTINGS(), ...(b.settings || {}) }),
-    kvSet('corrections', b.corrections || []), kvSet('manualShots', b.manualShots || []), kvSet('rawmeta', rawmeta),
+    kvSet('corrections', b.corrections || []), kvSet('manualShots', b.manualShots || []), kvSet('rawmeta', rawmeta), kvSet('journal', b.journal || {}), kvSet('weather', b.weather || {}),
     kvSet('audit', [...(b.audit || []), { ts: now(), action: 'restore', detail: { origin: b.origin, created_at: b.created_at } }]),
     kvSet('sync', { ...(b.sync || {}), token: keepSync?.token })]);
   Object.assign(state, await loadState());
@@ -145,3 +149,52 @@ export async function saveSettings(state, action, key, detail) {
   await kvSet('settings', state.settings); await audit(state, action, 'settings', key, detail);
 }
 export async function saveSync(state) { await kvSet('sync', state.sync); }
+
+// ---------------------------------------------------------------- demo data removal
+export const DEMO_SOURCE = 'SYNTHETIC SAMPLE';
+export const demoRoundCount = (state) => state.bundles.filter((b) => b.source === DEMO_SOURCE).length;
+const cardOf = (b) => { const d = b.detail || b; return d.scorecardDetails?.[0]?.scorecard || d.scorecard || d; };
+
+// Removes the synthetic demo rounds and everything that came with them (club names, synthetic
+// handicap history, course settings, corrections on demo rounds). Your Garmin rounds, your own
+// edits and the cloud-sync settings are kept.
+export async function removeDemo(state) {
+  const demo = state.bundles.filter((b) => b.source === DEMO_SOURCE);
+  if (!demo.length) return { rounds: 0, clubs: 0 };
+  const ids = demo.map((b) => String(b.scorecard_id)), rids = ids.map((i) => `garmin-${i}`);
+  await tx('raw', 'readwrite', (s) => { ids.forEach((i) => s.delete(i)); });
+  ids.forEach((i) => delete state.rawmeta[i]);
+  await kvSet('rawmeta', state.rawmeta);
+  state.bundles = await rawAll();
+  // courses only used by demo rounds
+  const live = new Set(state.bundles.map((b) => `garmin-${cardOf(b)?.courseGlobalId}`));
+  const demoCourses = new Set(demo.map((b) => `garmin-${cardOf(b)?.courseGlobalId}`).filter((c) => !live.has(c)));
+  for (const k of Object.keys(state.settings.tees || {})) if (demoCourses.has(k.split('|')[0])) delete state.settings.tees[k];
+  for (const k of Object.keys(state.settings.holes || {})) if (demoCourses.has(k.split('|')[0])) delete state.settings.holes[k];
+  state.settings.handicaps = (state.settings.handicaps || []).filter((h) => !/synthetic/i.test(h.note || ''));
+  await kvSet('settings', state.settings);
+  const isDemoKey = (k) => rids.some((r) => k === r || k.startsWith(r + '|') || k.startsWith(r + ':'));
+  state.corrections = state.corrections.filter((c) => !isDemoKey(String(c.key)));
+  state.manualShots = state.manualShots.filter((m) => !rids.includes(m.round_id));
+  await kvSet('corrections', state.corrections); await kvSet('manualShots', state.manualShots);
+  // clubs still in use: Garmin club list + clubs on remaining shots + clubs you added yourself
+  const used = new Set(parseClubsBundle(state.clubsBundle || {}).map((c) => c.club_id));
+  for (const b of state.bundles) for (const h of b.shots?.holeShots || []) for (const sh of h.shots || []) if (sh.clubId) used.add(String(sh.clubId));
+  for (const m of state.manualShots) if (m.club_id) used.add(String(m.club_id));
+  let clubs = 0;
+  for (const [id, o] of Object.entries(state.settings.clubs || {})) if (!used.has(id) && o.source !== 'user') { delete state.settings.clubs[id]; clubs++; }
+  await kvSet('settings', state.settings);
+  await audit(state, 'remove_demo', null, null, { rounds: ids.length, clubs });
+  return { rounds: ids.length, clubs };
+}
+
+// ---------------------------------------------------------------- journal, weather and course-map caches
+export const saveJournal = (state) => kvSet('journal', state.journal);
+export const saveWeather = (state) => kvSet('weather', state.weather);
+export const saveOsm = (state) => kvSet('osm', state.osm);
+export function addCoachNotes(state, notes, source) {
+  const key = (n) => `${n.date}|${n.title}|${n.feedback}`, have = new Set(state.journal.notes.map(key));
+  let added = 0;
+  for (const n of notes) { if (have.has(key(n))) continue; state.journal.notes.push({ id: `n${Date.now()}${added}`, ...n, source: source || n.source || 'claude', added_at: now() }); have.add(key(n)); added++; }
+  return added;
+}
