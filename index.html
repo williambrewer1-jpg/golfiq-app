@@ -152,6 +152,11 @@ th{background:transparent}td:first-child,th:first-child{background:var(--card)}
 <div id="toast" role="status"></div>
 <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js" defer></script>
 <script type="module" src="app.js"></script>
-<script>if('serviceWorker' in navigator){addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));}</script>
+<script>
+// Open the app with ?reset=1 to drop cached app code (your golf data is NOT touched) and reload the latest version.
+if (/[?&]reset=1/.test(location.search)) {
+  (async () => { try { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); for (const k of await caches.keys()) await caches.delete(k); } catch (e) {} location.replace(location.pathname); })();
+} else if ('serviceWorker' in navigator) { addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {})); }
+</script>
 </body>
 </html>
