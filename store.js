@@ -30,7 +30,7 @@ export async function requestPersistence() { try { return await navigator.storag
 
 export const DEFAULT_SETTINGS = () => ({ clubs: {}, tees: {}, holes: {}, handicaps: [] });
 // Things you write yourself (not from Garmin): practice, coach notes, swing thoughts, wedge matrix, timeline markers.
-export const DEFAULT_JOURNAL = () => ({ games: [], results: [], sessions: [], notes: [], thoughts: [], wedge: { lengths: ['7:30', '9:00', '10:30'], entries: [] }, markers: [] });
+export const DEFAULT_JOURNAL = () => ({ games: [], results: [], sessions: [], notes: [], thoughts: [], wedge: { lengths: ['7:30', '9:00', '10:30'], entries: [] }, markers: [], draft: null });
 
 export async function loadState() {
   const [bundles, clubsBundle, settings, corrections, manualShots, audit, rawmeta, importLog, sync, journal, weather, osm] = await Promise.all([
@@ -197,4 +197,12 @@ export function addCoachNotes(state, notes, source) {
   let added = 0;
   for (const n of notes) { if (have.has(key(n))) continue; state.journal.notes.push({ id: `n${Date.now()}${added}`, ...n, source: source || n.source || 'claude', added_at: now() }); have.add(key(n)); added++; }
   return added;
+}
+
+// ---------------------------------------------------------------- rounds entered by hand
+export async function deleteBundle(state, id) {
+  await tx('raw', 'readwrite', (s) => { s.delete(String(id)); });
+  delete state.rawmeta[String(id)]; await kvSet('rawmeta', state.rawmeta);
+  state.bundles = await rawAll();
+  await audit(state, 'delete_manual_round', 'round', `garmin-${id}`, null);
 }

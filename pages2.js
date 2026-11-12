@@ -99,8 +99,8 @@ export function registerPages(c) {
 
   // ================================================================ 3. Handicap
   function pageHandicap() {
-    const r = c.DS.rounds.filter((x) => x.format === '18'), withD = r.filter((x) => A.isNum(x.differential_for_index));
-    if (!withD.length) return emptyCard('Needs 18-hole rounds with course rating and slope. Add missing ratings in Settings → Courses.');
+    const r = c.DS.rounds.filter((x) => x.format !== 'partial'), withD = r.filter((x) => A.isNum(x.differential_for_index));
+    if (!withD.length) return emptyCard('Needs 9- or 18-hole rounds with course rating and slope. Add missing ratings in Settings → Courses.');
     const cur = withD[withD.length - 1].index_after, official = [...(c.state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date));
     const off = official.length ? official[official.length - 1] : null, last20 = withD.slice(-20), counting = A.whsCounting(last20.map((x) => x.differential_for_index));
     const pts = withD.filter((x) => A.isNum(x.index_after));
@@ -110,10 +110,10 @@ export function registerPages(c) {
     const est = r.filter((x) => String(x.hi_source || '').startsWith('GolfIQ')).length, prov = r.filter((x) => String(x.differential_source || '').startsWith('provisional')).length;
     return `<div class="kpis">${kpi('GolfIQ index', cur)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : 'add in Settings'}</div></div>
       ${kpi('Differentials used', withD.length, null, true, 0)}${A.isNum(cur) && off ? kpi('GolfIQ − official', cur - off.handicap_index, null, false, 1) : ''}</div>
-      ${withD.length < 3 ? '<div class="warn">An index needs at least 3 scored 18-hole rounds.</div>' : ''}
+      ${withD.length < 3 ? '<div class="warn">An index needs at least 3 scored rounds.</div>' : ''}
       <div class="card"><h2>Index over time</h2>${plot(tr, { height: 300, yaxis: { title: { text: 'Index / differential' } } })}
-      ${note('WHS method: average of your lowest 8 of the last 20 score differentials (fewer rounds use the WHS small-sample table). Not applied: playing-conditions adjustment, soft/hard caps, exceptional-score reductions and 9-hole rounds – so expect small differences from your official index.')}</div>
-      <div class="card"><h2>Last ${last20.length} differentials</h2>${table([...last20].map((x, i) => ({ ...x, counts: counting.has(i) })).reverse(), [['date', 'Date'], ['course_name', 'Course'], ['gross', 'Gross', n0], ['differential_for_index', 'Diff', n1], ['counts', 'Counts', (v) => (v ? '●' : '')], ['index_after', 'Index after', n1], ['hi_source', 'Handicap used', (v) => `<span class="small">${esc(v || 'none')}</span>`]])}
+      ${note('WHS method: average of your lowest 8 of the last 20 score differentials (fewer rounds use the WHS small-sample table). 9-hole rounds count the WHS way: the nine you played plus your expected score for the other nine, based on your index at the time (0.52 × index + 1.2, the published approximation of the WHS table). Not applied: playing-conditions adjustment, soft/hard caps and exceptional-score reductions – so expect small differences from your official index.')}</div>
+      <div class="card"><h2>Last ${last20.length} differentials</h2>${table([...last20].map((x, i) => ({ ...x, counts: counting.has(i) })).reverse(), [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['differential_for_index', 'Diff', n1], ['counts', 'Counts', (v) => (v ? '●' : '')], ['index_after', 'Index after', n1], ['hi_source', 'Handicap used', (v) => `<span class="small">${esc(v || 'none')}</span>`]])}
       ${note(`● = one of the lowest that make up the index. ${est} round(s) had no official index entered, so GolfIQ used its own estimate from your earlier rounds to reconstruct Stableford.${prov ? ` ${prov} early round(s) use a provisional differential (par+5 cap) because no handicap or stroke index was available yet.` : ''}`)}</div>`;
   }
 
@@ -251,13 +251,13 @@ export function registerPages(c) {
     const r = c.DS.rounds.find((x) => x.round_id === rid); if (!r) return;
     const hh = c.DS.holes.filter((h) => h.round_id === rid).sort((a, b) => a.hole - b.hole), w = c.state.weather[rid];
     const cv = document.createElement('canvas'); cv.width = 1080; cv.height = 1350; const g = cv.getContext('2d');
-    const grad = g.createLinearGradient(0, 0, 0, 1350); grad.addColorStop(0, '#0f3d2a'); grad.addColorStop(1, '#0a2218'); g.fillStyle = grad; g.fillRect(0, 0, 1080, 1350);
-    const font = (s, wt = 600) => { g.font = `${wt} ${s}px -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif`; };
+    const grad = g.createLinearGradient(0, 0, 0, 1350); grad.addColorStop(0, '#0a3d2b'); grad.addColorStop(1, '#05201a'); g.fillStyle = grad; g.fillRect(0, 0, 1080, 1350); g.strokeStyle = '#c9a43a'; g.lineWidth = 4; g.strokeRect(28, 28, 1024, 1294);
+    const font = (s, wt = 600) => { g.font = s >= 42 ? `${wt} ${s}px Didot, "Bodoni 72", Baskerville, "Hoefler Text", Georgia, serif` : `${wt} ${s}px -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif`; };
     g.fillStyle = 'rgba(255,255,255,.65)'; font(34, 500); g.fillText(new Date(r.date + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }), 72, 120);
     g.fillStyle = '#fff'; font(58, 700); let name = r.course_name || 'Round'; while (g.measureText(name).width > 936 && name.length > 8) name = name.slice(0, -2); g.fillText(name === (r.course_name || 'Round') ? name : name + '…', 72, 196);
     g.fillStyle = 'rgba(255,255,255,.65)'; font(32, 500); g.fillText([r.tee ? `${r.tee} tees` : null, A.isNum(r.par_played) ? `Par ${r.par_played}` : null, w ? `${fmt(w.temp_c, 0)}°C, wind ${fmt(w.wind_kmh, 0)} km/h` : null].filter(Boolean).join('  ·  '), 72, 250);
     g.fillStyle = '#fff'; font(300, 800); g.fillText(String(r.gross), 64, 560);
-    const gw = g.measureText(String(r.gross)).width; g.fillStyle = '#7ddc9f'; font(88, 700); g.fillText(A.isNum(r.to_par) ? (r.to_par > 0 ? `+${r.to_par}` : r.to_par === 0 ? 'E' : String(r.to_par)) : '', 96 + gw, 470);
+    const gw = g.measureText(String(r.gross)).width; g.fillStyle = '#f2cf4a'; font(88, 700); g.fillText(A.isNum(r.to_par) ? (r.to_par > 0 ? `+${r.to_par}` : r.to_par === 0 ? 'E' : String(r.to_par)) : '', 96 + gw, 470);
     if (A.isNum(r.stableford_round)) { g.fillStyle = 'rgba(255,255,255,.75)'; font(44, 600); g.fillText(`${r.stableford_round} pts`, 100 + gw, 548); }
     const stats = [['GIR', A.isNum(r.gir_n) ? `${r.gir_n}/${r.gir_holes}` : '–'], ['Fairways', A.isNum(r.fw_n) ? `${r.fw_n}/${r.fw_holes}` : '–'], ['Putts', A.isNum(r.putts_round) ? String(r.putts_round) : '–'], ['Penalties', A.isNum(r.penalties) ? String(r.penalties) : '–'],
       ['Birdies', String(r.birdies_or_better)], ['Pars', String(r.pars)], ['Differential', fmt(r.differential, 1)], ['Index used', fmt(r.hi, 1)]];

@@ -278,3 +278,63 @@ export function parseCoachNotes(text) {
   return out;
 }
 export const COACH_FORMAT = `{"golfiq_coach_note":1,"date":"YYYY-MM-DD","title":"short title","focus":"e.g. driver / wedges / putting","feedback":"what you saw and why it matters","feels":["feel 1","feel 2"],"drills":[{"name":"drill name","how":"how to do it","reps":"e.g. 3 x 10 balls"}]}`;
+
+// ------------------------------------------------------------------ live play: course knowledge + shot pattern on the map
+const RE = 6371008.8, rad = (d) => d * Math.PI / 180, deg = (r) => r * 180 / Math.PI;
+export function destination(lat, lon, bearingDeg, distM) {
+  const br = rad(bearingDeg), d = distM / RE, la1 = rad(lat), lo1 = rad(lon);
+  const la2 = Math.asin(Math.sin(la1) * Math.cos(d) + Math.cos(la1) * Math.sin(d) * Math.cos(br));
+  return [deg(la2), deg(lo1 + Math.atan2(Math.sin(br) * Math.sin(d) * Math.cos(la1), Math.cos(d) - Math.sin(la1) * Math.sin(la2)))];
+}
+// Point reached by going `along` metres on the bearing and `right` metres to the right of it.
+export function offsetPoint(lat, lon, bearingDeg, along, right) {
+  const [a, b] = destination(lat, lon, bearingDeg, along);
+  return destination(a, b, bearingDeg + 90, right);
+}
+// What GolfIQ knows about each hole of a course from your earlier tracked rounds: green centre (pin marker) and tee.
+export function courseHoles(ds, courseId) {
+  const out = {};
+  for (const [hole, g] of groupBy(ds.holes.filter((h) => h.course_id === courseId), (h) => h.hole)) {
+    const pins = g.filter((h) => isNum(h.pin_lat));
+    out[hole] = { hole, par: g[g.length - 1].par, si: g[g.length - 1].stroke_index, pin: pins.length ? [median(pins.map((h) => h.pin_lat)), median(pins.map((h) => h.pin_lon))] : null, tee: null, plays: g.length };
+  }
+  const first = new Map();
+  for (const s of [...ds.shots.filter((x) => x.course_id === courseId && isNum(x.start_lat))].sort((a, b) => a.shot_order - b.shot_order)) { const k = `${s.round_id}|${s.hole}`; if (!first.has(k)) first.set(k, s); }
+  for (const [hole, g] of groupBy([...first.values()].filter((s) => s.category === 'tee' || s.par3_tee), (s) => s.hole)) if (out[hole]) out[hole].tee = [median(g.map((s) => s.start_lat)), median(g.map((s) => s.start_lon))];
+  return out;
+}
+// A club's shot pattern in "aim" coordinates: x = metres right of the target line, y = metres travelled along it.
+export function clubPattern(ds, clubId) {
+  const st = A.stockShots(ds.shots, ds.clubs).filter((s) => s.club_id === clubId && !s.partial && !s.partial_by_intent && isNum(s.lateral_m) && isNum(s.dist_m));
+  const pts = st.map((s) => ({ x: s.lateral_m, y: Math.sqrt(Math.max(s.dist_m ** 2 - s.lateral_m ** 2, 0)) }));
+  const all = A.stockShots(ds.shots, ds.clubs).filter((s) => s.club_id === clubId && !s.partial && !s.partial_by_intent).map((s) => s.dist_m);
+  return { pts, stats: A.dispersionStats(pts), n_dist: all.length, median_m: median(all), p10_m: quantile(all, 0.1), p90_m: quantile(all, 0.9) };
+}
+// Front / back of a mapped green along the line of play.
+export function greenFrontBack(lat, lon, pin, features) {
+  if (!pin || !features?.length) return null;
+  let g = features.find((f) => f.kind === 'green' && pointInPolygon(pin[0], pin[1], f.pts));
+  if (!g) {
+    const near = features.filter((f) => f.kind === 'green').map((f) => ({ f, d: A.haversine(pin[0], pin[1], mean(f.pts.map((p) => p[0])), mean(f.pts.map((p) => p[1]))) })).sort((a, b) => a.d - b.d)[0];
+    if (near && near.d < 30) g = near.f;
+  }
+  if (!g) return null;
+  const br = A.bearing(lat, lon, pin[0], pin[1]), al = g.pts.map((p) => A.alongCross(lat, lon, p[0], p[1], br)[0]);
+  return { front_m: Math.min(...al), back_m: Math.max(...al) };
+}
+export function nearestGreens(lat, lon, features, n = 4) {
+  return (features || []).filter((f) => f.kind === 'green').map((f) => { const c = [mean(f.pts.map((p) => p[0])), mean(f.pts.map((p) => p[1]))]; return { pin: c, dist_m: A.haversine(lat, lon, c[0], c[1]) }; })
+    .sort((a, b) => a.dist_m - b.dist_m).slice(0, n);
+}
+// Garmin-shaped bundle for a round typed in by hand, so every page treats it like any other round.
+export function manualBundle(d) {
+  const holes = Object.entries(d.holes).map(([n, h]) => ({ n: Number(n), ...h })).filter((h) => h.strokes > 0).sort((a, b) => a.n - b.n);
+  const pars = Array.from({ length: 18 }, (_, i) => d.holes[i + 1]?.par || 4), si = Array.from({ length: 18 }, (_, i) => d.holes[i + 1]?.si || null);
+  const snap = { courseSnapshotId: 1, name: d.course_name, holePars: pars.join('') };
+  if (d.courseGlobalId) snap.courseGlobalId = d.courseGlobalId;
+  if (si.every((x) => x)) snap.holeHandicaps = si.join(',');
+  const sc = { id: d.id, courseSnapshotId: 1, formattedStartTime: d.start, teeBox: d.tee || null, teeBoxRating: d.rating ?? null, teeBoxSlope: d.slope ?? null,
+    holes: holes.map((h) => ({ number: h.n, strokes: h.strokes, putts: h.putts ?? null, penalties: h.penalties ?? 0, fairwayShotOutcome: pars[h.n - 1] >= 4 ? (h.fairway || null) : null })) };
+  if (d.courseGlobalId) sc.courseGlobalId = d.courseGlobalId;
+  return { golfiq_bundle_version: 1, kind: 'round', source: 'manual_entry', scorecard_id: String(d.id), summary: { id: d.id }, detail: { scorecardDetails: [{ scorecard: sc }], courseSnapshots: [snap] }, shots: { holeShots: [] } };
+}

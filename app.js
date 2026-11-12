@@ -5,6 +5,7 @@ import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
 import { BOOKMARKLET_SRC, bookmarkletUrl } from './bookmarklet.js';
 import { registerPages } from './pages2.js';
+import { registerPlay } from './play.js';
 import { icon } from './icons.js';
 
 const TOUR = A.Baseline.fromCsv(TOUR_CSV, 'pga_tour_broadie');
@@ -124,7 +125,10 @@ function demoBanner() {
   const real = state.bundles.length - n;
   return `<div class="warn"><b>Demo data is loaded:</b> ${n} synthetic rounds${real ? ` are mixed in with your ${real} Garmin rounds` : ''}, plus demo clubs and a demo handicap history. <br><button class="btn" data-removedemo>Remove demo data</button><br><span class="small">Keeps your Garmin rounds, your own edits and your cloud-sync settings.</span></div>`;
 }
-const emptyMsg = () => `<div class="card"><h2>No rounds yet</h2><p>Import your Garmin data on the <a href="#data">Data</a> page: sync from your cloud repo, or import a file from the Garmin export bookmarklet.</p><p>Setup steps are on the <a href="#help">Help</a> page.</p><p><button class="btn sec" id="loadSample">Load the synthetic demo data</button></p></div>`;
+const emptyMsg = () => `<div class="card"><h2>Welcome to GolfIQ</h2><p>Your golf, measured. Everything you add stays on this phone.</p>
+  <p><a class="btn" href="#play">Play a round &amp; keep score</a></p>
+  <p class="small">Have a Garmin watch? Bring in your full shot history on the <a href="#data">Data</a> page (automatic sync or a one-tap export) – setup steps are under <a href="#help">Help</a>.</p>
+  <p><button class="btn sec" id="loadSample">Explore with demo data</button></p></div>`;
 
 // ------------------------------------------------------------------ trend chart
 function trendChart(rounds, metric, label, ref = null) {
@@ -141,7 +145,7 @@ const PAGES = {
   clubs: ['Clubs & gapping', 'club'], dispersion: ['Dispersion & maps', 'spread'], sg: ['Strokes gained', 'bars'], rounds: ['Rounds', 'list'],
   data: ['Data & sync', 'cloud'], edit: ['Corrections', 'pencil'], settings: ['Settings', 'gear'], help: ['Help & setup', 'help'], more: ['More', 'grid'],
 };
-const NAV = [['overview', 'Overview'], ['rounds', 'Rounds'], ['caddie', 'Caddie'], ['coaching', 'Coach'], ['more', 'More']];
+const NAV = [['overview', 'Overview'], ['play', 'Play'], ['rounds', 'Rounds'], ['coaching', 'Coach'], ['more', 'More']];
 let EXTRA = null;                         // pages registered from pages2.js
 const FILTERED = new Set(['overview', 'scoring', 'striking', 'putting', 'clubs', 'dispersion', 'sg', 'rounds']);
 
@@ -348,10 +352,10 @@ function pageSG() {
 function pageRounds() {
   const ds = filtered(), r = [...ds.rounds].reverse();
   if (!r.length) return '<div class="warn">No rounds match the filters.</div>';
-  const rid = ui.rd_open, row = r.find((x) => x.round_id === rid);
+  const rid = ui.rd_open, row = r.find((x) => x.round_id === rid) || DS.rounds.find((x) => x.round_id === rid);   // an opened round shows even if the filters hide it
   let detail = '';
   if (row) {
-    const hh = ds.holes.filter((h) => h.round_id === rid).sort((a, b) => a.hole - b.hole), rs = ds.shots.filter((s) => s.round_id === rid);
+    const hh = DS.holes.filter((h) => h.round_id === rid).sort((a, b) => a.hole - b.hole), rs = DS.shots.filter((s) => s.round_id === rid);
     const use = [...A.groupBy(rs.filter((s) => s.club_id), (s) => s.club)].map(([c, g]) => ({ club: c, shots: g.length })).sort((a, b) => b.shots - a.shots);
     detail = `<div class="card" id="rdetail"><h2>${esc(row.label)}</h2><div class="kpis">${kpi('Gross', row.gross, null, false, 0)}${kpi('Stableford', row.stableford_round, null, true, 0)}${kpi('GIR', row.gir_pct, null, true, 0, '%')}${kpi('Fairways', row.fw_pct, null, true, 0, '%')}${kpi('Putts', row.putts_round, null, false, 0)}${kpi('Penalties', row.penalties, null, false, 0)}${kpi('Differential', row.differential)}${kpi('Playing hcp', row.ph, null, true, 0)}</div>
     <p class="small muted">${esc(row.tee || '?')} tee · CR ${fmt(row.course_rating)} / slope ${fmt(row.slope, 0)} · HI ${fmt(row.hi)} (${esc(row.hi_source || 'none')}) · ${esc(row.stableford_source || 'Stableford not reconstructable')}${state.weather?.[rid] ? ` · ${fmt(state.weather[rid].temp_c, 0)}°C, wind ${fmt(state.weather[rid].wind_kmh, 0)} km/h` : ''}</p>
@@ -360,7 +364,8 @@ function pageRounds() {
     <h3>Club usage</h3>${table(use, [['club', 'Club'], ['shots', 'Shots', n0]])}
     <details><summary>All shots</summary>${table(rs, [['hole', 'H'], ['shot_order', '#', n0], ['club', 'Club'], ['category', 'Type'], ['start_lie', 'Lie'], ['dist_m', `Dist ${UNIT}`, d0], ['start_to_pin', 'To pin', d0], ['lateral_m', 'Lat', d1], ['excluded_reason', 'Excluded']])}</details>
     ${note('Missing = score − putts − penalties − tracked swings (shots AutoShot didn\'t detect). Add them in Corrections.')}
-    <p><button class="btn" data-share="${esc(rid)}">${icon('share', 18)} Share round card</button><a class="btn sec" href="#review" data-goreview="${esc(rid)}">Review this round</a><a class="btn sec" href="#edit" data-goedit="${esc(rid)}">Corrections</a><button class="btn sec" id="rdClose">Close</button></p></div>`;
+    <p><button class="btn" data-share="${esc(rid)}">${icon('share', 18)} Share round card</button><a class="btn sec" href="#review" data-goreview="${esc(rid)}">Review this round</a><a class="btn sec" href="#edit" data-goedit="${esc(rid)}">Corrections</a><button class="btn sec" id="rdClose">Close</button></p>
+    ${row.origin === 'manual' ? `<p class="small muted">Entered by hand on this phone. <button class="btn sec sm" data-delround="${esc(row.source_id)}">Delete this round</button></p>` : ''}</div>`;
   }
   const a = segVal('cmp_a', r[0].round_id), b = segVal('cmp_b', r[1]?.round_id || r[0].round_id), ra = r.find((x) => x.round_id === a), rb = r.find((x) => x.round_id === b);
   const ms = ['gross', 'to_par', 'stableford_round', 'differential', 'gir_pct', 'fw_pct', 'putts_round', 'putts_per_gir', 'three_putts', 'penalties', 'blowups'];
@@ -507,7 +512,9 @@ function pageSettings() {
 }
 
 function pageHelp() {
-  return `<div class="card"><h2>1 · Keep it on your home screen</h2><p>In Safari tap Share → <b>Add to Home Screen</b> and always open GolfIQ from that icon. Home-screen apps keep their data (Safari can clear site data for pages you don't visit). Save a backup (Data page) to iCloud Drive now and then.</p></div>
+  return `<div class="card"><h2>Share GolfIQ</h2><p class="small">Send the app to a friend. They get their own empty copy – your rounds stay on your phone and they never see them. Without a Garmin watch they can keep score on the Play page; with one they can follow the same setup you did.</p>
+  <button class="btn" id="shareApp">${icon('share', 18)} Share the app</button></div>
+  <div class="card"><h2>1 · Keep it on your home screen</h2><p>In Safari tap Share → <b>Add to Home Screen</b> and always open GolfIQ from that icon. Home-screen apps keep their data (Safari can clear site data for pages you don't visit). Save a backup (Data page) to iCloud Drive now and then.</p></div>
   <div class="card"><h2>2 · Get your Garmin data in</h2><h3>Option A – automatic cloud sync (recommended)</h3><p class="small">A scheduled GitHub job logs in to Garmin with your credentials (stored as encrypted GitHub secrets, not in this app), downloads new rounds to your private repo, and this app pulls them with <b>Sync now</b>. Full steps: <code>iphone/SETUP_IPHONE.md</code>.</p>
   <h3>Option B – export bookmarklet (no setup)</h3><ol class="small"><li>Tap <b>Copy bookmarklet</b> below.</li><li>In Safari, bookmark any page (Share → Add Bookmark), name it <b>GolfIQ export</b>.</li><li>Open Bookmarks → Edit → tap <b>GolfIQ export</b> → replace the address with the copied text → Done.</li><li>Sign in at <b>connect.garmin.com</b> in Safari (use “Request Desktop Website” if it pushes you to the app), then open Bookmarks → <b>GolfIQ export</b>.</li><li>Choose how many recent rounds (blank = all), wait, tap <b>Save file</b> → Save to Files.</li><li>Come back here → Data → <b>Import a file</b>.</li></ol>
   <button class="btn" id="copyBm">Copy bookmarklet</button><details><summary class="small">What the bookmarklet does (readable source)</summary><p class="small">Runs only on connect.garmin.com in your signed-in session; reads your scorecards, shots and club list from Garmin's own golf endpoints; builds one JSON file and offers it to save. It sends nothing anywhere else and never sees your password.</p><textarea rows="12" readonly>${esc(BOOKMARKLET_SRC)}</textarea></details></div>
@@ -518,7 +525,7 @@ function pageHelp() {
 }
 
 const MORE = [
-  ['On the course', ['caddie', 'playbook', 'review', 'rounds']],
+  ['On the course', ['play', 'caddie', 'playbook', 'review']],
   ['Analysis', ['scoring', 'striking', 'putting', 'clubs', 'dispersion', 'sg', 'handicap', 'conditions', 'compare', 'bests']],
   ['Practice & coaching', ['practice', 'coaching']],
   ['Data', ['data', 'edit', 'settings', 'help']],
@@ -566,6 +573,7 @@ function wire(page) {
     }));
     on('#rdClose', 'click', () => { ui.rd_open = null; saveUi(); render(); });
     $$('[data-goedit]').forEach((a) => a.addEventListener('click', () => { ui.ed_round = a.dataset.goedit; saveUi(); }));
+    $$('[data-delround]').forEach((b) => b.addEventListener('click', async () => { if (!confirm('Delete this hand-entered round?')) return; await S.deleteBundle(state, b.dataset.delround); ui.rd_open = null; saveUi(); rebuild(); toast('Round deleted'); render(); }));
     $$('[data-goreview]').forEach((a) => a.addEventListener('click', () => { ui.rv_round = a.dataset.goreview; saveUi(); }));
   }
   if (page === 'data') {
@@ -602,6 +610,11 @@ function wire(page) {
   }
   if (page === 'edit') wireEdit();
   if (page === 'settings') wireSettings();
+  if (page === 'help') on('#shareApp', 'click', async () => {
+    const url = location.href.split('#')[0], data = { title: 'GolfIQ', text: 'GolfIQ – golf stats, live distances and score keeping. Open in Safari, then Share → Add to Home Screen.', url };
+    if (navigator.share) { try { await navigator.share(data); return; } catch (e) { if (e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { prompt('Copy this link:', url); }
+  });
   if (page === 'help') on('#copyBm', 'click', async () => { try { await navigator.clipboard.writeText(bookmarkletUrl()); toast('Bookmarklet copied – paste it as the bookmark address'); } catch { prompt('Copy this:', bookmarkletUrl()); } });
 }
 
@@ -722,9 +735,11 @@ $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#
 addEventListener('hashchange', () => { scrollTo(0, 0); render(); });
 (async () => {
   state = await S.loadState(); S.requestPersistence(); rebuild();
-  EXTRA = registerPages({ A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
+  const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
-    get state() { return state; }, get DS() { return DS; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } });
+    get state() { return state; }, get DS() { return DS; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+  EXTRA = registerPages(ctx);
+  const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
   Object.assign(PAGES, EXTRA.pages); Object.assign(RENDER, EXTRA.render);
   if (window.Plotly || document.readyState === 'complete') render(); else addEventListener('load', render, { once: true });
   window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; } };

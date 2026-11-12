@@ -7,29 +7,30 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="GolfIQ">
-<meta name="theme-color" content="#0e2a1f">
+<meta name="theme-color" content="#0a3d2b">
 <title>GolfIQ</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
 <style>
+/* Classic clubhouse theme: deep green, cream, gold rule, serif display type. */
 :root{
-  --bg:#f3f5f2;--card:#ffffff;--ink:#101a15;--muted:#66736b;--line:#e4e9e5;--hair:rgba(16,26,21,.07);
-  --accent:#12774a;--accent-ink:#ffffff;--tint:#e7f3ec;--chip:#eef1ee;
-  --good:#12774a;--bad:#c2372f;--warn:#a86200;--head:#0e2a1f;
-  --shadow:0 1px 2px rgba(16,26,21,.04),0 10px 28px -16px rgba(16,26,21,.22);
-  --r:18px;
+  --bg:#f3efe3;--card:#fffdf6;--ink:#14261d;--muted:#647067;--line:#e2dccb;--hair:rgba(20,38,29,.09);
+  --accent:#0b5a3e;--accent-ink:#ffffff;--tint:#e6efe6;--chip:#eeeadc;--gold:#c9a43a;--flag:#f2cf4a;
+  --good:#0b6b47;--bad:#b8322a;--warn:#96650a;--head:#0a3d2b;--head2:#072c1f;
+  --shadow:0 1px 2px rgba(20,38,29,.05),0 10px 26px -16px rgba(20,38,29,.28);
+  --r:16px;--serif:"Didot","Bodoni 72","Baskerville","Hoefler Text","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
 }
 :root:not([data-theme="light"]){color-scheme:light dark}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0a0f0c;--card:#141b17;--ink:#e9f0eb;--muted:#93a199;--line:#232d27;--hair:rgba(255,255,255,.07);
-  --accent:#4ccb8a;--accent-ink:#06140d;--tint:#16271e;--chip:#1c2520;
-  --good:#4ccb8a;--bad:#f0766c;--warn:#f0b455;--head:#0a1611;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 28px -16px rgba(0,0,0,.7);
+  --bg:#05201a;--card:#0b3023;--ink:#f4f0e3;--muted:#a9b8ad;--line:#1a4433;--hair:rgba(255,255,255,.08);
+  --accent:#f2cf4a;--accent-ink:#0a2a1e;--tint:#12402f;--chip:#103a2b;--gold:#d8b64e;--flag:#f2cf4a;
+  --good:#7fdcaa;--bad:#ff8f84;--warn:#f2cf4a;--head:#062a1e;--head2:#041c14;
+  --shadow:0 1px 2px rgba(0,0,0,.35),0 10px 26px -16px rgba(0,0,0,.7);
 }}
 :root[data-theme="dark"]{
-  --bg:#0a0f0c;--card:#141b17;--ink:#e9f0eb;--muted:#93a199;--line:#232d27;--hair:rgba(255,255,255,.07);
-  --accent:#4ccb8a;--accent-ink:#06140d;--tint:#16271e;--chip:#1c2520;--good:#4ccb8a;--bad:#f0766c;--warn:#f0b455;--head:#0a1611;
+  --bg:#05201a;--card:#0b3023;--ink:#f4f0e3;--muted:#a9b8ad;--line:#1a4433;--hair:rgba(255,255,255,.08);
+  --accent:#f2cf4a;--accent-ink:#0a2a1e;--tint:#12402f;--chip:#103a2b;--gold:#d8b64e;--flag:#f2cf4a;--good:#7fdcaa;--bad:#ff8f84;--warn:#f2cf4a;--head:#062a1e;--head2:#041c14;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;-webkit-text-size-adjust:100%;-webkit-font-smoothing:antialiased}
@@ -109,11 +110,42 @@ details summary{cursor:pointer;font-weight:600;padding:6px 0;color:var(--accent)
 .drill{padding:8px 0;border-bottom:1px solid var(--line)}.drill:last-of-type{border-bottom:0}
 .miss{background:var(--chip);border-radius:12px;padding:4px 10px 10px;margin-top:8px}
 #toast{position:fixed;left:14px;right:14px;bottom:calc(86px + env(safe-area-inset-bottom));z-index:60;background:#17211c;color:#fff;border-radius:14px;padding:13px 15px;font-size:14px;font-weight:500;display:none;box-shadow:0 12px 30px -10px rgba(0,0,0,.5)}
+
+/* ---- theme details */
+header{background:linear-gradient(180deg,var(--head),var(--head2));border-bottom:2px solid var(--gold)}
+header h1{font-family:var(--serif);font-style:italic;font-weight:600;font-size:23px;letter-spacing:.005em}
+header .mark{background:none;border:1.5px solid var(--gold);border-radius:50%;width:30px;height:30px;font:italic 700 17px var(--serif);color:#fff}
+header .mark i{display:none}
+nav.bottom{background:linear-gradient(180deg,var(--head),var(--head2));border-top:2px solid var(--gold);-webkit-backdrop-filter:none;backdrop-filter:none}
+nav.bottom a{color:rgba(255,255,255,.62)}nav.bottom a.on{color:var(--flag)}
+.card h2,.sheet h2{font-family:var(--serif);font-size:19px;font-weight:700;letter-spacing:0}
+.kpi .v,.best .v{font-family:var(--serif);font-weight:700;letter-spacing:0}
+.kpi{border-top:2px solid var(--accent)}.card .kpi{border-top-color:transparent}
+.sect{font-family:var(--serif);font-style:italic;font-weight:600;font-size:17px;text-transform:none;letter-spacing:0;color:var(--accent);border-bottom:1px solid var(--line);padding-bottom:4px}
+.thought p,.finding h3,.rec.top b,.lead b{font-family:var(--serif)}
+.thought span{font-family:var(--serif);background:var(--accent);color:var(--accent-ink)}
+.bigin input{font-family:var(--serif)}
+th{background:transparent}td:first-child,th:first-child{background:var(--card)}
+#toast{background:var(--head2);border:1px solid var(--gold)}
+/* ---- play page */
+.yard{display:grid;grid-template-columns:1fr 1.6fr 1fr;align-items:end;text-align:center;background:linear-gradient(180deg,var(--head),var(--head2));color:#fff;border-radius:14px;padding:12px 8px 10px;margin:0 0 10px;border:1px solid var(--gold)}
+.yard span{display:block;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.7);min-height:14px}
+.yard b{font:700 54px/1 var(--serif);color:var(--flag);font-variant-numeric:tabular-nums}.yard b.sm{font-size:28px;color:#fff}.yard b i{font:600 15px -apple-system,system-ui,sans-serif;font-style:normal;color:rgba(255,255,255,.75);margin-left:3px}
+.steps2{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:4px 0 6px}
+.step{background:var(--chip);border-radius:14px;padding:8px 3px 10px;text-align:center;min-width:0}.step span{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.step div{display:flex;align-items:center;justify-content:space-between;gap:2px;margin-top:4px}.step b{font:700 27px var(--serif);min-width:20px;font-variant-numeric:tabular-nums}
+.step button{flex:none;width:34px;height:34px;padding:0;border-radius:50%;border:0;background:var(--accent);color:var(--accent-ink);font:600 22px/1 -apple-system,system-ui,sans-serif}
+.step button:active{transform:scale(.94)}
+.strip{display:grid;grid-template-columns:repeat(9,1fr);gap:4px;margin-top:10px}
+.strip button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:3px 0 5px;font:700 16px var(--serif);position:relative}
+.strip button i{display:block;font:600 9px -apple-system,system-ui,sans-serif;font-style:normal;color:var(--muted)}
+.strip .under{color:var(--bad);border-color:var(--bad)}.strip .even{background:var(--tint)}.strip .bogey{background:var(--chip)}.strip .worse{background:color-mix(in srgb,var(--ink) 16%,var(--card))}
+.strip .cur{outline:2px solid var(--gold);outline-offset:1px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
 <body>
-<header><div class="mark"><i></i></div><h1 id="title">GolfIQ</h1><button id="filterBtn" hidden>Filters</button></header>
+<header><div class="mark" aria-hidden="true" style="display:grid;place-items:center">G</div><h1 id="title">GolfIQ</h1><button id="filterBtn" hidden>Filters</button></header>
 <main id="main"><div class="card">Loading…</div></main>
 <nav class="bottom" id="nav"></nav>
 <div class="sheet" id="sheet"><div class="panel" id="sheetPanel"></div></div>

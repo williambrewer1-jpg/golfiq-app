@@ -220,6 +220,7 @@ export function parseRoundBundle(bundle) {
     garmin_handicapped_strokes: int(first(sc, 'handicappedStrokes')),
     garmin_player_handicap: num(first(sc, 'playerHandicap', 'courseHandicap')),
     score_type: first(sc, 'scoreType', 'scoringType'), in_progress: first(sc, 'roundInProgress') ? 1 : 0,
+    origin: bundle.source === 'manual_entry' ? 'manual' : 'garmin',
   };
   if (round.in_progress) issue('warning', 'in_progress', 'Garmin marks this round as still in progress');
   const course_holes = (course_id && pars) ? pars.slice(0, 18).map((p, i) => ({ hole: i + 1, par: p, stroke_index: si && i < si.length ? si[i] : null })) : [];
@@ -365,6 +366,9 @@ export function whsCounting(diffs) {           // which of the last 20 different
   const k = n <= 5 ? 1 : n <= 8 ? 2 : n <= 11 ? 3 : n <= 14 ? 4 : n <= 16 ? 5 : n <= 18 ? 6 : n === 19 ? 7 : 8;
   return new Set(d.map((v, i) => [v, i]).filter(([v]) => isNum(v)).sort((x, y) => x[0] - y[0]).slice(0, k).map(([, i]) => i));
 }
+// Expected 9-hole score differential for a given Handicap Index. The WHS does not publish its exact table;
+// this is the widely published linear approximation of it (0.52 x HI + 1.197).
+export const expectedNineDifferential = (hi) => 0.52 * hi + 1.197;
 // Walk rounds in date order: where no official index is known for a round, use the index computed
 // from your earlier rounds, so Stableford/differentials can be reconstructed for the whole history.
 function estimateIndexes(rounds, holes) {
@@ -378,9 +382,20 @@ function estimateIndexes(rounds, holes) {
       hs.forEach((h) => { h.hi = r.hi; applyHandicap(h); });
     }
     let d = null;
-    if (hs.length === 18 && isNum(r.slope) && isNum(r.course_rating) && hs.every((h) => h.par !== null)) {
-      if (hs.every((h) => h.ags_hole !== null)) d = 113 / r.slope * (sum(hs.map((h) => h.ags_hole)) - r.course_rating);
+    const rated = isNum(r.slope) && isNum(r.course_rating) && hs.every((h) => h.par !== null);
+    const ags = () => (hs.every((h) => h.ags_hole !== null) ? sum(hs.map((h) => h.ags_hole)) : null);
+    if (hs.length === 18 && rated) {
+      if (ags() !== null) d = 113 / r.slope * (ags() - r.course_rating);
       else { d = 113 / r.slope * (sum(hs.map((h) => Math.min(h.strokes, h.par + 5))) - r.course_rating); r.differential_provisional = d; }
+    } else if (hs.length === 9 && rated && isNum(r.hi)) {
+      // WHS (2024): a 9-hole score becomes an 18-hole differential by adding the player's EXPECTED differential
+      // for the nine not played, which depends only on their Handicap Index at the time.
+      const cr9 = r.course_rating > 50 ? r.course_rating / 2 : r.course_rating;      // Garmin gives the 18-hole rating
+      const played = ags() !== null ? ags() : sum(hs.map((h) => Math.min(h.strokes, h.par + 5)));
+      r.differential_9 = 113 / r.slope * (played - cr9);
+      r.expected_9 = expectedNineDifferential(r.hi);
+      d = r.differential_9 + r.expected_9;
+      r.differential_nine_hole = d;
     }
     r.differential_for_index = d;
     if (d !== null) diffs.push(d);
@@ -606,6 +621,7 @@ function roundMetrics(rounds, holes, shots) {
     const ok = r.format === '18' && r.ags_holes === 18 && r.slope !== null && r.course_rating !== null;
     r.differential = ok ? (113 / r.slope) * (r.ags - r.course_rating) : (r.differential_provisional ?? null);
     r.differential_source = ok ? 'WHS (net double bogey cap)' : isNum(r.differential_provisional) ? 'provisional (par+5 cap: no handicap or stroke index yet)' : null;
+    if (r.format === '9' && isNum(r.differential_nine_hole)) { r.differential = r.differential_nine_hole; r.differential_source = '9 holes played + expected score for the other 9 (WHS)'; }
     r.chain_coverage = r.holes_played ? r.chain_complete_holes / r.holes_played : null;
     r.shots_tracked = s.length; r.shots_with_club = s.filter((x) => x.club_id).length;
     r.label = `${r.date} · ${r.course_name ?? '?'} (${r.gross})`;
