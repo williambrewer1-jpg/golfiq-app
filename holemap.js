@@ -165,14 +165,23 @@ export function staticSvg(fr, o) {
 }
 
 // The part that moves while you drag: lines, pattern, aim marker, distance labels.
+// The drag handle sits this far below the aim (above it near the bottom edge), so a thumb doesn't hide the aim.
+export const PAD = 66;
+export const padOffset = (ay, h = H) => (ay + PAD <= h - 16 ? PAD : -PAD);
+const riskCol = (r) => (r === null || r === undefined ? ['255,214,64', '#ffd640'] : r >= 25 ? ['232,74,58', '#ff6b57'] : r >= 10 ? ['255,170,40', '#ffb030'] : ['120,220,110', '#8ee07d']);
+
+// The part that moves while you drag: lines, pattern (coloured by risk), aim marker, thumb handle, distance tags.
 export function dynamicSvg(fr, o) {
-  const { pos, aim, green, pat, cv, unit, clubName } = o, out = [];
-  const [px, py] = fr.xy(...pos), [ax, ay] = fr.xy(...aim);
+  const { pos, aim, green, pat, cv, clubName } = o, out = [];
+  const [px, py] = fr.xy(...pos), [ax, ay] = fr.xy(...aim), [rgb, line] = riskCol(pat?.risk), dash = pat?.estimated ? ' stroke-dasharray="6 4"' : '';
   if (pat?.ell50) {
-    if (pat.ell90) out.push(`<path d="${P(pat.ell90.map((p) => fr.xy(...p)))}Z" fill="rgba(255,214,64,.16)" stroke="rgba(255,214,64,.9)" stroke-width="1.2" stroke-dasharray="4 3"/>`);
-    out.push(`<path d="${P(pat.ell50.map((p) => fr.xy(...p)))}Z" fill="rgba(255,214,64,.32)" stroke="#ffd640" stroke-width="2"/>`);
+    if (pat.ell90) out.push(`<path d="${P(pat.ell90.map((p) => fr.xy(...p)))}Z" fill="rgba(${rgb},.16)" stroke="rgba(${rgb},.95)" stroke-width="1.4" stroke-dasharray="4 3"/>`);
+    out.push(`<path d="${P(pat.ell50.map((p) => fr.xy(...p)))}Z" fill="rgba(${rgb},.32)" stroke="${line}" stroke-width="2.2"${dash}/>`);
   } else if (pat?.arc) out.push(`<path d="${P(pat.arc.map((p) => fr.xy(...p)))}" fill="none" stroke="#ffd640" stroke-width="3" stroke-linecap="round"/>`);
-  for (const p of pat?.dots || []) { const [x, y] = fr.xy(...p); out.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="rgba(255,255,255,.9)" stroke="rgba(0,0,0,.35)" stroke-width=".6"/>`); }
+  for (const d of pat?.dots || []) {
+    const [x, y] = fr.xy(...(d.p || d));
+    out.push(d.bad ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="#ff4d3d" stroke="#fff" stroke-width=".9"/>` : `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.5" fill="rgba(255,255,255,.9)" stroke="rgba(0,0,0,.35)" stroke-width=".6"/>`);
+  }
   out.push(`<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${ax.toFixed(1)}" y2="${ay.toFixed(1)}" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`);
   const dAim = A.haversine(pos[0], pos[1], aim[0], aim[1]);
   out.push(tag((px + ax) / 2 + 26, (py + ay) / 2, Math.round(cv(dAim))));
@@ -181,11 +190,16 @@ export function dynamicSvg(fr, o) {
     out.push(`<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${gx.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="rgba(255,255,255,.85)" stroke-width="1.5" stroke-dasharray="5 4"/>`);
     out.push(tag((ax + gx) / 2 + 26, (ay + gy) / 2, Math.round(cv(dG))));
   }
-  out.push(`<g class="hm-aim"><circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="24" fill="rgba(0,0,0,0)"/><circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="11" fill="rgba(10,61,43,.35)" stroke="#fff" stroke-width="2.5"/><circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="3" fill="#fff"/></g>`);
-  if (clubName) out.push(lbl(ax, ay - 18, clubName, 'mid'));
+  // aim ring + thumb handle
+  const off = o.pad ?? padOffset(ay, fr.h), hy = ay + off, sgn = Math.sign(off);
+  out.push(`<g class="hm-aim"><line x1="${ax.toFixed(1)}" y1="${(ay + sgn * 12).toFixed(1)}" x2="${ax.toFixed(1)}" y2="${(hy - sgn * 17).toFixed(1)}" stroke="rgba(255,255,255,.8)" stroke-width="1.5" stroke-dasharray="2 3"/>
+    <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="11" fill="rgba(10,61,43,.35)" stroke="#fff" stroke-width="2.5"/><circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="3" fill="#fff"/>
+    <g class="hm-pad"><circle cx="${ax.toFixed(1)}" cy="${hy.toFixed(1)}" r="17" fill="rgba(255,255,255,.92)" stroke="#0a3d2b" stroke-width="1.5"/>${[-5, 0, 5].map((d) => `<line x1="${(ax - 6).toFixed(1)}" y1="${(hy + d).toFixed(1)}" x2="${(ax + 6).toFixed(1)}" y2="${(hy + d).toFixed(1)}" stroke="#0a3d2b" stroke-width="1.6" stroke-linecap="round"/>`).join('')}</g></g>`);
+  const riskTxt = A.isNum(pat?.risk) ? ` · ${Math.round(pat.risk)}% trouble` : '';
+  if (clubName) out.push(lbl(ax, ay - sgn * 20, `${clubName}${pat?.estimated ? ' (est.)' : ''}${riskTxt}`, 'mid'));
   return out.join('');
 }
 
 export function svg(fr, staticPart, dynPart, style) {
-  return `<svg id="hm" class="holemap ${style}" viewBox="0 0 ${fr.w} ${fr.h}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hole map – drag the white ring to set your aim">${staticPart}<g id="hmDyn">${dynPart}</g></svg>`;
+  return `<svg id="hm" class="holemap ${style}" viewBox="0 0 ${fr.w} ${fr.h}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hole map – drag the handle under the white ring to set your aim">${staticPart}<g id="hmDyn">${dynPart}</g></svg>`;
 }

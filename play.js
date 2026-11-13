@@ -55,7 +55,13 @@ export function registerPlay(c) {
   // ------------------------------------------------------------ live view for the current hole
   let live = null, dragging = false;                                   // what the hole map is showing right now
   let patCache = { ds: null, m: new Map() };
-  const patternOf = (cid) => { if (patCache.ds !== c.DS) patCache = { ds: c.DS, m: new Map() }; if (!patCache.m.has(cid)) patCache.m.set(cid, F.clubPattern(c.DS, cid)); return patCache.m.get(cid); };
+  const rawOf = (cid) => { if (patCache.ds !== c.DS) patCache = { ds: c.DS, m: new Map(), raw: new Map(), ratio: null }; if (!patCache.raw.has(cid)) patCache.raw.set(cid, F.clubPattern(c.DS, cid)); return patCache.raw.get(cid); };
+  // your real pattern when the club has enough shots with direction, otherwise an estimate from your other clubs' spread
+  const patternOf = (cid) => {
+    const raw = rawOf(cid); if (patCache.m.has(cid)) return patCache.m.get(cid);
+    if (patCache.ratio === null) patCache.ratio = F.lateralRatio(c.DS, rawOf);
+    const p = raw.stats.enough ? raw : (F.estimatedPattern(raw, patCache.ratio) || raw); patCache.m.set(cid, p); return p;
+  };
   const playClubs = () => c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0 && c.DS.shots.some((s) => s.club_id === x.club_id));
   const featsFor = (d) => (d.course_id && c.state.osm[d.course_id]?.features) || c.state.osm.__live?.features || [];
   const osmEntry = (d) => (d.course_id ? c.state.osm[d.course_id] : null) || c.state.osm.__live || null;
@@ -90,8 +96,11 @@ export function registerPlay(c) {
     const club = L.clubs.find((x) => x.club_id === cid), pt = cid ? patternOf(cid) : null;
     let pat = null, out = null;
     if (pt?.stats.enough) {
-      pat = { ell50: HM.placeEllipse(L.pos, L.aim, pt.stats, 0.5, adj), ell90: pt.stats.enough_90 ? HM.placeEllipse(L.pos, L.aim, pt.stats, 0.9, adj) : null, dots: HM.placePattern(L.pos, L.aim, pt.pts.slice(-60), adj) };
+      const dots = pt.estimated ? [] : HM.placePattern(L.pos, L.aim, pt.pts.slice(-60), adj);
+      pat = { ell50: HM.placeEllipse(L.pos, L.aim, pt.stats, 0.5, adj), ell90: pt.stats.enough_90 ? HM.placeEllipse(L.pos, L.aim, pt.stats, 0.9, adj) : null, estimated: !!pt.estimated,
+        dots: dots.map((p) => { const sf = nearFeats ? F.surfaceAt(p[0], p[1], nearFeats) : null; return { p, bad: sf === 'bunker' || sf === 'water' || sf === 'trees' }; }) };
       out = nearFeats ? (top.find((r) => r.club_id === cid)?.out || HM.outcomes(HM.placePattern(L.pos, L.aim, pt.pts, adj), nearFeats)) : null;
+      pat.risk = out ? out.trouble : null;
     } else if (pt && A.isNum(pt.median_m)) {
       const br = A.bearing(L.pos[0], L.pos[1], L.aim[0], L.aim[1]);
       pat = { arc: Array.from({ length: 17 }, (_, i) => F.destination(L.pos[0], L.pos[1], br - 8 + i, adj(pt.median_m))) };
@@ -110,7 +119,8 @@ export function registerPlay(c) {
     const rows = m.top.map((r) => `<button type="button" class="recrow ${r.club_id === m.cid ? 'on' : ''}" data-club="${esc(r.club_id)}"><span class="rc">${r === m.top[0] ? '★ ' : ''}${esc(r.club)}${m.safer && m.safer !== m.top[0] && r === m.safer ? ' <em>safer</em>' : ''}</span>
       <span class="rp">${PCT(r.prob * 100)} <small>within ${tol}${Math.abs(m.pl.plays_m - m.aimDist) >= 0.9 ? ' of plays-like' : ''}</small></span><span class="rd small muted">usually ${c.d0(r.median_m)} ${U}</span>${trouble(r.out)}</button>`).join('');
     const s = m.pt?.stats;
-    const patNote = !m.club ? '' : s?.enough ? `<b>${esc(m.club.name)}</b> from here: usually ${c.d0(s.mean_y_m)} ${U}, half within ${c.d0(s.r50_m)} ${U} of that${Math.abs(s.mean_lateral_m) >= 3 ? `, tending ${c.d0(Math.abs(s.mean_lateral_m))} ${U} ${s.mean_lateral_m > 0 ? 'right' : 'left'}` : ''} (${s.n} shots).`
+    const patNote = !m.club ? '' : m.pt?.estimated ? `<b>${esc(m.club.name)}</b>: estimated pattern (dashed) – only ${m.pt.real_n} of ${A.T.min_shots_dispersion} shots with direction so far, so the spread is borrowed from your other clubs: usually ${c.d0(m.pt.median_m)} ${U}, about ${c.d0(s.sd_lateral_m)} ${U} either side.`
+      : s?.enough ? `<b>${esc(m.club.name)}</b> from here: usually ${c.d0(s.mean_y_m)} ${U}, half within ${c.d0(s.r50_m)} ${U} of that${Math.abs(s.mean_lateral_m) >= 3 ? `, tending ${c.d0(Math.abs(s.mean_lateral_m))} ${U} ${s.mean_lateral_m > 0 ? 'right' : 'left'}` : ''} (${s.n} shots).`
       : A.isNum(m.pt?.median_m) ? `<b>${esc(m.club.name)}</b>: usually ${c.d0(m.pt.median_m)} ${U}. Not enough shots with direction yet for a pattern (${s?.n || 0} of ${A.T.min_shots_dispersion}) – the arc shows distance only.` : `No tracked shots with ${esc(m.club.name)} yet.`;
     const others = L.clubs.filter((x) => !m.top.some((r) => r.club_id === x.club_id));
     const pls = Math.abs(m.pl.plays_m - m.aimDist) >= 0.9 ? ` <span class="pl">plays ${c.d0(m.pl.plays_m)}</span>` : '';
@@ -165,10 +175,10 @@ export function registerPlay(c) {
         <div class="hmtools">${hasMap ? `<div class="seg mini" data-seg="pl_style">${[['map', 'Course'], ['sat', 'Satellite']].map(([v, l]) => `<button data-v="${v}" class="${style === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
         <button type="button" class="hmbtn" id="plAimReset" ${live.custom ? '' : 'hidden'}>Reset aim</button></div>
         ${style === 'sat' ? '<span class="hmcredit">Imagery © Esri</span>' : '<span class="hmcredit">© OpenStreetMap</span>'}</div>
-      <p class="small muted hmhint">Drag the white ring to where you want to hit it. Rings every ${U === 'yd' ? '50 yd' : '50 m'} from you.</p>
+      <p class="small muted hmhint">Put your thumb on the handle under the white ring and drag – the ring stays visible above your thumb. The shaded area is where this club usually finishes from there: green = little trouble, amber = some, red = a lot; red dots are past shots that would end in trouble. Rings every ${U === 'yd' ? '50 yd' : '50 m'} from you.</p>
       <div id="plRec">${recHtml(live, m)}</div>
       ${feats.some((f) => f.kind === 'fairway' || f.kind === 'green') ? `<details class="strat" id="plStrat"><summary>Compare strategies from here</summary><div id="plStratBody" class="small muted">Working it out…</div></details>` : ''}
-      ${note(`Yellow shape = where your shots with the club have finished (inner: half of them, dashed: 90%), hit from ${usingTee ? 'the tee' : 'where you are'} along the white line; dots are your last ${Math.min(m.pt?.pts.length || 0, 60)}. "Within ±10 ${U}" = share of your stock shots with that club finishing that close to the aim distance. Trouble = bunker, water or trees on the mapped outline. Plays-like adds the height difference (terrain model, ~30–90 m grid, so small bumps don't show), wind and temperature now (Open-Meteo) and altitude, using caddie rules of thumb: 1 m up = 1 m longer, about +1% per mph into the wind and −0.5% per mph downwind, ~0.12% per °C from 21°C, 1.16% per 1000 ft of altitude. Garmin records total distance (carry + roll), so carrying a hazard can only be estimated. Phone GPS is good to a few ${U === 'yd' ? 'yards' : 'metres'} – check your competition's rules on distance devices.`)}
+      ${note(`Shaded shape = where your shots with the club have finished (inner: half of them, dashed: 90%; a dashed inner line means estimated from your other clubs), hit from ${usingTee ? 'the tee' : 'where you are'} along the white line; dots are your last ${Math.min(m.pt?.pts.length || 0, 60)}. "Within ±10 ${U}" = share of your stock shots with that club finishing that close to the aim distance. Trouble = bunker, water or trees on the mapped outline. Plays-like adds the height difference (terrain model, ~30–90 m grid, so small bumps don't show), wind and temperature now (Open-Meteo) and altitude, using caddie rules of thumb: 1 m up = 1 m longer, about +1% per mph into the wind and −0.5% per mph downwind, ~0.12% per °C from 21°C, 1.16% per 1000 ft of altitude. Garmin records total distance (carry + roll), so carrying a hazard can only be estimated. Phone GPS is good to a few ${U === 'yd' ? 'yards' : 'metres'} – check your competition's rules on distance devices.`)}
       ${stale ? `<p class="small" style="margin-top:8px">${d.course_id ? `<button class="btn sec sm" type="button" data-osm="${esc(d.course_id)}">Refresh course outline</button>` : '<button class="btn sec sm" type="button" id="plOsmHere">Refresh course outline</button>'} <span data-osmmsg id="plOsmMsg"></span> adds trees and hole lines.</p>` : osmHint(d, pos)}</div>`;
   }
   const compass = (deg) => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
@@ -214,19 +224,29 @@ export function registerPlay(c) {
   function refreshAim() {
     if (!live?.fr) return;
     const m = model(live), U = c.UNIT;
-    $('#hmDyn').innerHTML = HM.dynamicSvg(live.fr, { pos: live.pos, aim: live.aim, green: live.green, pat: m.pat, cv: c.cv, unit: U, clubName: m.club?.name });
+    $('#hmDyn').innerHTML = HM.dynamicSvg(live.fr, { pos: live.pos, aim: live.aim, green: live.green, pat: m.pat, cv: c.cv, unit: U, clubName: m.club?.name, pad: live.padOff });
     $('#plRec').innerHTML = recHtml(live, m);
     const rb = $('#plAimReset'); if (rb) rb.hidden = !live.custom;
   }
   function wireMap() {
     const el = $('#hm'); if (!el || !live) return;
     const toVB = (ev) => { const r = el.getBoundingClientRect(); return [(ev.clientX - r.left) * HM.W / r.width, (ev.clientY - r.top) * HM.H / r.height]; };
-    let raf = 0, last = null;
-    const move = (ev) => { last = toVB(ev); if (raf) return; raf = requestAnimationFrame(() => { raf = 0; live.aim = live.fr.fromXY(...last); live.custom = true; live.club = null; refreshAim(); }); };
-    el.addEventListener('pointerdown', (ev) => { dragging = true; try { el.setPointerCapture(ev.pointerId); } catch { /* old Safari */ } move(ev); ev.preventDefault(); });
+    let raf = 0, last = null, off = 0;
+    // the aim sits above your thumb (or below it near the bottom edge), so your finger never covers it
+    const move = (ev) => { last = toVB(ev); if (raf) return; raf = requestAnimationFrame(() => { raf = 0; live.aim = live.fr.fromXY(last[0], last[1] - off); live.custom = true; live.club = null; refreshAim(); }); };
+    el.addEventListener('pointerdown', (ev) => {
+      dragging = true; try { el.setPointerCapture(ev.pointerId); } catch { /* old Safari */ }
+      const [, y] = toVB(ev), [, ay] = live.fr.xy(...live.aim);
+      off = ev.pointerType === 'mouse' ? 0 : (live.padOff ?? HM.padOffset(ay, live.fr.h));
+      if (ev.pointerType !== 'mouse' && Math.abs(y - (ay + off)) > 90) off = y - HM.PAD >= 14 ? HM.PAD : -HM.PAD;    // started away from the handle: aim goes just above the thumb
+      live.padOff = off; move(ev); ev.preventDefault();
+    });
+    // iOS: stop double-tap zoom, pinch and page scroll while working on the map (pointer events still arrive)
+    for (const t of ['touchstart', 'touchmove', 'touchend']) el.addEventListener(t, (ev) => { if (ev.cancelable) ev.preventDefault(); }, { passive: false });
+    for (const t of ['gesturestart', 'gesturechange', 'dblclick']) el.addEventListener(t, (ev) => ev.preventDefault());
     el.addEventListener('pointermove', (ev) => { if (dragging) move(ev); });
     const end = async () => {
-      if (!dragging) return; dragging = false;
+      if (!dragging) return; dragging = false; live.padOff = null; refreshAim();
       const d = live.d; d.aim = d.aim || {}; d.aim[live.hole] = { pt: live.aim, from: live.pos };
       c.ui.pl_club = null; c.saveUi(); await saveDraft();
     };

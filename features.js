@@ -442,3 +442,22 @@ export function scoreKillers(holes, shots, shortM = 137.16) {
   for (const r of out.values()) r.total = KILLERS.reduce((t, [k]) => t + r[k], 0);
   return out;
 }
+
+// ------------------------------------------------------------------ estimated pattern for clubs without enough direction data
+// Uses your own spread from the clubs that do have enough shots (sideways spread as a share of distance, median
+// across clubs), else 7% of distance; distance spread from the club's own 10th-90th percentile, else 6%.
+// Deterministic points (no randomness), so the picture doesn't jump about while you drag.
+export function lateralRatio(ds, patternOf) {
+  const r = ds.clubs.map((c) => patternOf(c.club_id)).filter((p) => p.stats?.enough && p.stats.mean_y_m > 30 && !p.estimated).map((p) => p.stats.sd_lateral_m / p.stats.mean_y_m);
+  return r.length ? median(r) : 0.07;
+}
+export function estimatedPattern(base, latRatio, n = 120) {
+  if (!base || !isNum(base.median_m)) return null;
+  const sdY = isNum(base.p10_m) && isNum(base.p90_m) && base.p90_m > base.p10_m ? (base.p90_m - base.p10_m) / 2.563 : 0.06 * base.median_m;
+  const sdX = latRatio * base.median_m, pts = [];
+  for (let i = 0; i < n; i++) {                                         // Box-Muller on a fixed low-discrepancy sequence
+    const u = (i + 0.5) / n, v = (i * 0.6180339887) % 1, r = Math.sqrt(-2 * Math.log(1 - u * 0.999)), t = 2 * Math.PI * v;
+    pts.push({ x: sdX * r * Math.cos(t), y: base.median_m + sdY * r * Math.sin(t) });
+  }
+  return { ...base, pts, stats: A.dispersionStats(pts), estimated: true, real_n: base.stats?.n || 0 };
+}
