@@ -594,7 +594,7 @@ export function registerPages(c) {
     pages: { caddie: ['Caddie', 'target'], review: ['Post-round review', 'check'], handicap: ['Handicap', 'trend'], conditions: ['Conditions', 'wind'], compare: ['Before & after', 'swap'], playbook: ['Course playbook', 'flag'],
       bests: ['Personal bests', 'trophy'], practice: ['Practice', 'dumbbell'], coaching: ['Coach', 'compass'] },
     render: { caddie: pageCaddie, review: pageReview, handicap: pageHandicap, conditions: pageConditions, compare: pageCompare, playbook: pagePlaybook, bests: pageBests, practice: pagePractice, coaching: pageCoach },
-    wire: { playbook: wirePlaybook, caddie: wireCaddie, review: wireReview, conditions: wireConditions, compare: wireCompare, practice: () => { wirePractice(); wireCoach(); }, coaching: wireCoach },
+    wire: { playbook: wirePlaybook, caddie: wireCaddie, review: wireReview, conditions: wireConditions, compare: wireCompare, practice: () => { wirePractice(); wireCoach(); c.progress.wire(); }, coaching: wireCoach },
     noData: ['practice', 'coaching'],        // usable before any rounds are imported
     shareRound, wireOsm, osmCard, fetchWeather, briefing, reviewNeeds, practiceWedges, wireCoach, coachThoughts,
   };

@@ -227,6 +227,14 @@ a.prog-home{display:block;text-decoration:none;color:var(--ink)}.ph-row{display:
 .wpprev canvas{display:block;width:100%;height:auto}.wpclock{position:absolute;left:0;right:0;top:7%;text-align:center;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.3);pointer-events:none}
 .wpclock span{display:block;font:600 9px var(--sans);opacity:.9}.wpclock b{display:block;font:600 44px/1.05 var(--sans);letter-spacing:-.02em}
 .lvl{padding:10px 0;border-top:1px solid var(--line)}.lvl:first-of-type{border-top:0}.lvl-h{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.pot-bar{display:flex;height:12px;border-radius:7px;overflow:hidden;background:var(--chip);margin:8px 0 6px}.pot-bar i{display:block;height:100%}
+.pot-key{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12.5px;margin-bottom:8px}.pot-key i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.pot-bar .base,.pot-key .base{background:#9fb8a8}.pot-bar .mom,.pot-key .mom{background:#4f9a72}.pot-bar .unl,.pot-key .unl{background:var(--accent)}.pot-bar .lock,.pot-key .lock{background:repeating-linear-gradient(45deg,var(--chip),var(--chip) 3px,var(--line) 3px,var(--line) 6px)}
+.skill-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px 0}.skill-tile{display:flex;flex-direction:column;gap:2px;text-align:left;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:12px;min-height:44px;font:500 14px var(--sans);width:100%}
+.skill-tile.focus{border-color:var(--accent);background:var(--tint)}.skill-tile.open{box-shadow:inset 0 0 0 2px var(--accent)}.skill-tile:active{transform:scale(.98)}
+.st-top{display:flex;justify-content:space-between;align-items:center;gap:6px}.st-top b{font-size:15px}.tag{font-style:normal;font:700 10.5px var(--sans);text-transform:uppercase;letter-spacing:.04em;background:var(--accent);color:var(--accent-ink);border-radius:8px;padding:2px 6px}
+.st-hcp{font:700 34px/1.1 var(--serif);color:var(--ink)}.st-go{font:600 14px var(--sans);color:var(--muted)}.skill-detail{border-top:1px solid var(--line);margin-top:8px;padding-top:10px}
+.gbtn{min-height:40px;padding:8px 12px;font-size:13px;margin:0;text-align:left}
 .lvl .bar{margin:6px 0 2px}.lvl.ahead{opacity:.7}.lvl-g{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}.lvl-g .chip{font-size:13px;text-decoration:none}
 /* ---- AI coach */
 .tpls{display:grid;gap:6px}.tpl{display:grid;text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:13px;padding:10px 12px;font:500 14px var(--sans);min-height:52px}

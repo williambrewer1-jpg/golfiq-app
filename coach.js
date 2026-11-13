@@ -23,11 +23,19 @@ export function theilSen(xs, ys) {
 // level drifting with your recent trend (halved, and capped – trends rarely continue at full speed), with your
 // round-to-round spread. The WHS index (best 8 of the last 20) is worked out at the end of each simulated season.
 // "If you fix your top priorities" lowers the average differential by half the strokes those priorities cost, phased in.
-// "Potential" is the headline: what following your plan can do. It assumes you win back the strokes your top three
-// priorities cost (at least 1.5 a round – a typical gain from structured practice – and at most 6), phased in over
-// four months, keeps an improving trend at full strength and stops a worsening one.
-export const POTENTIAL_MIN = 1.5, POTENTIAL_MAX = 6;
-export function forecast(rounds, { months = 6, savings = 0, potential = 0, now = Date.now(), sims = 500 } = {}) {
+// "Potential" is the headline: your current index minus the earned gain from potentialPlan() (a small base, momentum for
+// working on two focus areas, and strokes unlocked by hitting practice-game targets), phased in over four months.
+// It starts at your current index and never rises above it. The shaded range is the normal spread of a WHS index.
+export const POTENTIAL = {
+  base: 0.5,                         // always applies
+  momentum2: 0.5, momentum3: 0.25,   // two active focus areas; a third active skill adds a little more
+  transfer: 0.5, transfer_confirmed: 1.0,   // share of a sub-skill's strokes value credited before / after the course confirms it
+  hits_needed: 3, hit_days: 60, active_days: 14, active_games: 2,
+  pressure_hit: 1.5,                 // a pressure-finish hit counts this many hits
+  confirm_rounds: 5, stall_rounds: 8,
+  unlocked_cap: 3.0, total_cap: 4.0, pct_cap: 0.30,
+};
+export function forecast(rounds, { months = 6, savings = 0, gain = POTENTIAL.base, now = Date.now(), sims = 500 } = {}) {
   const d = rounds.filter((r) => isNum(r.differential_for_index) && r.date).map((r) => ({ t: dt(r.date), v: r.differential_for_index })).sort((a, b) => a.t - b.t);
   if (d.length < 8) return { ok: false, need: 8 - d.length };
   const win = d.filter((x) => x.t >= now - 365 * DAY).slice(-40), use = win.length >= 8 ? win : d.slice(-20);
@@ -49,17 +57,15 @@ export function forecast(rounds, { months = 6, savings = 0, potential = 0, now =
     return { likely: q(out, 0.5), low: q(out, 0.1), high: q(out, 0.9), path: path.map((p, i) => ({ month: i, likely: q(p, 0.5), low: q(p, 0.1), high: q(p, 0.9) })) };
   };
   const base = run(0), fix = savings > 0.2 ? run(savings * 0.5) : null;
-  // Potential: the strokes you win back come straight off your index, phased in over four months, plus any
-  // improving trend you already have. It starts at your current index and never rises above it. The shaded
-  // range is the normal round-to-round spread of a WHS index (from the simulation).
-  const potSave = Math.max(POTENTIAL_MIN, Math.min(POTENTIAL_MAX, potential || 0)), potTrend = Math.max(-1 / 30, Math.min(0, ts.slope));
-  const start = isNum(current) ? current : base.path[0].likely, ramp = horizon * 2 / 3;
-  const potPath = base.path.map((p) => { const t = p.month * 30.4, mid = start + potTrend * t - potSave * Math.min(1, t / ramp), f = Math.min(1, t / horizon);
+  // Potential: the earned gain comes straight off your index, phased in over four months. No extra trend is added:
+  // potential = current index - gain. It starts at your current index and never rises above it.
+  const potSave = Math.max(0, gain || 0), start = isNum(current) ? current : base.path[0].likely, ramp = horizon * 2 / 3;
+  const potPath = base.path.map((p) => { const t = p.month * 30.4, mid = start - potSave * Math.min(1, t / ramp), f = Math.min(1, t / horizon);
     const lo = (p.likely - p.low) * f, hi = (p.high - p.likely) * f;
     return { month: p.month, likely: Math.round(mid * 10) / 10, low: Math.round((mid - lo) * 10) / 10, high: Math.round(Math.min(start, mid + hi) * 10) / 10 }; });
   const potEnd = potPath[potPath.length - 1];
   return { ok: true, current, ...base, optimistic: fix?.likely ?? null, optimistic_path: fix?.path || null,
-    potential: potEnd.likely, potential_best: potEnd.low, potential_path: potPath, potential_save: potSave, rounds_ahead: n, per_month: perMonth, trend_per_month: slope * 30.4, sd, level, months };
+    potential: potEnd.likely, potential_low: potEnd.low, potential_path: potPath, potential_save: potSave, rounds_ahead: n, per_month: perMonth, trend_per_month: slope * 30.4, sd, level, months };
 }
 
 // ------------------------------------------------------------------ 2. milestones
@@ -204,43 +210,45 @@ export const STANDARDS = {
 export const STANDARD_SOURCE = ['Scratch vs 10 vs 20 handicap (Shot Scope / Golf Monthly)', 'https://www.golfmonthly.com/features/scratch-vs-10-vs-20-handicap-how-the-stats-compare'];
 export const standard = (key, h) => { const v = STANDARDS[key], x = Math.max(0, Math.min(36, h));
   return x <= 10 ? v[0] + (v[1] - v[0]) * x / 10 : v[1] + (v[2] - v[1]) * (x - 10) / 10; };
-const LEVEL_GAMES = { gir: ['range-greens', 'combine', 'range-wedge'], updown: ['chip-updown', 'chip-par18'], three: ['putt-lag', 'putt-par18', 'putt-369'], fw: ['range-fairways'], penalties: ['range-fairways'] };
-export function levelUp({ rounds, holes, hcp, step = 5, unitM = 0.9144, games = [], results = [], findings = [] }) {
-  if (!isNum(hcp)) return null;
-  const r = rounds.filter((x) => x.format === '18').sort((a, b) => dt(a.date) - dt(b.date)).slice(-20);
-  if (r.length < 5) return null;
-  const ids = new Set(r.map((x) => x.round_id)), h = holes.filter((x) => ids.has(x.round_id));
-  const to = Math.max(0, Math.round(hcp - step)), from = hcp;
-  const meanOf = (a) => { const v = a.filter(isNum); return v.length ? mean(v) : null; };
-  const cGir = A.contrast(h, 'gir_eff'), cFw = A.contrast(h, 'fw_hit', (x) => x.par >= 4);
-  const girVal = isNum(cGir.delta) && cGir.n_yes >= 15 && cGir.n_no >= 15 ? Math.max(0.4, Math.min(1, cGir.delta)) : 0.65;
-  const fwVal = isNum(cFw.delta) && cFw.n_yes >= 15 && cFw.n_no >= 15 ? Math.max(0.1, Math.min(0.6, cFw.delta)) : 0.3;
-  const areas = [];
-  const gir = meanOf(r.map((x) => x.gir_pct));
-  if (isNum(gir)) { const tgt = Math.max(gir, standard('gir', to)); areas.push({ key: 'gir', title: 'Greens in regulation', you: gir, std: standard('gir', to), unit: '%', higher: true,
-    strokes: (tgt - gir) / 100 * 18 * girVal, how: 'Approach proximity and distance control: more greens means more two-putt pars and fewer up-and-downs to save.' }); }
-  const missed = h.filter((x) => x.gir_eff === 0 && isNum(x.to_par));
-  if (missed.length >= 20) { const ud = 100 * missed.filter((x) => x.to_par <= 0).length / missed.length, std = standard('updown', to);
-    const missesAtTarget = 18 * (1 - Math.max(gir ?? 0, standard('gir', to)) / 100);
-    areas.push({ key: 'updown', title: 'Up and down', you: ud, std, unit: '%', higher: true, strokes: Math.max(0, std - ud) / 100 * missesAtTarget,
-      how: 'Chipping and pitching to inside 6 ft, then holing it: every save turns a bogey into a par.' }); }
-  const pr = r.filter((x) => x.putts_holes === x.holes_played && isNum(x.three_putts));
-  if (pr.length >= 5) { const tp = 100 * pr.reduce((t, x) => t + x.three_putts, 0) / pr.reduce((t, x) => t + x.holes_played, 0), std = standard('three', to);
-    areas.push({ key: 'three', title: 'Three-putts', you: tp, std, unit: '%', higher: false, strokes: Math.max(0, tp - std) / 100 * 18,
-      how: 'Lag putting from 20–40 ft to inside 3 ft, and holing everything from there.' }); }
-  const fw = meanOf(r.map((x) => x.fw_pct));
-  if (isNum(fw)) { const std = standard('fw', to);
-    areas.push({ key: 'fw', title: 'Fairways', you: fw, std, unit: '%', higher: true, strokes: Math.max(0, std - fw) / 100 * 14 * fwVal,
-      how: 'Start line and a reliable tee shot: fairways set up greens.' }); }
-  const pen = findings.find((f) => f.key === 'penalties');
-  if (pen && pen.strokes_per_round > 0) areas.push({ key: 'penalties', title: 'Penalties', you: pen.current, std: pen.target, unit: '/rd', higher: false, strokes: pen.strokes_per_round, std_label: 'your best ¼',
-    how: 'A safe tee club and target on the holes where you find trouble.' });
-  const best = (id, better) => { const v = results.filter((x) => (x.game ?? x.game_id) === id && isNum(x.score)).map((x) => x.score); return v.length ? (better === 'lower' ? Math.min(...v) : Math.max(...v)) : null; };
-  for (const a of areas) {
-    a.games = (LEVEL_GAMES[a.key] || []).map((id) => { const g = games.find((x) => x.id === id); if (!g) return null;
-      const e = B.expectedFor(id, to, unitM); return { id, name: g.name, target: isNum(e) ? Math.round(e * 10) / 10 : null, better: g.better || 'higher', best: best(id, g.better) }; }).filter(Boolean);
+
+// ------------------------------------------------------------------ earned potential
+// gain = base + momentum + unlocked, capped. `ratings` is skills.skillRatings(); `results` the practice journal results.
+// baselines: { [sub full_key]: strokes value when the first target hit was scored } so a confirmed sub-skill keeps its credit
+// after the on-course number has caught up (its current strokes value is then zero).
+const hitScore = (r, g) => isNum(r.score) && isNum(g.target) && (g.better === 'lower' ? r.score <= g.target : r.score >= g.target);
+export function potentialPlan({ ratings, results = [], rounds = [], now = Date.now(), baselines = {}, index = null } = {}) {
+  const P = POTENTIAL, empty = { base: P.base, momentum: 0, active: [], unlocked: 0, locked: 0, gain: P.base, ledger: [], focus: [], capped: false };
+  if (!ratings?.skills) return empty;
+  const gid = (r) => r.game ?? r.game_id, res = results.filter((r) => isNum(r.score) && r.date);
+  const since = (days) => now - days * DAY;
+  // active skills: two scored games (or one guided session) in the skill's games within the last 14 days
+  const active = ratings.skills.filter((s) => s.rated).filter((s) => {
+    const ids = new Set(s.subs.flatMap((x) => x.games.map((g) => g.id))), mine = res.filter((r) => ids.has(gid(r)) && dt(r.date) >= since(P.active_days));
+    return mine.length >= P.active_games || mine.some((r) => r.mode === 'guided');
+  }).map((s) => s.key);
+  const focus = ratings.focus || [], focusActive = focus.filter((k) => active.includes(k)).length;
+  const momentum = focusActive >= 2 ? P.momentum2 + (active.length >= 3 ? P.momentum3 : 0) : 0;
+  const ledger = [];
+  for (const sk of ratings.skills.filter((s) => focus.includes(s.key))) for (const sub of sk.subs) {
+    const games = sub.games.filter((g) => isNum(g.target)); if (!games.length || !sub.enough) continue;
+    const base = Math.max(sub.strokes || 0, baselines[sub.full_key] || 0); if (base <= 0) continue;
+    const mine = res.filter((r) => dt(r.date) >= since(P.hit_days)).map((r) => ({ r, g: games.find((g) => g.id === gid(r)) })).filter((x) => x.g && hitScore(x.r, x.g));
+    const hits = mine.reduce((t, x) => t + (x.r.pressure ? P.pressure_hit : 1), 0), progress = Math.min(1, hits / P.hits_needed);
+    const first = res.filter((r) => games.some((g) => g.id === gid(r) && hitScore(r, g))).map((r) => r.date).sort()[0] || null;
+    const after = first ? rounds.filter((r) => r.format === '18' && String(r.date) > String(first)).length : 0;
+    const onCourse = isNum(sub.you) && isNum(sub.target_value) && (sub.higher ? sub.you >= sub.target_value : sub.you <= sub.target_value);
+    const confirmed = progress > 0 && after >= P.confirm_rounds && onCourse;
+    const stalled = !confirmed && progress >= 1 && after >= P.stall_rounds;
+    const transfer = confirmed ? P.transfer_confirmed : P.transfer, max_credit = base * P.transfer_confirmed, credit = base * transfer * progress;
+    const g0 = games[0], step = base * P.transfer / P.hits_needed, left = Math.max(1, Math.ceil(P.hits_needed - hits));
+    const next = hits < P.hits_needed ? `Score ${g0.target}${g0.better === 'lower' ? ' or less' : '+'} in ${g0.name}${left > 1 ? ` ${left} more times` : ' once more'} → −${(Math.round(step * 10) / 10).toFixed(1)}`
+      : stalled ? 'Not showing up on the course yet – try the on-course challenge' : confirmed ? 'Showing up on the course ✓' : 'Keep it up: play a few rounds so the course can confirm it';
+    ledger.push({ sub: sub.full_key, skill: sk.key, title: sub.title, base_strokes: base, game: g0.id, game_name: g0.name, hits, need: P.hits_needed, credit, max_credit, confirmed, stalled, next, step: hits < P.hits_needed ? step : 0 });
   }
-  areas.sort((a, b) => b.strokes - a.strokes);
-  const gain = areas.reduce((t, a) => t + Math.max(0, a.strokes), 0);
-  return { from, to, step, areas, total: gain, rounds: r.length };
+  ledger.sort((a, b) => b.step - a.step || b.max_credit - a.max_credit);
+  const sum = ledger.reduce((t, x) => t + x.credit, 0), room = ledger.reduce((t, x) => t + x.max_credit, 0);
+  const unlocked = Math.min(P.unlocked_cap, sum), locked = Math.max(0, Math.min(P.unlocked_cap, room * P.transfer) - unlocked);
+  const raw = P.base + momentum + unlocked, cap = Math.min(P.total_cap, isNum(index) ? P.pct_cap * Math.max(0, index) : P.total_cap);
+  const gain = Math.max(0, Math.min(raw, cap));
+  return { base: P.base, momentum, active, unlocked, locked, gain, ledger, focus, capped: gain < raw - 1e-9 };
 }

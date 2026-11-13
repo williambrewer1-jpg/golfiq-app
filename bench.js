@@ -14,7 +14,7 @@ const PROX = { 0: [26, 38, 54, 92], 5: [36, 50, 82, 150], 10: [41, 57, 92, 190],
 // Up-and-down % (scratch / 10 / 20) – Shot Scope via Golf Monthly; 5/15/25 interpolated, 25 extended on the 10-20 slope
 const UPDOWN = { 0: 54, 5: 46.5, 10: 39, 15: 35, 20: 31, 25: 27 };
 // Average leave after a ~30 ft first putt: scratch 4.6 ft, 25 handicap 7.8 ft – Shot Scope via MyGolfSpy
-const leave30 = (h) => 4.6 + (7.8 - 4.6) * h / 25;
+export const leave30 = (h) => 4.6 + (7.8 - 4.6) * h / 25;
 export const SOURCES = [
   ['Putting make % by handicap (Shot Scope / MyGolfSpy)', 'https://mygolfspy.com/news-opinion/putting-make-percentage-by-handicap-full-chart-are-you-above-or-below-average/'],
   ['Approach proximity by handicap (Shot Scope / Golf Monthly)', 'https://golfmonthly.com/features/how-close-to-the-pin-do-amateur-golfers-hit-their-approach-shots'],
@@ -32,6 +32,19 @@ export function makeProb(dFt, h) {
 // average proximity (ft) from d yards for handicap h (clamped to the published bands)
 export function proximityFt(dYd, h) { const mids = PROX_BANDS.map(([a, b]) => (a + b) / 2); return byH(PROX, h, (row) => lerp(dYd, mids, row)); }
 export const upDown = (h) => lerp(h, H, H.map((k) => UPDOWN[k])) / 100;
+// ---- ASSUMED standards. No published amateur data exists for these, so they are modelled from the tables above and
+// flagged as assumptions wherever they are shown. Change the numbers here and everything follows.
+//  - chip on-green %: you can only get up and down if the chip finishes on the green and the putt goes in, so
+//    on-green % = up-and-down % / make % from a typical chip leave (assumed 6 ft).
+//  - Landing zone game (10 chips, count balls on the towel): a much smaller target than the green, so the hit rate is
+//    taken as on-green % raised to a power (assumed 3).
+//  - tee-shot penalties per 14 tee shots at scratch / 10 / 20: assumed 0.25 / 0.5 / 1.0 (Arccos data puts a scratch golfer
+//    at about half the penalties of a 10 handicap in their best rounds; the rest is an assumption), carried on past 20.
+//  - Imaginary fairways game (14 tee shots at a ~30 yd target): fairways % by handicap from Shot Scope / Golf Monthly (50 / 48 / 45).
+export const ASSUMED = { chip_leave_ft: 6, zone_power: 3, penalties_per14: [0.25, 0.5, 1.0], fairways_pct: [50, 48, 45] };
+export const chipOnGreen = (h) => Math.min(0.98, upDown(h) / makeProb(ASSUMED.chip_leave_ft, h));
+export const teePenalties = (h) => { const [a, b, c] = ASSUMED.penalties_per14; return Math.max(0, h <= 10 ? a + (b - a) * Math.max(0, h) / 10 : b + (c - b) * (h - 10) / 10); };
+export const fairwaysPct = (h) => { const [a, b, c] = ASSUMED.fairways_pct, x = Math.max(0, Math.min(36, h)); return x <= 10 ? a + (b - a) * x / 10 : b + (c - b) * (x - 10) / 10; };
 // share of balls finishing within R ft when the average miss is mu ft (assumes a typical round spread around the target)
 export const within = (rFt, muFt) => 1 - Math.exp(-Math.PI * rFt * rFt / (4 * muFt * muFt));
 
@@ -62,10 +75,10 @@ const EXPECTED = {
   'range-greens': (h) => 9 * [80, 100, 120, 140, 160].reduce((t, d) => t + within(0.1 * d * 3, proximityFt(d, h)), 0) / 5,
   'range-wedge': (h) => 10 * [40, 55, 70, 85, 100].reduce((t, d) => t + within(15, proximityFt(d, h)), 0) / 5,
   combine: (h, unitM) => combineExpected(h, unitM),
+  'chip-zone': (h) => 10 * Math.pow(chipOnGreen(Math.min(h, 25)), ASSUMED.zone_power),
+  'range-fairways': (h) => 14 * fairwaysPct(h) / 100,
 };
 export const NO_LEVEL = {
-  'chip-zone': 'No published amateur data for landing-spot accuracy, so this one is tracked against your own history only.',
-  'range-fairways': 'Fairways hit barely changes with handicap in Shot Scope data (50% scratch, 48% at 10, 45% at 20), so a level would be noise.',
   'range-round': 'Use Range round instead – it scores a full course and gives a handicap-style level.',
 };
 export const NOTES = {
@@ -77,6 +90,8 @@ export const NOTES = {
   'range-greens': 'A hit = inside 10% of the distance; uses on-course proximity by handicap from 80–160 yd.',
   'range-wedge': 'Inside 5 yd; uses on-course proximity by handicap from 50–100 yd.',
   combine: 'Expected points for each target from on-course proximity by handicap.',
+  'chip-zone': 'Assumed level (no published data): the share of chips finishing on the green is worked out from up-and-down % and make %, then cubed because the towel is a much smaller target.',
+  'range-fairways': 'Fairways hit barely changes with handicap in Shot Scope data (50% scratch, 48% at 10, 45% at 20), so one fairway is worth a lot of handicap and this level is a rough guide.',
 };
 export const hasLevel = (id) => !!EXPECTED[id];
 // Handicap level for a score: interpolate on the expected-score curve. Returns { h, label } or null.
