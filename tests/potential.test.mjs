@@ -86,5 +86,15 @@ test('sample data with no extra practice: potential sits 0.5–1.0 shots under t
   const fc = CO.forecast(ds.rounds, { gain: pl.gain, now: Date.parse('2026-11-24') }), drop = fc.current - fc.potential;
   assert.ok(drop >= 0.5 - 1e-9 && drop <= 1.0 + 1e-9, `drop ${drop}`); console.log(`     sample: ${fc.current} -> ${fc.potential} (gain ${pl.gain})`);
 });
+test('Imaginary fairways and Landing zone targets can now unlock potential', () => {
+  const sample = JSON.parse(fs.readFileSync(new URL('../sample-data.json', import.meta.url), 'utf8'));
+  const ds = A.buildDataset({ bundles: sample.bundles, clubsBundle: sample.clubsBundle, settings: sample.settings, corrections: [], manualShots: [] }, { estimateIndex: true });
+  const today = new Date().toISOString().slice(0, 10), results = [1, 2, 3].flatMap((i) => [{ id: `f${i}`, game: 'range-fairways', date: today, score: 14 }, { id: `z${i}`, game: 'chip-zone', date: today, score: 10 }]);
+  const sk = skillRatings({ ...ds, results, games: F.DEFAULT_GAMES, unitM: 0.9144, pinned: ['driving', 'short'] });
+  const acc = sk.skills.find((s) => s.key === 'driving').subs.find((s) => s.key === 'accuracy'); assert.ok(Number.isFinite(acc.games[0].target), 'fairways target');
+  const pl = CO.potentialPlan({ ratings: sk, results, rounds: ds.rounds, index: 11 }), x = pl.ledger.find((l) => l.sub === 'driving.accuracy');
+  assert.ok(x && x.hits === 3 && x.credit > 0, JSON.stringify(x));
+  assert.ok(sk.skills.find((s) => s.key === 'short').subs.find((s) => s.key === 'chip').practice_hcp !== null, 'chip practice level from Landing zone');
+});
 test('POTENTIAL defaults match the plan', () => { assert.deepEqual([P.base, P.momentum2, P.momentum3, P.transfer, P.unlocked_cap, P.total_cap, P.pct_cap, P.hits_needed, P.hit_days, P.active_days], [0.5, 0.5, 0.25, 0.5, 3, 4, 0.3, 3, 60, 14]); });
 console.log(failed ? `\n${failed} failed` : '\nall passed'); process.exit(failed ? 1 : 0);

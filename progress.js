@@ -84,11 +84,11 @@ export function registerProgress(c) {
   function subRow(s, skill) {
     const has = A.isNum(s.you), tv = s.target_value, ahead = has && s.strokes < 0.05 && !s.context_only;
     const w = has && A.isNum(tv) && tv > 0 ? Math.max(4, Math.min(100, (s.higher ? s.you / tv : tv / Math.max(s.you, 1e-9)) * 100)) : has ? 100 : 0;
-    const head = s.hcp !== null ? `${hc(s.hcp)} handicap${s.source === 'practice' ? ' <small class="muted">from practice</small>' : ''}` : s.own_history ? '<small class="muted">your own history</small>' : '<small class="muted">not enough data yet</small>';
+    const head = s.hcp !== null ? `${hc(s.hcp)} handicap${s.source === 'practice' ? ' <small class="muted">from practice</small>' : ''}` : '<small class="muted">not enough data yet</small>';
     const gain = s.context_only ? '<span class="muted">for context</span>' : !has ? '' : ahead ? '<span class="good">already there ✓</span>' : `<b class="good">≈ ${n1(s.strokes)}</b> shots a round`;
     return `<div class="lvl ${ahead ? 'ahead' : ''}"><div class="lvl-h"><b>${esc(s.title)}</b><span>${head}</span></div>
       ${has ? `<div class="bar"><i style="width:${Math.round(w)}%"></i></div>
-      <p class="small">You <b>${val(s.you, s.unit)}</b>${A.isNum(tv) ? ` · ${s.std_label ? esc(s.std_label) : `a ${skill.target} handicapper`} <b>${val(tv, s.unit)}</b>` : ''} · ${gain}</p>`
+      <p class="small">You <b>${val(s.you, s.unit)}</b>${A.isNum(tv) ? ` · a ${skill.target} handicapper${s.assumed ? ' <small class="muted">(assumed)</small>' : ''} <b>${val(tv, s.unit)}</b>` : ''} · ${gain}</p>`
       : `<p class="small muted">${s.n ? `Only ${s.n} ${NOUN[s.full_key]} so far` : `No ${NOUN[s.full_key]} yet`} – a few more rounds with shot tracking will rate this.</p>`}
       <p class="small muted" style="margin:0">${has ? `From ${s.n} ${NOUN[s.full_key]}. ` : ''}${A.isNum(s.practice_hcp) ? `Practice level ${hc(s.practice_hcp)}. ` : ''}${esc(s.how)}</p>
       ${!ahead && s.games.length ? `<div class="lvl-g">${s.games.map(gameBtn).join('')}</div>` : ''}</div>`;
@@ -106,12 +106,11 @@ export function registerProgress(c) {
     const detail = open ? `<div class="skill-detail"><div class="rv-h"><h3 style="margin:0">${esc(open.title)}</h3>${open.rated ? `<span class="small muted">${hc(open.hcp)} → ${open.target} handicap</span>` : ''}</div>
       ${open.subs.map((s) => subRow(s, open)).join('')}
       <p style="margin:8px 0 0"><button class="btn sec gbtn" data-pin="${open.key}">${pinned.includes(open.key) ? 'Stop pinning this focus' : open.focus ? 'Pin as a focus area' : 'Make this a focus area'}</button></p></div>` : '';
-    const own = sk.skills.flatMap((s) => s.subs).filter((s) => s.own_history).map((s) => s.title.toLowerCase());
     return `<div class="card" id="levelUp"><h2>Level up</h2>
       <p class="small">Every skill has its own handicap, rated against what golfers of each level typically do. Aim for the next level: ${sk.skills.some((s) => s.rated) ? 'three shots better' : 'play five full rounds to rate them'}. Tap a skill to see why.</p>
       <div class="skill-grid">${sk.skills.map(tile).join('')}</div>${detail}
       ${link ? '<p class="small"><a href="#practice" data-practice="progress">See your 6-month potential →</a></p>' : ''}
-      ${note(`Your last ${sk.rounds} 18-hole rounds against Shot Scope data (putting make %, approach proximity, up-and-down %, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}; sources: ${[...B.SOURCES, CO.STANDARD_SOURCE].map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t.split(' (')[0])}</a>`).join(', ')}). ${own.length ? `No published standard exists for ${esc(own.join(' or '))}, so they use your own best quarter of rounds and don't count towards the handicap. ` : ''}Proximity compares your median finish with the published averages. Practice level comes from your last 5 game scores and is shown separately, because practice is easier than the course. Strokes are what reaching the next level would save per round; skills overlap a little, so treat the total as a target.`)}</div>`;
+      ${note(`Your last ${sk.rounds} 18-hole rounds against Shot Scope data (putting make %, approach proximity, up-and-down %, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}; sources: ${[...B.SOURCES, CO.STANDARD_SOURCE].map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t.split(' (')[0])}</a>`).join(', ')}). Chip proximity, tee penalties and the Landing zone and Imaginary fairways games have no published standard, so their levels are assumptions worked out from the tables above (marked "assumed"). Proximity compares your median finish with the published averages. Practice level comes from your last 5 game scores and is shown separately, because practice is easier than the course. Strokes are what reaching the next level would save per round; skills overlap a little, so treat the total as a target.`)}</div>`;
   }
   function wire() {
     c.$$('[data-skill]').forEach((b) => b.addEventListener('click', () => { c.ui.lv_skill = c.ui.lv_skill === b.dataset.skill ? null : b.dataset.skill; c.saveUi(); c.rerender(); }));

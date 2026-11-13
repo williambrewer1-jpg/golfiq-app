@@ -33,9 +33,10 @@ function synth(h, { approachShots = 24, noPutts = false } = {}) {
   // up and down is measured on missed greens only, so draw the saves over the missed holes
   const missed = holes.filter((x) => x.gir_eff === 0), q = quota(B.upDown(h)); missed.forEach((x) => { x.to_par = q() ? 0 : 1; });
   for (const [mid_, n] of [[75, approachShots], [125, 24], [175, 24]]) for (let k = 0; k < n; k++) shots.push({ round_id: `r${k % 20}`, category: 'approach', start_to_pin: mid_ * YD, end_to_pin: B.proximityFt(mid_, h) * FT, on_green_end: 1 });
-  for (let k = 0; k < 280; k++) shots.push({ round_id: `r${k % 20}`, hole: 1, category: 'tee', club_category: 'driver', dist_m: BENCH['driving.distance'](h) * YD, ends_in_penalty: 0 });
-  const og = quota(0.8);
-  for (let k = 0; k < 100; k++) shots.push({ round_id: `r${k % 20}`, hole: (k % 18) + 1, category: 'around_green', on_green_end: og() });
+  const pen = quota(B.teePenalties(h) / 14);
+  for (let k = 0; k < 280; k++) shots.push({ round_id: `r${k % 20}`, hole: 1, category: 'tee', club_category: 'driver', dist_m: BENCH['driving.distance'](h) * YD, ends_in_penalty: pen() });
+  const og = quota(B.chipOnGreen(h));
+  for (let k = 0; k < 400; k++) shots.push({ round_id: `r${k % 20}`, hole: (k % 18) + 1, category: 'around_green', on_green_end: og() });
   return { rounds, holes, shots };
 }
 const ratings = (h, o = {}, extra = {}) => skillRatings({ ...synth(h, o), results: [], games: F.DEFAULT_GAMES, unitM: YD, ...extra });
@@ -55,15 +56,29 @@ test('values beyond the table clamp to 0 and 36', () => {
 });
 test('a golfer with exactly the 10-handicap numbers rates 10 ± 0.5 in every published sub-skill', () => {
   const r = ratings(10);
-  for (const [sk, key] of [['putting', 'short'], ['putting', 'mid'], ['putting', 'lag'], ['short', 'updown'], ['approach', 'gir'], ['approach', 'wedge'], ['approach', 'mid'], ['approach', 'long'], ['driving', 'distance'], ['driving', 'accuracy']])
+  for (const [sk, key] of [['putting', 'short'], ['putting', 'mid'], ['putting', 'lag'], ['short', 'updown'], ['approach', 'gir'], ['approach', 'wedge'], ['approach', 'mid'], ['approach', 'long'], ['short', 'chip'], ['driving', 'distance'], ['driving', 'penalties'], ['driving', 'accuracy']])
     near(sub(r, sk, key).hcp, 10, 0.5, `${sk}.${key}`);
   for (const s of r.skills) near(s.hcp, 10, 0.5, s.key);
   near(r.index, 10, 0.5, 'index');
 });
 test('the same holds at 5, 15 and 20', () => { for (const h of [5, 15, 20]) { const r = ratings(h); for (const s of r.skills) near(s.hcp, h, 0.6, `${s.key} @ ${h}`); } });
-test('own-history sub-skills get no handicap and no published standard', () => {
+test('chip proximity and tee penalties are rated from assumed standards and flagged', () => {
   const r = ratings(10), chip = sub(r, 'short', 'chip'), pen = sub(r, 'driving', 'penalties');
-  assert.equal(chip.hcp, null); assert.equal(pen.hcp, null); assert.equal(chip.std_label, 'your best ¼'); assert.ok(chip.own_history && pen.own_history);
+  near(chip.hcp, 10, 0.5, 'chip'); near(pen.hcp, 10, 0.5, 'penalties'); assert.ok(chip.assumed && pen.assumed); assert.ok(!sub(r, 'putting', 'lag').assumed);
+  assert.ok(B.ASSUMED.penalties_per14.length === 3 && B.ASSUMED.zone_power > 0);
+  // a golfer who never has a tee penalty is rated at least as good as scratch on that sub-skill; more penalties rate worse
+  assert.ok(rateValue('driving.penalties', 0) === 0 && rateValue('driving.penalties', 1) > rateValue('driving.penalties', 0.5));
+  assert.ok(sub(r, 'short', 'chip').games.some((g) => g.id === 'chip-zone' && Number.isFinite(g.target)), 'chip-zone now has a target');
+  assert.ok(sub(r, 'driving', 'accuracy').games.some((g) => g.id === 'range-fairways' && Number.isFinite(g.target)), 'imaginary fairways now has a target');
+});
+test('Landing zone and Imaginary fairways map scores to handicap levels', () => {
+  for (const id of ['chip-zone', 'range-fairways']) {
+    assert.ok(B.hasLevel(id) && !B.NO_LEVEL[id]);
+    let prev = Infinity; for (const h of [0, 5, 10, 15, 20, 25]) { const e = B.expectedFor(id, h); assert.ok(e < prev, `${id} falls as handicap rises`); prev = e; }
+    for (const h of [0, 5, 10, 15, 20]) near(B.level(id, B.expectedFor(id, h)).h, h, 0.3, `${id} round trip @ ${h}`);
+  }
+  near(B.expectedFor('range-fairways', 10), 14 * 0.48, 1e-9);                       // 48% fairways at 10, Shot Scope / Golf Monthly
+  near(B.expectedFor('chip-zone', 10), 10 * Math.pow(B.upDown(10) / B.makeProb(6, 10), 3), 1e-9);
 });
 test('weights re-normalise when a sub-skill is unrated', () => {
   const full = ratings(10), s = full.skills.find((x) => x.key === 'putting');
