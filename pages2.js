@@ -18,26 +18,53 @@ export function registerPages(c) {
   // ================================================================ 1. Caddie
   function pageCaddie() {
     const U = c.UNIT, dist = Number(c.ui.cd_dist) || 150, tol = Number(segVal('cd_tol', 10));
-    const cells = F.wedgeMatrix(J().wedge.entries), wrows = [...cells.values()].map((w) => ({ club: clubName(w.club_id), length: w.length, carry_m: w.carry_m, n: w.sessions }));
-    const rec = F.recommendClubs(c.DS, c.uncv(dist), c.uncv(tol), wrows), gps = rec.filter((r) => r.kind === 'gps'), wd = rec.filter((r) => r.kind === 'wedge');
-    const top = gps[0];
-    const row = (r, i) => `<div class="rec ${i === 0 ? 'top' : ''}"><div class="rec-h"><b>${esc(r.club)}</b><span class="pill ${r.prob >= 0.5 ? 'good' : r.prob >= 0.25 ? 'mid' : ''}">${Math.round(r.prob * 100)}% within ±${tol} ${U}</span></div>
-      <div class="bar"><i style="width:${Math.round(r.prob * 100)}%"></i></div>
-      <div class="small muted">Usually ${c.d0(r.median_m)} ${U} (middle half ${c.d0(r.p25_m)}–${c.d0(r.p75_m)}) · ${Math.round(r.short_pct * 100)}% short, ${Math.round(r.long_pct * 100)}% long${A.isNum(r.lateral_sd_m) ? ` · L/R spread ±${c.d0(r.lateral_sd_m)} ${U}` : ''} · n=${r.n}${r.sample === 'low' ? ' (low sample)' : ''}</div></div>`;
+    const wrows = F.wedgeRowsOf(J().wedge.entries, clubName);
+    const rec = F.recommendClubs(c.DS, c.uncv(dist), c.uncv(tol), wrows), top = rec[0];
+    const src = (r) => (r.kind === 'wedge' ? `carries ${c.d0(r.median_m)} ${U} from your wedge matrix (${r.n} session${r.n === 1 ? '' : 's'}); odds assume about ±5%`
+      : `${r.source === 'mine' ? `your number ${c.d0(r.median_m)} ${U}${A.isNum(r.gps_m) ? ` (GPS ${c.d0(r.gps_m)})` : ''}` : `usually ${c.d0(r.median_m)} ${U}`} (middle half ${c.d0(r.p25_m)}–${c.d0(r.p75_m)}) · ${Math.round(r.short_pct * 100)}% short, ${Math.round(r.long_pct * 100)}% long${A.isNum(r.lateral_sd_m) ? ` · L/R spread ±${c.d0(r.lateral_sd_m)} ${U}` : ''}${r.n ? ` · n=${r.n}` : ''}`);
+    const row = (r, i) => `<div class="rec ${i === 0 ? 'top' : ''}"><div class="rec-h"><b>${esc(r.club)}</b>${r.kind === 'wedge' ? ' <span class="pill">part swing</span>' : r.source === 'mine' ? ' <span class="pill">your number</span>' : ''}<span class="pill ${r.prob >= 0.5 ? 'good' : r.prob >= 0.25 ? 'mid' : ''}">${Math.round(r.prob * 100)}% within ±${tol} ${U}</span></div>
+      <div class="bar"><i style="width:${Math.round(r.prob * 100)}%"></i></div><div class="small muted">${src(r)}</div></div>`;
+    const shown = rec.filter((r) => r.prob > 0.005 || Math.abs(r.diff_m) < c.uncv(25)).slice(0, 7);
     return `<div class="card"><h2>What club for…</h2>
       <div class="bigin"><input id="cdDist" type="number" inputmode="numeric" value="${dist}" aria-label="Distance"><span>${U}</span></div>
       <input id="cdRange" type="range" min="${U === 'yd' ? 30 : 25}" max="${U === 'yd' ? 280 : 255}" step="1" value="${dist}">
       ${seg('cd_tol', [[5, `±5 ${U}`], [10, `±10 ${U}`], [15, `±15 ${U}`]], 10)}
-      ${top ? `<p class="lead">Best odds: <b>${esc(top.club)}</b> – ${Math.round(top.prob * 100)}% of your stock shots with it finish within ${tol} ${U} of ${dist}.</p>` : '<p class="muted">No club with at least 8 stock shots yet.</p>'}</div>
-      ${gps.length ? `<div class="card"><h2>Your clubs at ${dist} ${U}</h2>${gps.filter((r) => r.prob > 0 || Math.abs(r.diff_m) < c.uncv(25)).slice(0, 6).map(row).join('') || '<p class="muted">Nothing in your bag is close to this distance.</p>'}
-      ${note('Based on GPS total distance of your stock tee and approach shots (not carry, no wind/slope/lie adjustment). Percent = share of those shots that finished within the tolerance of this distance.')}</div>` : ''}
-      ${wd.length ? `<div class="card"><h2>Part-swing wedges near ${dist} ${U}</h2>${wd.map((r) => `<p style="margin:6px 0"><b>${esc(r.club)}</b> – carries ${c.d0(r.median_m)} ${U} <span class="small muted">(${sgn(c.cv(r.diff_m), 0)} ${U} vs target, from your wedge matrix)</span></p>`).join('')}</div>` : ''}`;
+      ${top ? `<p class="lead">Best odds: <b>${esc(top.club)}</b> – ${Math.round(top.prob * 100)}% chance of finishing within ${tol} ${U} of ${dist}.</p>` : '<p class="muted">No club has enough shots or a distance of yours yet – add them under Your club distances below.</p>'}</div>
+      ${shown.length ? `<div class="card"><h2>Options at ${dist} ${U}</h2>${shown.map(row).join('')}
+      ${note('Full swings: GPS total distance of your stock shots, or your own number where you chose it (your GPS spread moved to your number; no GPS shots = about ±6% assumed). Part swings: the carries from Practice → Wedges. No wind, slope or lie adjustment here – the Play map adds those.')}</div>` : ''}
+      ${distancesCard()}`;
+  }
+  // Your club distances: GPS by default, or your own number per club
+  function distancesCard() {
+    const U = c.UNIT, clubs = c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0);
+    const rows = clubs.map((x) => {
+      const cd = F.clubDistance(c.DS, x.club_id), useMine = x.dist_source === 'mine';
+      return `<div class="cdrow" data-cdc="${esc(x.club_id)}"><div class="cdn"><b>${esc(x.name)}</b><span class="small muted">${A.isNum(cd.gps_m) ? `GPS ${c.d0(cd.gps_m)} ${U} · ${cd.n} shot${cd.n === 1 ? '' : 's'}${cd.enough ? '' : ' (too few)'}` : 'no GPS shots'}</span></div>
+        <input type="number" inputmode="numeric" name="mine" placeholder="${A.isNum(cd.gps_m) ? c.d0(cd.gps_m) : U}" value="${A.isNum(x.target_total_m) ? c.d0(x.target_total_m) : ''}" aria-label="Your distance for ${esc(x.name)}">
+        <select name="use" aria-label="Which distance to use"><option value="gps" ${useMine ? '' : 'selected'}>Use GPS</option><option value="mine" ${useMine ? 'selected' : ''}>Use mine</option></select></div>`;
+    }).join('');
+    return `<div class="card" id="cdDistances"><h2>Your club distances</h2>
+      <p class="small">Every club uses its GPS median by default. Type your own total distance (${U}, carry + roll) and choose <b>Use mine</b> to override it – for a new club, a fitting, or when GPS is off. A club with too few GPS shots uses your number automatically.</p>
+      <form id="cdDistForm">${rows}<p><button class="btn">Save distances</button></p></form>
+      <p class="small muted">Part-swing wedges come from <a href="#practice" data-practice="wedges">Practice → Wedges</a> and are offered automatically on the Play map and here.</p></div>`;
   }
   function wireCaddie() {
     const set = (v) => { c.ui.cd_dist = Math.max(1, Number(v) || 150); c.saveUi(); c.rerender(); };
     $('#cdDist')?.addEventListener('change', (e) => set(e.target.value));
     $('#cdRange')?.addEventListener('change', (e) => set(e.target.value));
     $('#cdRange')?.addEventListener('input', (e) => { $('#cdDist').value = e.target.value; });
+    $('#cdDistForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault(); const st = c.state.settings; st.clubs = st.clubs || {}; let n = 0;
+      for (const row of $$('[data-cdc]', e.target)) {
+        const id = row.dataset.cdc, cl = c.DS.clubs.find((x) => x.club_id === id), raw = $('[name=mine]', row).value.trim();
+        const mine = raw === '' ? null : c.uncv(Number(raw)), use = $('[name=use]', row).value === 'mine' && mine !== null ? 'mine' : 'gps';
+        const old = { target_total_m: cl.target_total_m ?? null, dist_source: cl.dist_source || 'gps' };
+        const keep = old.target_total_m !== null && mine !== null && Math.abs(c.cv(old.target_total_m) - Number(raw)) < 0.5;   // same number on screen: keep the exact metres
+        const v = { target_total_m: keep ? old.target_total_m : mine, dist_source: use };
+        if (v.target_total_m !== old.target_total_m || v.dist_source !== old.dist_source) { st.clubs[id] = { ...(st.clubs[id] || {}), ...v }; await S.saveSettings(c.state, 'update_club', id, { old, new: v }); n++; }
+      }
+      c.done(n ? `${n} club distance${n > 1 ? 's' : ''} saved` : 'No changes');
+    });
   }
 
   // ================================================================ 2. Post-round review

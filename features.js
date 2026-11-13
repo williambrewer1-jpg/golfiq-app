@@ -6,25 +6,57 @@ const { isNum, mean, median, std, quantile, groupBy, sum } = A;
 
 // ------------------------------------------------------------------ 1. club recommendation
 // For a target distance: each club's share of stock shots finishing within ±tol of it.
+// ------------------------------------------------------------------ club distances: GPS by default, or your own number
+// Each club plays to its GPS median unless you've chosen "mine" (Settings → Clubs or Play → Caddie → Your distances),
+// or the club has too few tracked shots and you've entered a number. With "mine", your GPS spread is kept and moved
+// to your number; with no GPS shots the spread is assumed (6% of distance).
+const stockCache = new WeakMap();
+function stockOf(ds) {
+  if (!stockCache.has(ds)) stockCache.set(ds, groupBy(A.stockShots(ds.shots, ds.clubs).filter((s) => !s.partial && !s.partial_by_intent && isNum(s.dist_m)), (s) => s.club_id));
+  return stockCache.get(ds);
+}
+export function clubDistance(ds, cid) {
+  const c = ds.clubs.find((x) => x.club_id === cid), g = stockOf(ds).get(cid) || [], d = g.map((s) => s.dist_m), n = d.length;
+  const gps = n ? median(d) : null, mine = isNum(c?.target_total_m) ? c.target_total_m : null, enough = n >= A.T.min_shots_club_stats;
+  const use = mine !== null && (c?.dist_source === 'mine' || !enough) ? 'mine' : 'gps';
+  return { club_id: cid, n, gps_m: gps, mine_m: mine, use, enough, median_m: use === 'mine' ? mine : gps, shift_m: use === 'mine' && gps !== null ? mine - gps : 0 };
+}
+const erf = (x) => { const t = 1 / (1 + 0.3275911 * Math.abs(x)), y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; };
+export const normCdf = (z) => 0.5 * (1 + erf(z / Math.SQRT2));
+// share of a normal(mu, sd) inside target ± tol, and the parts short / long of it
+export function normalWithin(mu, sd, t, tol) { const a = normCdf((t - tol - mu) / sd), b = normCdf((t + tol - mu) / sd); return { prob: b - a, short: a, long: 1 - b }; }
+export const wedgeSd = (carry) => Math.max(2.5, 0.05 * carry);       // range carries: about 5% (at least 2.5 m) either way
+
 export function recommendClubs(ds, targetM, tolM, wedgeRows = []) {
-  const stock = A.stockShots(ds.shots, ds.clubs).filter((s) => !s.partial && !s.partial_by_intent);
-  const out = [];
-  for (const [cid, g] of groupBy(stock, (s) => s.club_id)) {
-    const c = ds.clubs.find((x) => x.club_id === cid);
+  const out = [], stock = stockOf(ds);
+  for (const c of ds.clubs) {
     if (!c || c.category === 'putter' || c.active === 0) continue;
-    const d = g.map((s) => s.dist_m), n = d.length;
-    if (n < A.T.min_shots_club_stats) continue;
-    const within = d.filter((x) => Math.abs(x - targetM) <= tolM).length;
-    const lat = g.map((s) => s.lateral_m).filter(isNum);
-    out.push({ kind: 'gps', club: c.name, club_id: cid, n, median_m: median(d), p25_m: quantile(d, 0.25), p75_m: quantile(d, 0.75),
-      prob: within / n, short_pct: d.filter((x) => x < targetM - tolM).length / n, long_pct: d.filter((x) => x > targetM + tolM).length / n,
-      diff_m: median(d) - targetM, lateral_sd_m: lat.length >= 8 ? std(lat) : null, sample: A.sampleLabel(n) });
+    const cd = clubDistance(ds, c.club_id), g = stock.get(c.club_id) || [];
+    if (cd.enough) {
+      const d = g.map((s) => s.dist_m + cd.shift_m), n = d.length, within = d.filter((x) => Math.abs(x - targetM) <= tolM).length;
+      const lat = g.map((s) => s.lateral_m).filter(isNum);
+      out.push({ kind: 'gps', source: cd.use, club: c.name, club_id: c.club_id, n, median_m: median(d), gps_m: cd.gps_m, p25_m: quantile(d, 0.25), p75_m: quantile(d, 0.75),
+        prob: within / n, short_pct: d.filter((x) => x < targetM - tolM).length / n, long_pct: d.filter((x) => x > targetM + tolM).length / n,
+        diff_m: median(d) - targetM, lateral_sd_m: lat.length >= 8 ? std(lat) : null, sample: cd.use === 'mine' ? 'your number, GPS spread' : A.sampleLabel(n) });
+    } else if (cd.use === 'mine') {                                     // your number only: assumed spread
+      const sd = 0.06 * cd.mine_m, w = normalWithin(cd.mine_m, sd, targetM, tolM);
+      out.push({ kind: 'gps', source: 'mine', club: c.name, club_id: c.club_id, n: cd.n, median_m: cd.mine_m, gps_m: cd.gps_m, p25_m: cd.mine_m - 0.674 * sd, p75_m: cd.mine_m + 0.674 * sd,
+        prob: w.prob, short_pct: w.short, long_pct: w.long, diff_m: cd.mine_m - targetM, lateral_sd_m: null, sample: 'your number (spread assumed)' });
+    }
   }
-  // part-swing wedges from the range matrix (carry numbers you entered), shown as options without a probability
-  for (const w of wedgeRows) if (isNum(w.carry_m) && Math.abs(w.carry_m - targetM) <= Math.max(tolM, 9)) {
-    out.push({ kind: 'wedge', club: `${w.club} · ${w.length}`, n: w.n, median_m: w.carry_m, prob: null, diff_m: w.carry_m - targetM, sample: 'range carry' });
+  // part-swing wedges from the range matrix (carries you entered); odds assume about ±5% around that carry
+  for (const w of wedgeRows) {
+    if (!isNum(w.carry_m)) continue;
+    const sd = wedgeSd(w.carry_m); if (Math.abs(w.carry_m - targetM) > tolM + 2.5 * sd) continue;
+    const r = normalWithin(w.carry_m, sd, targetM, tolM);
+    out.push({ kind: 'wedge', club: `${w.club} · ${w.length}`, club_id: w.key || `w:${w.club_id}|${w.length}`, base_club_id: w.club_id, length: w.length, n: w.n, median_m: w.carry_m,
+      p25_m: w.carry_m - 0.674 * sd, p75_m: w.carry_m + 0.674 * sd, prob: r.prob, short_pct: r.short, long_pct: r.long, diff_m: w.carry_m - targetM, sample: 'range carry' });
   }
   return out.sort((a, b) => (b.prob ?? -1) - (a.prob ?? -1) || Math.abs(a.diff_m) - Math.abs(b.diff_m));
+}
+// Wedge-matrix cells as caddie options
+export function wedgeRowsOf(entries, clubName) {
+  return [...wedgeMatrix(entries || []).values()].map((w) => ({ key: `w:${w.club_id}|${w.length}`, club_id: w.club_id, club: clubName(w.club_id), length: w.length, carry_m: w.carry_m, n: w.sessions }));
 }
 
 // ------------------------------------------------------------------ 9. personal bests & milestones
@@ -353,9 +385,20 @@ export function courseHoles(ds, courseId) {
 // A club's shot pattern in "aim" coordinates: x = metres right of the target line, y = metres travelled along it.
 export function clubPattern(ds, clubId) {
   const st = A.stockShots(ds.shots, ds.clubs).filter((s) => s.club_id === clubId && !s.partial && !s.partial_by_intent && isNum(s.lateral_m) && isNum(s.dist_m));
-  const pts = st.map((s) => ({ x: s.lateral_m, y: Math.sqrt(Math.max(s.dist_m ** 2 - s.lateral_m ** 2, 0)) }));
-  const all = A.stockShots(ds.shots, ds.clubs).filter((s) => s.club_id === clubId && !s.partial && !s.partial_by_intent).map((s) => s.dist_m);
-  return { pts, stats: A.dispersionStats(pts), n_dist: all.length, median_m: median(all), p10_m: quantile(all, 0.1), p90_m: quantile(all, 0.9) };
+  const cd = clubDistance(ds, clubId), k = cd.shift_m;                  // your own number moves the whole pattern
+  const pts = st.map((s) => ({ x: s.lateral_m, y: Math.sqrt(Math.max(s.dist_m ** 2 - s.lateral_m ** 2, 0)) + k }));
+  const all = A.stockShots(ds.shots, ds.clubs).filter((s) => s.club_id === clubId && !s.partial && !s.partial_by_intent).map((s) => s.dist_m + k);
+  const med = all.length ? median(all) : cd.mine_m;
+  return { club_id: clubId, pts, stats: A.dispersionStats(pts), n_dist: all.length, median_m: med, p10_m: all.length >= 5 ? quantile(all, 0.1) : null, p90_m: all.length >= 5 ? quantile(all, 0.9) : null, source: cd.use };
+}
+// A part swing (wedge matrix) uses the full-swing pattern of that wedge, scaled to its carry.
+export function wedgePattern(base, carry, latRatio) {
+  if (base?.stats?.enough && isNum(base.stats.mean_y_m) && base.stats.mean_y_m > 0) {
+    const k = carry / base.stats.mean_y_m, pts = base.pts.map((p) => ({ x: p.x * k, y: carry + (p.y - base.stats.mean_y_m) * k }));
+    return { ...base, pts, stats: A.dispersionStats(pts), median_m: carry, partial_swing: true, base_id: base.club_id };
+  }
+  const e = estimatedPattern({ median_m: carry, p10_m: carry - 1.2816 * wedgeSd(carry), p90_m: carry + 1.2816 * wedgeSd(carry), stats: { n: 0 } }, latRatio);
+  return e ? { ...e, partial_swing: true } : null;
 }
 // Front / back of a mapped green along the line of play.
 export function greenFrontBack(lat, lon, pin, features) {

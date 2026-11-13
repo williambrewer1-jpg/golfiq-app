@@ -58,11 +58,19 @@ export function registerPlay(c) {
   const rawOf = (cid) => { if (patCache.ds !== c.DS) patCache = { ds: c.DS, m: new Map(), raw: new Map(), ratio: null }; if (!patCache.raw.has(cid)) patCache.raw.set(cid, F.clubPattern(c.DS, cid)); return patCache.raw.get(cid); };
   // your real pattern when the club has enough shots with direction, otherwise an estimate from your other clubs' spread
   const patternOf = (cid) => {
+    if (String(cid).startsWith('w:')) {                               // a part swing from the wedge matrix
+      const w = wedgeRows().find((x) => x.key === cid); if (!w) return { pts: [], stats: { n: 0, enough: false }, median_m: null };
+      const ck = `${cid}@${w.carry_m}`; if (patCache.m.has(ck)) return patCache.m.get(ck);
+      const p = F.wedgePattern(patternOf(w.club_id), w.carry_m, patCache.ratio ?? F.lateralRatio(c.DS, rawOf)); patCache.m.set(ck, p); return p;
+    }
     const raw = rawOf(cid); if (patCache.m.has(cid)) return patCache.m.get(cid);
     if (patCache.ratio === null) patCache.ratio = F.lateralRatio(c.DS, rawOf);
     const p = raw.stats.enough ? raw : (F.estimatedPattern(raw, patCache.ratio) || raw); patCache.m.set(cid, p); return p;
   };
-  const playClubs = () => c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0 && c.DS.shots.some((s) => s.club_id === x.club_id));
+  const playClubs = () => c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0 && (A.isNum(x.target_total_m) || c.DS.shots.some((s) => s.club_id === x.club_id)));
+  const clubName = (id) => c.DS.clubs.find((x) => x.club_id === id)?.name || id;
+  const wedgeRows = () => F.wedgeRowsOf(J().wedge?.entries, clubName);
+  const labelOf = (id) => { if (!String(id).startsWith('w:')) return clubName(id); const w = wedgeRows().find((x) => x.key === id); return w ? `${w.club} · ${w.length}` : id; };
   const featsFor = (d) => (d.course_id && c.state.osm[d.course_id]?.features) || c.state.osm.__live?.features || [];
   const osmEntry = (d) => (d.course_id ? c.state.osm[d.course_id] : null) || c.state.osm.__live || null;
 
@@ -87,13 +95,13 @@ export function registerPlay(c) {
   }
   function model(L) {
     const aimDist = A.haversine(L.pos[0], L.pos[1], L.aim[0], L.aim[1]), pl = conditions(L, L.aim), adj = (y) => ST.groundDistance(y, pl.parts.elev, pl.factor);
-    const rec = F.recommendClubs(c.DS, pl.plays_m, c.uncv(10)).filter((r) => r.kind === 'gps' && L.clubs.some((x) => x.club_id === r.club_id));
+    const rec = F.recommendClubs(c.DS, pl.plays_m, c.uncv(10), wedgeRows()).filter((r) => r.kind === 'wedge' || L.clubs.some((x) => x.club_id === r.club_id));
     const nearFeats = L.feats.length && L.feats.some((f) => f.kind !== 'hole' && A.haversine(L.aim[0], L.aim[1], f.pts[0][0], f.pts[0][1]) < 600) ? L.feats : null;
     const top = rec.filter((r) => r.prob > 0).slice(0, 3);
     for (const r of top) { const pt = patternOf(r.club_id); r.out = nearFeats && pt.stats.enough ? HM.outcomes(HM.placePattern(L.pos, L.aim, pt.pts, adj), nearFeats) : null; }
     const safer = top.length > 1 && top.every((r) => r.out) ? [...top].filter((r) => r.prob >= 0.25).sort((a, b) => a.out.trouble - b.out.trouble)[0] : null;
-    const cid = (L.club && L.clubs.some((x) => x.club_id === L.club)) ? L.club : (rec[0]?.club_id || null);
-    const club = L.clubs.find((x) => x.club_id === cid), pt = cid ? patternOf(cid) : null;
+    const cid = (L.club && (L.clubs.some((x) => x.club_id === L.club) || String(L.club).startsWith('w:'))) ? L.club : (rec[0]?.club_id || null);
+    const club = cid ? { club_id: cid, name: labelOf(cid) } : null, pt = cid ? patternOf(cid) : null;
     let pat = null, out = null;
     if (pt?.stats.enough) {
       const dots = pt.estimated ? [] : HM.placePattern(L.pos, L.aim, pt.pts.slice(-60), adj);
@@ -117,17 +125,19 @@ export function registerPlay(c) {
     const U = c.UNIT, tol = `±10 ${U}`;
     const trouble = (o) => (o ? `<span class="pill ${o.trouble >= 25 ? 'bad' : o.trouble >= 10 ? 'mid' : 'good'}">trouble ${PCT(o.trouble)}</span>` : '');
     const rows = m.top.map((r) => `<button type="button" class="recrow ${r.club_id === m.cid ? 'on' : ''}" data-club="${esc(r.club_id)}"><span class="rc">${r === m.top[0] ? '★ ' : ''}${esc(r.club)}${m.safer && m.safer !== m.top[0] && r === m.safer ? ' <em>safer</em>' : ''}</span>
-      <span class="rp">${PCT(r.prob * 100)} <small>within ${tol}${Math.abs(m.pl.plays_m - m.aimDist) >= 0.9 ? ' of plays-like' : ''}</small></span><span class="rd small muted">usually ${c.d0(r.median_m)} ${U}</span>${trouble(r.out)}</button>`).join('');
+      <span class="rp">${PCT(r.prob * 100)} <small>within ${tol}${Math.abs(m.pl.plays_m - m.aimDist) >= 0.9 ? ' of plays-like' : ''}</small></span><span class="rd small muted">${r.kind === 'wedge' ? `carries ${c.d0(r.median_m)} ${U} (range)` : r.source === 'mine' ? `your ${c.d0(r.median_m)} ${U}` : `usually ${c.d0(r.median_m)} ${U}`}</span>${trouble(r.out)}</button>`).join('');
     const s = m.pt?.stats;
-    const patNote = !m.club ? '' : m.pt?.estimated ? `<b>${esc(m.club.name)}</b>: estimated pattern (dashed) – only ${m.pt.real_n} of ${A.T.min_shots_dispersion} shots with direction so far, so the spread is borrowed from your other clubs: usually ${c.d0(m.pt.median_m)} ${U}, about ${c.d0(s.sd_lateral_m)} ${U} either side.`
+    const patNote = !m.club ? '' : m.pt?.partial_swing ? `<b>${esc(m.club.name)}</b>: carries ${c.d0(m.pt.median_m)} ${U} from your wedge matrix; the spread is your full-swing pattern with that wedge${m.pt.estimated ? ' (estimated)' : ''}, scaled down to this distance.`
+      : m.pt?.estimated ? `<b>${esc(m.club.name)}</b>: estimated pattern (dashed) – only ${m.pt.real_n} of ${A.T.min_shots_dispersion} shots with direction so far, so the spread is borrowed from your other clubs: usually ${c.d0(m.pt.median_m)} ${U}, about ${c.d0(s.sd_lateral_m)} ${U} either side.`
       : s?.enough ? `<b>${esc(m.club.name)}</b> from here: usually ${c.d0(s.mean_y_m)} ${U}, half within ${c.d0(s.r50_m)} ${U} of that${Math.abs(s.mean_lateral_m) >= 3 ? `, tending ${c.d0(Math.abs(s.mean_lateral_m))} ${U} ${s.mean_lateral_m > 0 ? 'right' : 'left'}` : ''} (${s.n} shots).`
       : A.isNum(m.pt?.median_m) ? `<b>${esc(m.club.name)}</b>: usually ${c.d0(m.pt.median_m)} ${U}. Not enough shots with direction yet for a pattern (${s?.n || 0} of ${A.T.min_shots_dispersion}) – the arc shows distance only.` : `No tracked shots with ${esc(m.club.name)} yet.`;
     const others = L.clubs.filter((x) => !m.top.some((r) => r.club_id === x.club_id));
     const pls = Math.abs(m.pl.plays_m - m.aimDist) >= 0.9 ? ` <span class="pl">plays ${c.d0(m.pl.plays_m)}</span>` : '';
     return `<div class="aimline"><span>To aim <b>${c.d0(m.aimDist)}</b> ${U}${pls}</span>${L.green && A.haversine(L.aim[0], L.aim[1], L.green[0], L.green[1]) > 4 ? `<span>then <b>${c.d0(A.haversine(L.aim[0], L.aim[1], L.green[0], L.green[1]))}</b> ${U} to the green</span>` : '<span>at the green</span>'}</div>
       ${rows ? `<div class="recs">${rows}</div>` : `<p class="small muted">None of your clubs reach ${c.d0(m.aimDist)} ${U} often enough to rate (needs ${A.T.min_shots_club_stats}+ stock shots per club).</p>`}
-      ${m.out ? `<p class="small" style="margin:10px 0 4px">If your ${m.out.n} recorded ${esc(m.club.name)} shots were hit at this aim, they'd finish:</p>${outBar(m.out)}` : ''}
+      ${m.out ? `<p class="small" style="margin:10px 0 4px">${m.pt?.partial_swing ? `Your ${esc(labelOf(m.pt.base_id || '') || 'wedge')} pattern scaled to this swing, hit at this aim, would finish:` : m.pt?.estimated ? `An estimated ${esc(m.club.name)} pattern, hit at this aim, would finish:` : `If your ${m.out.n} recorded ${esc(m.club.name)} shots were hit at this aim, they'd finish:`}</p>${outBar(m.out)}` : ''}
       ${patNote ? `<p class="small" style="margin:8px 0">${patNote}</p>` : ''}
+      <p class="small" style="margin:8px 0 0"><a href="#play" data-cdedit>Edit club distances</a> <span class="muted">– GPS by default, or your own numbers</span></p>
       ${others.length ? `<details class="small"><summary>Other clubs</summary><div class="chips">${others.map((x) => `<button type="button" class="chip ${x.club_id === m.cid ? 'on' : ''}" data-club="${esc(x.club_id)}">${esc(x.name)}</button>`).join('')}</div></details>` : ''}`;
   }
 
@@ -252,6 +262,7 @@ export function registerPlay(c) {
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
     $('#plRec')?.addEventListener('click', (e) => {
+      if (e.target.closest('[data-cdedit]')) { e.preventDefault(); c.ui.pl_tab = 'caddie'; c.saveUi(); c.rerender(); setTimeout(() => $('#cdDistances')?.scrollIntoView({ block: 'start' }), 50); return; }
       const b = e.target.closest('[data-club]'); if (!b) return;
       live.club = b.dataset.club; c.ui.pl_club = b.dataset.club; c.ui.pl_club_hole = `${live.d.id}|${live.hole}`; c.saveUi(); refreshAim();
     });
