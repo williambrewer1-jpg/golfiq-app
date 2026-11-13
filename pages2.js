@@ -1,6 +1,9 @@
 // GolfIQ pages: caddie, post-round review, handicap, conditions, before/after, playbook, personal bests,
 // practice (games, log, wedge matrix), coach hub (priorities, notes from Claude, swing thoughts), share card, course maps.
 import * as F from './features.js';
+import * as B from './bench.js';
+import * as HM from './holemap.js';
+import * as ST from './strategy.js';
 
 export function registerPages(c) {
   const { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, n0, n1, n2, p0, COLORS } = c;
@@ -224,13 +227,34 @@ export function registerPages(c) {
       .map(([id, name]) => [id, `${name} (${c.DS.rounds.filter((r) => r.course_id === id).length})`]).sort((a, b) => Number(b[1].match(/\((\d+)\)$/)[1]) - Number(a[1].match(/\((\d+)\)$/)[1]));
     if (!courses.length) return emptyCard('No courses yet.');
     const cid = segVal('pb_course', courses[0][0]), pb = F.playbook(c.DS, cid), U = c.UNIT;
-    const hole = (h) => `<div class="card pb"><div class="rv-h"><b>Hole ${h.hole}</b><span class="small muted">Par ${h.par ?? '?'}${h.si ? ` · SI ${h.si}` : ''} · played ${h.n}×</span><span class="pill ${h.avg_to_par >= 1.5 ? 'bad' : h.avg_to_par <= 0.6 ? 'good' : 'mid'}">${sgn(h.avg_to_par, 2)} avg</span></div>
+    const known = F.courseHoles(c.DS, cid), feats = c.state.osm[cid]?.features || [], ev = c.state.elev?.[`course|${cid}`];
+    const clubs = c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0);
+    // The plan for each hole: best tee club by expected strokes (your patterns on the mapped hole), plays-like from the terrain, and where the green's hazards are.
+    const plan = (h) => {
+      const t = HM.holeTargets(known[h.hole], feats, h.hole, null), bits = [];
+      if (!t.tee || !t.green) return '';
+      const len = A.haversine(t.tee[0], t.tee[1], t.green[0], t.green[1]), zt = ev?.[h.hole]?.tee, zg = ev?.[h.hole]?.green;
+      if (A.isNum(zt) && A.isNum(zg) && Math.abs(zg - zt) >= 1) bits.push(`<span><b>Plays</b> ${c.d0(len + zg - zt)} ${U} (${zg > zt ? 'uphill' : 'downhill'} ${c.d0(Math.abs(zg - zt))})</span>`);
+      if (feats.some((f) => f.kind === 'fairway' || f.kind === 'green')) {
+        const res = ST.predict({ ds: c.DS, pos: t.tee, green: t.green, line: t.line, feats, E: c.E, clubs, minFrac: h.par === 3 ? 0.7 : 0.4, maxPts: 100 });
+        if (res.length) {
+          const b = res[0], drv = res.find((r) => /driver/i.test(c.DS.clubs.find((k) => k.club_id === r.club_id)?.category || ''));
+          bits.push(`<span><b>Tee</b> ${esc(b.club)} <span class="muted">(${fmt(b.expected, 2)} expected${drv && drv !== b ? `; driver +${fmt(drv.vs_best, 2)}` : res[1] ? `; ${esc(res[1].club)} +${fmt(res[1].vs_best, 2)}` : ''})</span>${b.out && b.out.trouble >= 5 ? ` · trouble ${fmt(b.out.trouble, 0)}%` : ''}</span>`);
+        }
+        const gh = ST.greenHazards(t.line?.length > 2 ? t.line[t.line.length - 2] : t.tee, t.green, feats), hz = Object.entries(gh.sides).filter(([, v]) => v.length);
+        if (hz.length) bits.push(`<span><b>Green</b> ${hz.map(([k, v]) => `${[...new Set(v)].join(' & ')} ${k}`).join(', ')}${gh.safe.length ? ` – safe miss <b>${gh.safe.join(' or ')}</b>` : ''}</span>`);
+      }
+      return bits.length ? `<div class="plan">${bits.join('')}</div>` : '';
+    };
+    const hole = (h) => `<div class="card pb"><div class="rv-h"><b>Hole ${h.hole}</b><span class="small muted">Par ${h.par ?? '?'}${h.si ? ` · SI ${h.si}` : ''} · played ${h.n}×</span><span class="pill ${h.avg_to_par >= 1.5 ? 'bad' : h.avg_to_par <= 0.6 ? 'good' : 'mid'}">${sgn(h.avg_to_par, 2)} avg</span></div>${plan(h)}
       <div class="statline"><span>GIR <b>${fmt(h.gir_pct, 0, '%')}</b></span>${h.par >= 4 ? `<span>Fairway <b>${fmt(h.fw_pct, 0, '%')}</b></span>` : ''}<span>Putts <b>${fmt(h.putts, 2)}</b></span><span>Triple+ <b>${fmt(h.blowup_pct, 0, '%')}</b></span>${A.isNum(h.stableford) ? `<span>Pts <b>${fmt(h.stableford, 2)}</b></span>` : ''}</div>
       ${h.clubs.length ? table(h.clubs.slice(0, 4), [['club', 'Tee club'], ['n', 'n', n0], ['avg_to_par', 'To par', (v) => sgn(v, 2)], ...(h.par >= 4 ? [['fw_pct', 'FW', p0]] : [['gir_pct', 'Green', p0]]), ['pen_pct', 'Pen', p0], ['median_m', U, c.d0]]) : ''}
       ${h.tips.length ? `<ul class="tips">${h.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}</div>`;
     return `${select('pb_course', courses, cid, 'Course')}
       <div class="kpis" style="margin-top:10px">${kpi('Rounds here', pb.rounds, null, true, 0)}<div class="kpi"><div class="l">Costing you most</div><div class="v sm">${pb.hardest.map((h) => `#${h}`).join(' · ') || '–'}</div></div><div class="kpi"><div class="l">Your best holes</div><div class="v sm">${pb.easiest.map((h) => `#${h}`).join(' · ') || '–'}</div></div></div>
       ${note('Suggestions only appear where your own rounds support them (e.g. a tee club needs 3+ plays to be compared). With few rounds on a course, treat everything as a hint.')}
+      ${feats.length ? '' : '<p class="small">Download the course outline (bottom of the page) to add the tee-club strategy and green hazards to each hole.</p>'}${ev ? '' : `<p class="small"><button class="btn sec sm" id="pbElev" data-cid="${esc(cid)}">Get elevation for each hole</button> <span id="pbElevMsg"></span></p>`}
+      ${note('Tee strategy: expected strokes to finish each hole if you hit that club, aimed down the hole line, from your own shot pattern on the mapped outline and your strokes-gained model. Plays = tee-to-green distance plus the height difference from a terrain model (about 30–90 m grid).')}
       ${pb.holes.map(hole).join('')}${osmCard(cid)}`;
   }
 
@@ -276,15 +300,16 @@ export function registerPages(c) {
   // ================================================================ Practice: games, log, wedge matrix
   const allGames = () => [...F.DEFAULT_GAMES, ...J().games];
   function practiceGames() {
-    const games = F.gameStats(allGames(), J().results), gid = segVal('pg_game', games[0].id), g = games.find((x) => x.id === gid) || games[0];
-    const cats = [...new Set(games.map((x) => x.cat))];
-    return `<div class="card"><h2>Record a score</h2><form id="pgForm">${select('pg_game', cats.flatMap((cat) => games.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
-      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>
+    const games = F.gameStats(allGames(), J().results), entry = games.filter((x) => !x.auto), gid = segVal('pg_game', entry[0].id), g = games.find((x) => x.id === gid) || entry[0];
+    const cats = [...new Set(entry.map((x) => x.cat))], uM = c.UNIT === 'yd' ? 0.9144 : 1, L = (s) => c.compete.lvlText(c.compete.lvl(g.id, s));
+    const bench = B.hasLevel(g.id) ? `<p class="small muted" style="margin:6px 0">Handicap benchmarks: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 hcp ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 hcp ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
+    return `<div class="card"><h2>Record a score</h2><form id="pgForm">${select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
+      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}
       <div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}" required></div><div><label class="f">Score (${esc(g.unit || '')})</label><input name="score" type="number" inputmode="decimal" step="any" ${g.max ? `max="${g.max}"` : ''} min="0" required></div></div>
       <label class="f">Note (optional)</label><input name="note" style="width:100%" placeholder="conditions, feel, club used…"><p><button class="btn">Save score</button></p></form></div>
-      <div class="card"><h2>${esc(g.name)}</h2>${g.n ? `<div class="kpis">${kpi('Best', g.best, null, true, 0)}${kpi('Last 5 average', g.avg5, A.isNum(g.prev5) ? g.avg5 - g.prev5 : null, g.better !== 'lower')}${kpi('Played', g.n, null, true, 0)}</div>
+      <div class="card"><h2>${esc(g.name)}</h2>${g.n ? `<div class="kpis">${kpi('Best', g.best, null, true, 0)}${B.hasLevel(g.id) ? `<div class="kpi"><div class="l">Best = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.best)?.label || '–')}</div></div><div class="kpi"><div class="l">Last 5 = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.avg5)?.label || '–')}</div></div>` : ''}${kpi('Last 5 average', g.avg5, A.isNum(g.prev5) ? g.avg5 - g.prev5 : null, g.better !== 'lower')}${kpi('Played', g.n, null, true, 0)}</div>
         ${g.n >= 2 ? plot([{ x: g.results.map((r) => r.date), y: g.results.map((r) => r.score), mode: 'lines+markers', line: { color: '#1b7f4b', width: 2.5 }, marker: { size: 7 } }], { height: 220, yaxis: { title: { text: g.unit || 'score' }, ...(g.better === 'lower' ? { autorange: 'reversed' } : {}) } }) : ''}
-        ${table([...g.results].reverse().slice(0, 15), [['date', 'Date'], ['score', 'Score', (v) => fmt(v, Number.isInteger(v) ? 0 : 1) + (g.max ? ` / ${g.max}` : '')], ['note', 'Note'], ['id', '', (v) => `<button class="btn sec sm" data-delres="${esc(v)}">Delete</button>`]])}` : '<p class="muted">No scores yet for this game.</p>'}</div>
+        ${table([...g.results].reverse().slice(0, 15), [['date', 'Date'], ['score', 'Score', (v) => fmt(v, Number.isInteger(v) ? 0 : 1) + (g.max ? ` / ${g.max}` : '')], ...(B.hasLevel(g.id) ? [['score', 'Level', (v) => L(v)]] : []), ['note', 'Note'], ['id', '', (v) => `<button class="btn sec sm" data-delres="${esc(v)}">Delete</button>`]])}` : '<p class="muted">No scores yet for this game.</p>'}</div>
       <div class="card"><h2>All games</h2>${table(games, [['cat', 'Type'], ['name', 'Game'], ['n', 'Played', n0], ['best', 'Best', (v) => fmt(v, 0)], ['avg5', 'Last 5', n1], ['trend', 'Trend', vcol]])}
       <details><summary>Add your own game</summary><form id="pgNew"><div class="row"><div><label class="f">Name</label><input name="name" required></div><div><label class="f">Type</label><select name="cat">${['Putting', 'Chipping', 'Range', 'Other'].map((x) => `<option>${x}</option>`).join('')}</select></div></div>
       <div class="row"><div><label class="f">Scoring</label><select name="better"><option value="higher">Higher is better</option><option value="lower">Lower is better</option></select></div><div><label class="f">Max score (optional)</label><input name="max" type="number"></div></div>
@@ -335,12 +360,24 @@ export function registerPages(c) {
   }
   function pagePractice() {
     const tab = segVal('pr_tab', 'games');
-    const body = { focus: () => c.coachingPriorities(), games: practiceGames, wedges: practiceWedges, log: practiceLog, notes: coachNotes, thoughts: coachThoughts }[tab] || practiceGames;
-    return `${seg('pr_tab', [['focus', 'Focus'], ['games', 'Games'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach notes'], ['thoughts', 'Swing thoughts']], 'games', 'tabs')}${body()}`;
+    const body = { focus: () => c.coachingPriorities(), games: practiceGames, board: () => c.compete.pageBoard(), combine: () => c.compete.pageCombine(), range: () => c.compete.pageRange(),
+      wedges: practiceWedges, log: practiceLog, notes: coachNotes, thoughts: coachThoughts }[tab] || practiceGames;
+    return `${seg('pr_tab', [['focus', 'Focus'], ['games', 'Games'], ['board', 'Leaderboard'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach notes'], ['thoughts', 'Swing thoughts']], 'games', 'tabs')}${body()}`;
+  }
+  function wirePlaybook() {
+    $('#pbElev')?.addEventListener('click', async (e) => {
+      const cid = e.target.dataset.cid, known = F.courseHoles(c.DS, cid), feats = c.state.osm[cid]?.features || [], pts = [], idx = [];
+      for (let h = 1; h <= 18; h++) { const t = HM.holeTargets(known[h], feats, h, null); if (t.tee && t.green) { pts.push(t.tee, t.green); idx.push(h); } }
+      if (!pts.length) return; e.target.disabled = true; $('#pbElevMsg').textContent = 'Fetching…';
+      try { const r = await fetch(ST.elevUrl(pts)); const j = await r.json(); if (!Array.isArray(j.elevation)) throw new Error('no data');
+        const out = {}; idx.forEach((h, i) => { out[h] = { tee: j.elevation[2 * i], green: j.elevation[2 * i + 1] }; }); c.state.elev[`course|${cid}`] = out; await S.saveElev(c.state); c.rerender();
+      } catch (err) { $('#pbElevMsg').textContent = `Elevation service unavailable (${err.message})`; e.target.disabled = false; }
+    });
   }
   function wirePractice() {
     $('#pgForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target);
-      J().results.push({ id: `r${Date.now()}`, game: $('[data-sel=pg_game]').value, date: f.get('date'), score: Number(f.get('score')), note: f.get('note') || '' }); await saveJ('Score saved'); });
+      const res = { id: `r${Date.now()}`, game: $('[data-sel=pg_game]').value, date: f.get('date'), score: Number(f.get('score')), note: f.get('note') || '' };
+      J().results.push(res); const l = c.compete.lvl(res.game, res.score); await saveJ(`Score saved${l ? ` – ${l.label}` : ''}`); c.compete.onScore(res); });
     $$('[data-delres]').forEach((b) => b.addEventListener('click', async () => { J().results = J().results.filter((r) => r.id !== b.dataset.delres); await saveJ('Deleted'); }));
     $('#pgNew')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target), id = `g${Date.now()}`;
       J().games.push({ id, name: f.get('name'), cat: f.get('cat'), better: f.get('better'), max: c.numOrNull(f.get('max')), how: f.get('how') || '', unit: c.numOrNull(f.get('max')) ? `/ ${f.get('max')}` : 'score' }); c.ui.pg_game = id; c.saveUi(); await saveJ('Game added'); });
@@ -422,7 +459,7 @@ export function registerPages(c) {
     pages: { caddie: ['Caddie', 'target'], review: ['Post-round review', 'check'], handicap: ['Handicap', 'trend'], conditions: ['Conditions', 'wind'], compare: ['Before & after', 'swap'], playbook: ['Course playbook', 'flag'],
       bests: ['Personal bests', 'trophy'], practice: ['Practice', 'dumbbell'], coaching: ['Coach', 'compass'] },
     render: { caddie: pageCaddie, review: pageReview, handicap: pageHandicap, conditions: pageConditions, compare: pageCompare, playbook: pagePlaybook, bests: pageBests, practice: pagePractice, coaching: pageCoach },
-    wire: { caddie: wireCaddie, review: wireReview, conditions: wireConditions, compare: wireCompare, practice: () => { wirePractice(); wireCoach(); }, coaching: wireCoach },
+    wire: { playbook: wirePlaybook, caddie: wireCaddie, review: wireReview, conditions: wireConditions, compare: wireCompare, practice: () => { wirePractice(); wireCoach(); }, coaching: wireCoach },
     noData: ['practice', 'coaching'],        // usable before any rounds are imported
     shareRound, wireOsm, osmCard, fetchWeather, briefing, reviewNeeds, practiceWedges, wireCoach, coachThoughts,
   };

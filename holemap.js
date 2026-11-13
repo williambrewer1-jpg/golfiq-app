@@ -89,13 +89,14 @@ export function pointAlongHole(pos, green, line, dist) {
 
 // ------------------------------------------------------------------ pattern placement + outcomes
 // Your shots with a club, hit from pos along the line to the aim point: x = metres right, y = metres travelled.
-export function placePattern(pos, aim, pts) {
+// adj turns a flat-ground distance into the distance actually travelled (slope, wind, temperature – see strategy.js)
+export function placePattern(pos, aim, pts, adj = (y) => y) {
   const br = A.bearing(pos[0], pos[1], aim[0], aim[1]);
-  return pts.map((p) => F.offsetPoint(pos[0], pos[1], br, p.y, p.x));
+  return pts.map((p) => F.offsetPoint(pos[0], pos[1], br, adj(p.y), p.x));
 }
-export function placeEllipse(pos, aim, stats, q) {
+export function placeEllipse(pos, aim, stats, q, adj = (y) => y) {
   const [ex, ey] = A.ellipse(stats.centre, stats.cov, q, 48), br = A.bearing(pos[0], pos[1], aim[0], aim[1]);
-  return ex.map((x, i) => F.offsetPoint(pos[0], pos[1], br, ey[i], x));
+  return ex.map((x, i) => F.offsetPoint(pos[0], pos[1], br, adj(ey[i]), x));
 }
 // Share of a club's past shots that would finish on each surface if hit at this aim point.
 export function outcomes(landing, feats) {

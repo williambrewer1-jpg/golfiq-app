@@ -1,6 +1,7 @@
 // GolfIQ for iPhone — UI. All data lives in this browser's on-device storage (store.js).
 import * as A from './analytics.js';
 import * as F from './features.js';
+import { registerCompete } from './compete.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -148,7 +149,11 @@ const PAGES = {
 const NAV = [['home', 'Home'], ['play', 'Play'], ['rounds', 'Rounds'], ['stats', 'Stats'], ['practice', 'Practice']];
 let EXTRA = null;                         // pages registered from pages2.js / play.js
 let SUBWIRE = [];                         // sub-pages shown inside a hub that need their own event wiring
-let EMBED = null;                         // round shown inside the round page (review / edit tabs)
+let EMBED = null;
+let COMP = null;                          // practice competition + friends (compete.js)
+let E_CACHE = null;
+// expected strokes to hole out (your strokes-gained model), rebuilt when the data changes
+function expectedFn() { if (!E_CACHE || E_CACHE.ds !== DS) E_CACHE = { ds: DS, f: A.expectedModel(DS, TOUR) }; return E_CACHE.f; }                         // round shown inside the round page (review / edit tabs)
 const FILTERED = new Set(['stats', 'rounds']);
 // Pages that moved in the reorganisation: old address -> [new page, ui state to set, optional hook]
 const latestRound = () => DS.rounds[DS.rounds.length - 1]?.round_id || null;
@@ -190,6 +195,14 @@ function pageHome() {
   ${sc.owner ? `<div class="card syncline"><span class="small">Garmin sync · last ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleDateString() : 'never')}</span><button class="btn sec sm" id="syncNow">Sync now</button><span id="syncMsg" class="small"></span></div>` : ''}`;
 }
 
+function killersTrend(ds) {
+  const map = F.scoreKillers(ds.holes, ds.shots, F.shortIronRange(DS)), rows = ds.rounds.filter((r) => r.format === '18').map((r) => ({ ...map.get(r.round_id), date: r.date, course: r.course_name })).filter((x) => x.round_id);
+  if (rows.length < 3) return '';
+  const last = rows.slice(-5), prev = rows.slice(-10, -5), avg = (a, k) => (a.length ? A.mean(a.map((x) => x[k])) : null);
+  return `<div class="card"><h2>Score killers</h2><p class="small">Per 18-hole round – after Scott Fawcett's five scoring rules, plus penalty strokes. Short-iron range = your 9-iron distance (${D(F.shortIronRange(DS))}).</p>
+    ${table(F.KILLERS.map(([k, l]) => ({ l, last: avg(last, k), prev: avg(prev, k), all: avg(rows, k) })), [['l', 'Per round'], ['last', 'Last 5', n1], ['prev', 'Previous 5', n1], ['all', `All ${rows.length}`, n1]])}
+    ${plot([{ x: rows.map((r) => r.date), y: rows.map((r) => r.total), type: 'bar', marker: { color: '#b4472f' } }], { height: 200, title: 'Score killers per round' })}</div>`;
+}
 function bestWorst(r) {
   const basis = r.filter((x) => x.differential !== null).length >= 3 ? 'differential' : 'to_par';
   const sorted = [...r].filter((x) => A.isNum(x[basis])).sort((a, b) => a[basis] - b[basis]);
@@ -213,6 +226,7 @@ function pageScoring() {
   ${note('Welch t-test, p < 0.10. "No clear change" = within normal round-to-round noise; needs 2×N rounds.')}
   ${plot([{ x: r.map((x) => x[m]).filter(A.isNum), type: 'histogram', marker: { color: '#1E88E5' }, nbinsx: 15 }], { title: 'Distribution of rounds', height: 220 })}</div>
   <div class="card"><h2>Consistency</h2><div class="kpis">${['gross', 'stableford_round', 'differential'].map((mm) => { const cc = A.consistency(r, mm); return `<div class="kpi"><div class="l">${A.METRICS[mm][0]} – SD</div><div class="v">${fmt(cc.sd)}</div><div class="d muted">IQR ${fmt(cc.iqr)} · n=${cc.n}</div></div>`; }).join('')}</div></div>
+  ${killersTrend(ds)}
   ${bestWorst(r)}
   <div class="card"><h2>Score types per 18 holes</h2>${plot([{ x: dist.map((d) => d.bucket), y: dist.map((d) => d.per_18), type: 'bar', marker: { color: cols }, text: dist.map((d) => d.per_18.toFixed(1)), textposition: 'outside' }], { height: 260 })}
   <div class="kpis">${kpi('Triple+ holes / round', bl.per_round, null, false, 2)}${kpi('Strokes beyond double / rd', bl.beyond_double_per_round, null, false, 2)}${kpi('Blow-ups with a penalty', bl.with_penalty_pct, null, false, 0, '%')}</div></div>
@@ -381,6 +395,15 @@ function pageSG() {
   <div class="card"><h2>By club</h2>${table(byClub, [['club', 'Club'], ['category', 'Category'], ['shots', 'n', n0], ['sg_per_shot', 'SG/shot', (v) => sgn(v, 3)], ['sg_total', 'Total', (v) => sgn(v)]], { empty: 'Needs ≥5 SG-eligible shots per club.' })}</div>`;
 }
 
+function killersCard(rid) {
+  const k = F.scoreKillers(DS.holes.filter((h) => h.round_id === rid), DS.shots.filter((s) => s.round_id === rid), F.shortIronRange(DS)).get(rid);
+  if (!k) return '';
+  return `<h3>Score killers <span class="small muted">${k.total ? `${k.total} this round` : 'none – clean round'}</span></h3><div class="killers">${F.KILLERS.map(([key, label]) => `<div class="${k[key] ? 'hit' : ''}"><b>${k[key]}</b><span>${label}</span></div>`).join('')}</div>`;
+}
+function sideCard(rid) {
+  const sr = (state.journal.sideResults || []).find((x) => x.round_id === rid);
+  return sr ? `<h3>Side games</h3>${EXTRA.play.standingsHtml(sr.game)}` : '';
+}
 function roundDetail(rid) {
   const row = DS.rounds.find((x) => x.round_id === rid); if (!row) return null;
   const tab = segVal('rd_tab', 'card'), hh = DS.holes.filter((h) => h.round_id === rid).sort((a, b) => a.hole - b.hole), rs = DS.shots.filter((s) => s.round_id === rid);
@@ -397,6 +420,7 @@ function roundDetail(rid) {
     body = `<div class="card"><div class="kpis">${kpi('Gross', row.gross, null, false, 0)}${kpi('Stableford', row.stableford_round, null, true, 0)}${kpi('GIR', row.gir_pct, null, true, 0, '%')}${kpi('Fairways', row.fw_pct, null, true, 0, '%')}${kpi('Putts', row.putts_round, null, false, 0)}${kpi('Penalties', row.penalties, null, false, 0)}${kpi('Differential', row.differential)}${kpi('Playing hcp', row.ph, null, true, 0)}</div>
     <p class="small muted">${esc(row.tee || '?')} tee · CR ${fmt(row.course_rating)} / slope ${fmt(row.slope, 0)} · HI ${fmt(row.hi)} (${esc(row.hi_source || 'none')}) · ${esc(row.stableford_source || 'Stableford not reconstructable')}${state.weather?.[rid] ? ` · ${fmt(state.weather[rid].temp_c, 0)}°C, wind ${fmt(state.weather[rid].wind_kmh, 0)} km/h` : ''}</p>
     <h3>Scorecard</h3>${table(hh, [['hole', 'H'], ['par', 'Par'], ['stroke_index', 'SI', n0], ['strokes', 'Score', n0], ['putts_eff', 'Putts', n0], ['penalties_eff', 'Pen', n0], ['fairway', 'FW'], ['gir_eff', 'GIR', (v) => (v === 1 ? '✓' : v === 0 ? '·' : '–')], ['stableford', 'Pts', n0], ['swings_missing', 'Missing', n0]])}
+    ${killersCard(rid)}${sideCard(rid)}
     <h3>Club usage</h3>${table(use, [['club', 'Club'], ['shots', 'Shots', n0]])}
     <details><summary>All shots</summary>${table(rs, [['hole', 'H'], ['shot_order', '#', n0], ['club', 'Club'], ['category', 'Type'], ['start_lie', 'Lie'], ['dist_m', `Dist ${UNIT}`, d0], ['start_to_pin', 'To pin', d0], ['lateral_m', 'Lat', d1], ['excluded_reason', 'Excluded']])}</details>
     ${note('Missing = score − putts − penalties − tracked swings (shots AutoShot didn\'t detect). Add them on the Review tab.')}
@@ -555,7 +579,7 @@ function pageSettings() {
   }
   const unitsCard = `<div class="card"><h2>Distance units</h2><div class="seg" id="unitSeg">${[['yd', 'Yards (putts in feet)'], ['m', 'Metres']].map(([v, l]) => `<button data-u="${v}" class="${UNIT === v ? 'on' : ''}">${l}</button>`).join('')}</div><p class="note">Display only – data is stored unchanged, so you can switch any time.</p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${unitsCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Cloud sync']], 'clubs')}<div class="card">${body}</div>`;
+  return `${demoBanner()}${links}${unitsCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
@@ -587,9 +611,9 @@ function pageStats() {
 }
 function pagePlayHub() {
   const t = segVal('pl_tab', 'round'), d = state.journal.draft;
-  const head = seg('pl_tab', [['round', d ? 'Round' : 'Play'], ['caddie', 'Caddie'], ['plan', 'Course plan']], 'round', 'tabs');
+  const head = seg('pl_tab', [['round', d ? 'Round' : 'Play'], ['caddie', 'Caddie'], ['plan', 'Strategy card']], 'round', 'tabs');
   if (t === 'caddie') { SUBWIRE.push('caddie'); return head + (DS.rounds.length ? EXTRA.render.caddie() : emptyMsg()); }
-  if (t === 'plan') return head + (DS.rounds.length ? EXTRA.render.playbook() : emptyMsg());
+  if (t === 'plan') { SUBWIRE.push('playbook'); return head + (DS.rounds.length ? EXTRA.render.playbook() : emptyMsg()); }
   SUBWIRE.push('play'); return head + EXTRA.play.render.play();
 }
 const RENDER = { home: pageHome, stats: pageStats, rounds: pageRounds, data: pageData, corrections: () => pageEdit(false), settings: pageSettings, help: pageHelp };
@@ -644,6 +668,7 @@ function wire(page) {
     try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }
     catch (e) { m.textContent = ' ' + e.message; }
   });
+  if (page === 'settings' || page === 'practice') COMP.wire();
   if (page === 'data') {
     on('#impFile', 'change', async (e) => {
       const m = $('#impMsg'); let tot = { new: 0, updated: 0, unchanged: 0, failed: 0 };
@@ -798,12 +823,13 @@ $('#gearBtn').innerHTML = icon('gear', 22);
 // bottom bar: Play opens the live round, Rounds goes back to the list (like tapping a tab bar twice on iOS)
 $('#nav').addEventListener('click', (e) => { const h = e.target.closest('a')?.getAttribute('href'); if (h === '#play') ui.pl_tab = 'round'; if (h === '#rounds') ui.rd_open = null; saveUi(); if (h === location.hash) render(); });
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#sheet').classList.remove('open'); });
-addEventListener('hashchange', () => { scrollTo(0, 0); render(); });
+addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); return; } scrollTo(0, 0); render(); });
 (async () => {
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
-    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+  COMP = registerCompete(ctx); COMP.handleInvite();
   EXTRA = registerPages(ctx);
   const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
