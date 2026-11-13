@@ -154,6 +154,16 @@ th{background:transparent}td:first-child,th:first-child{background:var(--card);b
 .strip button i{display:block;font:600 9px -apple-system,system-ui,sans-serif;font-style:normal;color:var(--muted)}
 .strip .under{color:var(--bad);border-color:var(--bad)}.strip .even{background:var(--tint)}.strip .bogey{background:var(--chip)}.strip .worse{background:color-mix(in srgb,var(--ink) 16%,var(--card))}
 .strip .cur{outline:2px solid var(--gold);outline-offset:1px}
+/* ---- slimmer header that slides away while you scroll down; back out of Settings */
+header{padding:calc(env(safe-area-inset-top) + 7px) 14px 7px;transition:transform .22s ease;will-change:transform}
+header.away{transform:translateY(calc(-100% + env(safe-area-inset-top)))}
+header h1{font-size:21px}
+body::before{content:"";position:fixed;left:0;right:0;top:0;height:env(safe-area-inset-top);background:var(--head);z-index:21}
+#backBtn{display:flex;align-items:center;gap:2px;background:none;border:0;color:#fff;padding:4px 6px 4px 0;margin-left:-4px;min-height:40px;font:600 15px var(--sans)}
+#backBtn[hidden]{display:none}#backBtn svg{width:24px;height:24px}
+header.sub .mark{display:none!important}
+#gearBtn{width:44px;height:44px;margin-right:-8px}#gearBtn svg{width:25px;height:25px}
+#gearBtn.done{width:auto;padding:0 4px;font:700 15px var(--sans);color:var(--flag);text-decoration:none}
 /* ---- navigation & hubs */
 html{touch-action:manipulation}/* no double-tap zoom on iPhone; pinch still works on pages */
 .steps2 .step:only-child{grid-column:1/-1}
@@ -240,7 +250,7 @@ a.prog-home{display:block;text-decoration:none;color:var(--ink)}.ph-row{display:
 </style>
 </head>
 <body>
-<header><div class="mark" aria-hidden="true" style="display:grid;place-items:center">G</div><h1 id="title">GolfIQ</h1><button id="filterBtn" hidden>Filters</button><a id="gearBtn" href="#settings" aria-label="Settings"></a></header>
+<header><div class="mark" aria-hidden="true" style="display:grid;place-items:center">G</div><button id="backBtn" hidden aria-label="Back"></button><h1 id="title">GolfIQ</h1><button id="filterBtn" hidden>Filters</button><a id="gearBtn" href="#settings" aria-label="Settings"></a></header>
 <main id="main"><div class="card">Loading…</div></main>
 <nav class="bottom" id="nav"></nav>
 <div class="sheet" id="sheet"><div class="panel" id="sheetPanel"></div></div>
