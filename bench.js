@@ -14,7 +14,7 @@ const PROX = { 0: [26, 38, 54, 92], 5: [36, 50, 82, 150], 10: [41, 57, 92, 190],
 // Up-and-down % (scratch / 10 / 20) – Shot Scope via Golf Monthly; 5/15/25 interpolated, 25 extended on the 10-20 slope
 const UPDOWN = { 0: 54, 5: 46.5, 10: 39, 15: 35, 20: 31, 25: 27 };
 // Average leave after a ~30 ft first putt: scratch 4.6 ft, 25 handicap 7.8 ft – Shot Scope via MyGolfSpy
-const leave30 = (h) => 4.6 + (7.8 - 4.6) * h / 25;
+export const leave30 = (h) => 4.6 + (7.8 - 4.6) * h / 25;
 export const SOURCES = [
   ['Putting make % by handicap (Shot Scope / MyGolfSpy)', 'https://mygolfspy.com/news-opinion/putting-make-percentage-by-handicap-full-chart-are-you-above-or-below-average/'],
   ['Approach proximity by handicap (Shot Scope / Golf Monthly)', 'https://golfmonthly.com/features/how-close-to-the-pin-do-amateur-golfers-hit-their-approach-shots'],

@@ -1,6 +1,6 @@
 // Offline cache for the app shell (code only - your golf data lives in IndexedDB, not here).
-const CACHE = 'golfiq-v11';
-const SHELL = ['./', 'index.html', 'app.js', 'analytics.js', 'store.js', 'sync.js', 'baseline.js', 'bookmarklet.js', 'features.js', 'pages2.js', 'play.js', 'holemap.js', 'strategy.js', 'bench.js', 'sidegames.js', 'cloud.js', 'compete.js', 'friends.js', 'coach.js', 'progress.js', 'aicoach.js', 'wallpaper.js', 'icons.js',
+const CACHE = 'golfiq-v12';
+const SHELL = ['./', 'index.html', 'app.js', 'analytics.js', 'store.js', 'sync.js', 'baseline.js', 'bookmarklet.js', 'features.js', 'pages2.js', 'play.js', 'holemap.js', 'strategy.js', 'bench.js', 'sidegames.js', 'cloud.js', 'compete.js', 'friends.js', 'coach.js', 'progress.js', 'skills.js', 'aicoach.js', 'wallpaper.js', 'icons.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js'];
 self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => Promise.allSettled(SHELL.map((u) => fetch(u, { cache: 'reload' }).then((r) => r.ok ? c.put(u, r) : null)))).then(() => self.skipWaiting())));
