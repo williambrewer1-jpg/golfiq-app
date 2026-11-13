@@ -5,6 +5,7 @@ import * as B from './bench.js';
 import { registerCompete } from './compete.js';
 import { registerProgress } from './progress.js';
 import { registerGuided } from './guided.js';
+import * as FEEL from './feel.js';
 import * as CH from './challenges.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
@@ -92,7 +93,7 @@ const readFile = (f) => new Promise((res, rej) => { const r = new FileReader(); 
 
 // ------------------------------------------------------------------ data & filters
 const BUILD = { estimateIndex: true };
-function rebuild() { UNIT = state.settings?.units === 'm' ? 'm' : 'yd'; DS = A.buildDataset(state, BUILD); DSDUP = null; }
+function rebuild() { UNIT = state.settings?.units === 'm' ? 'm' : 'yd'; DS = A.buildDataset(state, BUILD); DSDUP = null; FEEL.init(state.settings); }
 function filtered(opts = {}) {
   const f = { ...filters }; if (opts.allFormats) delete f.formats;
   return A.filterDataset(DS, f);
@@ -590,8 +591,13 @@ function pageSettings() {
   }
   const unitsCard = `<div class="card"><h2>Distance units</h2><div class="seg" id="unitSeg">${[['yd', 'Yards (putts in feet)'], ['m', 'Metres']].map(([v, l]) => `<button data-u="${v}" class="${UNIT === v ? 'on' : ''}">${l}</button>`).join('')}</div><p class="note">Display only – data is stored unchanged, so you can switch any time.</p></div>`;
   const rangeCard = `<div class="card"><h2>Range ball adjustment</h2><label class="f" for="rangeAdj">Extra distance for a course ball (%)</label><input id="rangeAdj" type="number" inputmode="numeric" min="0" max="${B.DRIVER_TEST.adj_max}" step="1" value="${Number(state.settings.range_ball_adj) || 0}" style="width:100%"><p class="note">Range balls and mats usually fly shorter than a course ball. The Driver test and Max out add this percentage to every distance you enter, so your level is closer to the course. 0 means no adjustment (up to ${B.DRIVER_TEST.adj_max}). If a distance comes from a premium ball on a launch monitor, tick Premium ball in the game to skip it.</p></div>`;
+  const fl = FEEL.get(), FC = FEEL.COPY.settings;
+  const feelCard = `<div class="card"><h2>${FC.title}</h2>
+    <label class="sw"><input type="checkbox" id="feelSound" ${fl.sound ? 'checked' : ''}><span><b>${FC.sound}</b><small>${FC.soundNote}</small></span></label>
+    <label class="sw"><input type="checkbox" id="feelMotion" ${fl.motion ? 'checked' : ''}><span><b>${FC.motion}</b><small>${FC.motionNote}</small></span></label>
+    <p style="margin:6px 0 0"><button type="button" class="btn sec" id="feelTry">${FC.try}</button> <span class="small muted" id="feelTryOut" aria-live="polite"></span></p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${unitsCard}${rangeCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
+  return `${demoBanner()}${links}${unitsCard}${rangeCard}${feelCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
@@ -780,6 +786,21 @@ function wireSettings() {
     if (st.units === b.dataset.u || (!st.units && b.dataset.u === 'yd')) return;
     st.units = b.dataset.u; await S.saveSettings(state, 'set_units', null, { units: st.units }); done(`Distances now in ${b.dataset.u === 'yd' ? 'yards' : 'metres'}`);
   }));
+  const saveFeel = async (patch, msg) => {
+    st.feel = { ...FEEL.read(st), ...patch }; FEEL.init(st); await S.saveSettings(state, 'set_feel', null, { feel: st.feel });
+    if (st.feel.sound) { FEEL.unlock(); FEEL.play('good'); }
+    done(msg);
+  };
+  $('#feelSound')?.addEventListener('change', (e) => saveFeel({ sound: e.target.checked }, e.target.checked ? 'Sound on' : 'Sound off'));
+  $('#feelMotion')?.addEventListener('change', (e) => saveFeel({ motion: e.target.checked }, e.target.checked ? 'Motion on' : 'Motion off'));
+  $('#feelTry')?.addEventListener('click', () => {                     // plays every event in turn so you can hear them on this phone
+    const out = $('#feelTryOut'), FC2 = FEEL.COPY.settings; if (!out) return;
+    if (!FEEL.get().sound) { out.textContent = FC2.tryOff; return; }
+    if (!FEEL.unlock()) { out.textContent = FC2.tryNone; return; }
+    const names = FEEL.EVENT_NAMES; let i = 0;
+    const next = () => { if (!document.body.contains(out) || i >= names.length) { if (document.body.contains(out)) out.textContent = ''; return; } const n = names[i++]; out.textContent = FC2.names[n] || n; FEEL.play(n); setTimeout(next, FEEL.lengthOf(n) * 1000 + 450); };
+    next();
+  });
   $('#rangeAdj')?.addEventListener('change', async (e) => {
     const v = Math.max(0, Math.min(B.DRIVER_TEST.adj_max, Math.round(Number(e.target.value) || 0)));
     st.range_ball_adj = v; await S.saveSettings(state, 'set_range_adj', null, { range_ball_adj: v }); done(v ? `Range ball adjustment ${v}%` : 'Range ball adjustment off');

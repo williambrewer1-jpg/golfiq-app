@@ -8,6 +8,8 @@ const P = {
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/>',
   score: '<path d="M9 4L7 20M17 4l-2 16M4.5 9h16M3.5 15h16"/>',
   crosshair: '<circle cx="12" cy="12" r="7"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
+  sound: '<path d="M4 9.5v5h3.5l4.500 4v-13l-4.500 4z"/><path d="M15.500 9.200a4 4 0 010 5.600"/><path d="M18 6.800a7.500 7.500 0 010 10.400"/>',
+  soundoff: '<path d="M4 9.500v5h3.500l4.500 4v-13l-4.500 4z"/><path d="M16 9.500l5 5M21 9.500l-5 5"/>',
   putt: '<ellipse cx="12" cy="17" rx="7.5" ry="2.8"/><path d="M12 17V4l6 2.6-6 2.6"/>',
   club: '<path d="M16 3L9.5 16.5"/><path d="M9.5 16.5c-1.2 2.4-5 3.2-5.5 1.2-.4-1.6 2.6-2.4 5.500-1.200z"/><circle cx="17" cy="18" r="2"/>',
   map: '<path d="M9 5L4 7v12l5-2 6 2 5-2V5l-5 2z"/><path d="M9 5v12M15 7v12"/>',
