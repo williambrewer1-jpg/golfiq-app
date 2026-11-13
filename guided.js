@@ -5,6 +5,8 @@ import * as G from './games.js';
 import * as SS from './sessions.js';
 import * as ST from './skillstest.js';
 import * as LG from './league.js';
+import * as FEEL from './feel.js';
+import { icon } from './icons.js';
 
 export function registerGuided(c) {
   const { esc, fmt, $, $$ } = c;
@@ -16,6 +18,16 @@ export function registerGuided(c) {
   const save = () => c.S.saveJournal(c.state);
   const sc = (v) => (Number.isInteger(v) ? String(v) : fmt(v, 1));
   const canGuide = (id) => G.GUIDED.has(id);
+  // the speaker toggle on the game screen: switches sound for every game, saved with the Settings switch. The icon and the label both show the state.
+  const soundBtn = () => { const on = FEEL.get().sound, t = on ? FEEL.COPY.sound.on : FEEL.COPY.sound.off; return `<button type="button" class="gp-snd" id="gpSound" data-gpsound aria-pressed="${on}" aria-label="${t}" title="${t}">${icon(on ? 'sound' : 'soundoff', 22)}</button>`; };
+  async function toggleSound() {
+    const st = c.state.settings, on = !FEEL.get().sound;
+    st.feel = { ...FEEL.read(st), sound: on }; FEEL.init(st); await c.S.saveSettings(c.state, 'set_feel', null, { feel: st.feel });
+    if (on) { FEEL.unlock(); FEEL.play('tap'); }
+    const b = $('#gpSound'); if (b) b.outerHTML = soundBtn(); $('#gpSound')?.addEventListener('click', toggleSound);
+  }
+  // audio can only start after a tap: wake it on the first tap of any game button (and again later if the phone suspended it)
+  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gptest]')) FEEL.unlock(); }, true);
 
   // what the golfer is aiming at in this game: the target for the skill's next handicap step, and where the plan stands
   function info(id) {
@@ -91,7 +103,7 @@ export function registerGuided(c) {
     const gh = d.ghost && i > 0 ? LG.compareAt(g, a, d.ghost.detail, i) : null;
     const ghostLine = d.ghost ? `<div class="gp-ghost ${gh ? gh.state : 'level'}">${esc(d.ghost.nick)}${gh ? ` had ${sc(gh.ghost)} after ${i} · ${gh.state === 'level' ? 'you are level' : `you are ${gh.state} by ${sc(Math.abs(gh.diff))}`}` : `'s ${sc(d.ghost.score)} to beat`}</div>` : '';
     const tgt = inf.target !== undefined && inf.target !== null ? `Target ${sc(inf.target)}${lower ? ' or fewer' : '+'} · a ${inf.skill_h}-handicapper` : '';
-    return `<div class="card gp" id="gpRoot"><div class="gp-top"><button class="btn sec sm" data-gpquit>Quit</button><b>${esc(g.name)}</b><span class="small muted">~${G.minutesFor(g.id)} min</span></div>
+    return `<div class="card gp" id="gpRoot"><div class="gp-top"><button class="btn sec sm" data-gpquit>Quit</button><b>${esc(g.name)}</b><span class="small muted">~${G.minutesFor(g.id)} min</span>${soundBtn()}</div>
       <div class="gp-dots">${dots}</div>
       ${ghostLine}${pr ? `<div class="gp-pressure">${esc(G.pressureBanner(g))}</div>` : ''}
       <div class="gp-main"><div class="gp-prompt">${esc(step.prompt)}</div><div class="gp-sub">${esc(step.sub || '')}</div></div>${dist}
@@ -269,7 +281,7 @@ export function registerGuided(c) {
     sl?.addEventListener('input', () => { num.textContent = sl.value; if (ty) ty.value = ''; });
     ty?.addEventListener('input', () => { num.textContent = ty.value !== '' ? ty.value : sl.value; });
     $('#gpPrem')?.addEventListener('change', (e) => { const d = draft(); if (d) { d.premium = e.target.checked; save(); } });
-    $('[data-gpundo]')?.addEventListener('click', undo); $('[data-gpquit]')?.addEventListener('click', quit);
+    $('[data-gpundo]')?.addEventListener('click', undo); $('[data-gpquit]')?.addEventListener('click', quit); $('#gpSound')?.addEventListener('click', toggleSound);
     $$('[data-gpstart]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpstart, { pressure: !!$('#gpPressure')?.checked })));
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
