@@ -155,6 +155,8 @@ th{background:transparent}td:first-child,th:first-child{background:var(--card);b
 .strip .under{color:var(--bad);border-color:var(--bad)}.strip .even{background:var(--tint)}.strip .bogey{background:var(--chip)}.strip .worse{background:color-mix(in srgb,var(--ink) 16%,var(--card))}
 .strip .cur{outline:2px solid var(--gold);outline-offset:1px}
 /* ---- navigation & hubs */
+html{touch-action:manipulation}/* no double-tap zoom on iPhone; pinch still works on pages */
+.steps2 .step:only-child{grid-column:1/-1}
 main a{color:var(--accent);text-decoration:none;font-weight:600}
 #gearBtn{display:grid;place-items:center;width:40px;height:40px;margin-right:-6px;border-radius:12px;color:rgba(255,255,255,.85)}#gearBtn.on{color:var(--flag)}
 .seg.tabs{background:transparent;padding:0;gap:6px;margin:0 -14px 14px;padding:0 14px;scrollbar-width:none;scroll-behavior:smooth}.seg.tabs::-webkit-scrollbar{display:none}
@@ -170,6 +172,26 @@ main a{color:var(--accent);text-decoration:none;font-weight:600}
 .prio>span{flex:none;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:700 14px var(--serif)}
 .syncline{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px}.syncline span:first-child{flex:1}
 details.card>summary{font:700 17px var(--serif);color:var(--ink)}
+/* ---- compete, side games, strategy */
+.playslike{font-size:14px;margin:-4px 0 10px;text-align:center}.playslike b{font:700 18px var(--serif)}
+.aimline .pl{font-size:13px;color:var(--muted);margin-left:4px}
+details.strat{margin:12px 0 4px;border:1px solid var(--line);border-radius:13px;padding:10px 12px;background:var(--card)}details.strat>summary{font-weight:700;color:var(--accent)}
+details.sgset{border:1px solid var(--line);border-radius:13px;padding:10px 12px;margin:10px 0}details.sgset>summary{font-weight:700}
+.checks{display:flex;flex-wrap:wrap;gap:6px 14px;margin:2px 0 8px}.checks label,.checkrow{display:flex;align-items:center;gap:8px;font-size:14.5px;min-height:36px}
+.checks input,.checkrow input{width:20px;height:20px;accent-color:var(--accent)}
+.lb{display:grid;gap:2px;margin:6px 0}.lb>div{display:grid;grid-template-columns:26px 1fr auto auto;gap:10px;align-items:center;padding:9px 6px;border-bottom:1px solid var(--line)}
+.lb>div.me{background:var(--tint);border-radius:10px}.lb span{font:700 15px var(--serif);color:var(--muted);text-align:center}.lb b{font-weight:650}.lb em{font:700 18px var(--serif);font-style:normal}.lb small{color:var(--muted);font-size:12px;min-width:56px;text-align:right}
+.challenge{border-color:var(--gold);background:linear-gradient(180deg,var(--tint),var(--card) 60%)}
+.cmb{border-top:1px solid var(--line);padding:10px 0}.cmbh{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:6px}.cmbh b{font:700 18px var(--serif)}
+.cmbrow{display:grid;grid-template-columns:52px repeat(5,minmax(0,1fr));gap:5px;align-items:center;margin:4px 0}.cmbrow span{font-size:12.5px;color:var(--muted)}
+.cmbrow button{min-height:40px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:600 13px var(--sans)}.cmbrow button.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.rrshot{font-size:16px;margin:4px 0 10px}.rrshot b{font:700 22px var(--serif)}
+.rrres{display:grid;grid-template-columns:1fr 1fr;gap:8px}.rrres .btn{margin:0;min-height:50px}
+.killers{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;margin:6px 0 10px}.killers>div{border:1px solid var(--line);border-radius:12px;padding:8px;display:grid;gap:2px}
+.killers b{font:700 22px var(--serif);color:var(--good)}.killers .hit b{color:var(--bad)}.killers span{font-size:11.5px;color:var(--muted);line-height:1.25}
+.plan{display:grid;gap:4px;margin:8px 0 6px;padding:10px 12px;border-radius:12px;background:var(--tint);font-size:13.5px}
+.step .pu{width:auto;padding:0 10px;font-size:12px;margin-left:4px}
+.card.sub{box-shadow:none;border:1px solid var(--line);margin:8px 0}
 /* ---- hole map */
 .hmwrap{position:relative;margin:0 -6px;border-radius:16px;overflow:hidden;border:1px solid var(--gold);background:#33402f}
 .holemap{display:block;width:100%;height:auto;touch-action:none;-webkit-user-select:none;user-select:none;cursor:crosshair}

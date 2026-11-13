@@ -434,7 +434,7 @@ function buildRoundsBase(rounds, base) {
 function applyHandicap(h) {
   const hp = h.holes_played ?? 18;
   if ([h.hi, h.slope, h.course_rating, h.par_total].every(isNum)) {
-    if (hp <= 9) h.ch = courseHandicap(h.hi / 2, h.slope, h.course_rating > 50 ? h.course_rating / 2 : h.course_rating, h.par_total);
+    if (hp <= 9) h.ch = courseHandicap(h.hi / 2, h.slope, h.course_rating > 50 ? h.course_rating / 2 : h.course_rating, hp === 9 ? h.par_total : pyRound(h.par_total * 9 / hp));   // < 9 holes: par scaled to nine
     else if (hp < 18) h.ch = courseHandicap(h.hi, h.slope, h.course_rating, pyRound(h.par_total * 18 / hp));
     else h.ch = courseHandicap(h.hi, h.slope, h.course_rating, h.par_total);
   } else h.ch = null;
@@ -1044,6 +1044,14 @@ export function strokesGained(ds, tour, baseline = 'personal', personalFrom = nu
   }
   byRound.sort((a, b) => a.start.localeCompare(b.start));
   return { states: st, byRound, coverage, name };
+}
+// Expected strokes to hole out from (lie, metres): the tour baseline shifted by your own strokes-gained residuals when there's enough data.
+export function expectedModel(ds, tour) {
+  let m = null;
+  const ref = sgStates(ds); ref.forEach((x) => { x.E_tour = x.kind === 'holed' ? 0 : tour.expected(x.lie, x.dist_m); });
+  if (ref.filter((x) => x.kind !== 'holed').length >= 60) m = personalModel(ref);
+  const f = (lie, d) => { const et = tour.expected(lie, d); return m ? personalExpected(m, lie, d, et) : et; };
+  f.personal = !!m; return f;
 }
 export function sgSummary(res) {
   return [...SG_CATS, 'unattributed', 'total'].map((c) => ({ category: c, sg_per_round: mean(res.byRound.map((r) => r[`${c}_per18`])) }));

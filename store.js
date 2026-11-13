@@ -33,12 +33,12 @@ export const DEFAULT_SETTINGS = () => ({ clubs: {}, tees: {}, holes: {}, handica
 export const DEFAULT_JOURNAL = () => ({ games: [], results: [], sessions: [], notes: [], thoughts: [], wedge: { lengths: ['7:30', '9:00', '10:30'], entries: [] }, markers: [], draft: null });
 
 export async function loadState() {
-  const [bundles, clubsBundle, settings, corrections, manualShots, audit, rawmeta, importLog, sync, journal, weather, osm] = await Promise.all([
+  const [bundles, clubsBundle, settings, corrections, manualShots, audit, rawmeta, importLog, sync, journal, weather, osm, cloud, elev] = await Promise.all([
     rawAll(), kvGet('clubsBundle', {}), kvGet('settings', DEFAULT_SETTINGS()), kvGet('corrections', []), kvGet('manualShots', []),
-    kvGet('audit', []), kvGet('rawmeta', {}), kvGet('importLog', []), kvGet('sync', {}), kvGet('journal', {}), kvGet('weather', {}), kvGet('osm', {})]);
+    kvGet('audit', []), kvGet('rawmeta', {}), kvGet('importLog', []), kvGet('sync', {}), kvGet('journal', {}), kvGet('weather', {}), kvGet('osm', {}), kvGet('cloud', {}), kvGet('elev', {})]);
   const dj = DEFAULT_JOURNAL();
   return { bundles, clubsBundle, settings: { ...DEFAULT_SETTINGS(), ...settings }, corrections, manualShots, audit, rawmeta, importLog, sync,
-    journal: { ...dj, ...journal, wedge: { ...dj.wedge, ...(journal.wedge || {}) } }, weather, osm };
+    journal: { ...dj, ...journal, wedge: { ...dj.wedge, ...(journal.wedge || {}) } }, weather, osm, cloud, elev };
 }
 
 const now = () => new Date().toISOString().slice(0, 19) + 'Z';
@@ -190,6 +190,9 @@ export async function removeDemo(state) {
 
 // ---------------------------------------------------------------- journal, weather and course-map caches
 export const saveJournal = (state) => kvSet('journal', state.journal);
+// friends (Firebase config, group, sign-in) – kept out of backups like the sync token; terrain heights cache
+export const saveCloud = (state) => kvSet('cloud', state.cloud);
+export const saveElev = (state) => { const k = Object.keys(state.elev); if (k.length > 60) for (const x of k.slice(0, k.length - 60)) delete state.elev[x]; return kvSet('elev', state.elev); };
 export const saveWeather = (state) => kvSet('weather', state.weather);
 export const saveOsm = (state) => kvSet('osm', state.osm);
 export function addCoachNotes(state, notes, source) {

@@ -273,7 +273,9 @@ export const DEFAULT_GAMES = [
   { id: 'range-fairways', cat: 'Range', name: 'Imaginary fairways', better: 'higher', max: 14, unit: 'fairways / 14', how: 'Pick two targets ~30 yd apart as a fairway. 14 tee shots (your normal tee clubs), full routine. Count fairways hit.' },
   { id: 'range-greens', cat: 'Range', name: '9-shot greens', better: 'higher', max: 9, unit: 'greens / 9', how: 'Nine approaches, new target and club every ball. A hit = inside ~10% of the distance.' },
   { id: 'range-wedge', cat: 'Range', name: 'Wedge distance ladder', better: 'higher', max: 10, unit: 'inside 5 yd / 10', how: 'Ten wedge shots to called distances (e.g. 40–100). Count balls finishing within 5 yd.' },
-  { id: 'range-round', cat: 'Range', name: 'Play the course', better: 'higher', max: 18, unit: 'good shots / 18', how: 'Play your home course on the range: tee shot then approach for 9 holes. Count shots that would have worked.' },
+  { id: 'range-round', cat: 'Range', name: 'Play the course (simple)', better: 'higher', max: 18, unit: 'good shots / 18', how: 'Play your home course on the range: tee shot then approach for 9 holes. Count shots that would have worked. (Practice → Range round does this properly.)' },
+  { id: 'combine', cat: 'Range', name: 'Monthly combine', better: 'higher', max: 100, unit: 'points / 100', how: 'Practice → Combine: 18 shots to six targets, scored by how close they finish.', auto: true },
+  { id: 'range-course', cat: 'Range', name: 'Range round', better: 'lower', unit: 'strokes', how: 'Practice → Range round: play a real course shot by shot on the range.', auto: true },
 ];
 export function gameStats(games, results) {
   return games.map((g) => {
@@ -406,4 +408,56 @@ export function shortGame(holes, shots, rounds) {
     chip_on_green_pct: pctOf(ag.filter((s) => s.on_green_end !== null), (s) => s.on_green_end === 1), chips: ag.length,
     sand_save_pct: pctOf(sandHoles, (h) => h.to_par <= 0), sand_n: sandHoles.length, bands, byRound,
   };
+}
+
+// ------------------------------------------------------------------ score killers (after Scott Fawcett's five scoring rules, plus penalties)
+// Per round: bogey+ on par 5s, double bogey+, 3-putts, bogey+ from short-iron range, blown easy saves, double chips, penalty strokes.
+export const KILLERS = [
+  ['par5_bogey', 'Bogey+ on a par 5'], ['double', 'Double bogey or worse'], ['three_putt', '3-putts'], ['short_iron_bogey', 'Bogey+ from short-iron range'],
+  ['blown_save', 'Blown easy saves'], ['double_chip', 'Double chips'], ['penalties', 'Penalty strokes'],
+];
+export function shortIronRange(ds) {
+  const nine = ds.clubs.find((c) => /\b9\s*-?\s*iron\b|^9i$/i.test(c.name));
+  const sh = nine ? ds.shots.filter((s) => s.club_id === nine.club_id && isNum(s.dist_m) && !s.excluded) : [];
+  return sh.length >= 5 ? median(sh.map((s) => s.dist_m)) : 137.16;            // your 9-iron, else 150 yd
+}
+export function scoreKillers(holes, shots, shortM = 137.16) {
+  const byHole = groupBy(shots, (s) => `${s.round_id}|${s.hole}`), out = new Map();
+  for (const h of holes) {
+    const r = out.get(h.round_id) || Object.fromEntries([['round_id', h.round_id], ['holes', 0], ...KILLERS.map(([k]) => [k, 0])]); out.set(h.round_id, r);
+    r.holes++;
+    if (!isNum(h.to_par)) continue;
+    const g = [...(byHole.get(`${h.round_id}|${h.hole}`) || [])].sort((a, b) => a.shot_order - b.shot_order);
+    if (h.par === 5 && h.to_par >= 1) r.par5_bogey++;
+    if (h.to_par >= 2) r.double++;
+    if (isNum(h.putts_eff) && h.putts_eff >= 3) r.three_putt++;
+    r.penalties += h.penalties_eff || 0;
+    const appr = g.filter((s) => s.category === 'approach' && isNum(s.start_to_pin));
+    if (h.to_par >= 1 && appr.some((s) => s.start_to_pin <= shortM && s.start_lie !== 'Sand' && s.start_lie !== 'Recovery')) r.short_iron_bogey++;
+    const ag = g.filter((s) => s.category === 'around_green');
+    if (ag.length >= 2) r.double_chip++;
+    const first = ag[0];
+    if (first && h.gir_eff === 0 && isNum(first.start_to_pin) && first.start_to_pin <= 27.4 && first.start_lie !== 'Sand' && isNum(h.putts_eff) && ag.length + h.putts_eff > 2 && h.to_par >= 1) r.blown_save++;
+  }
+  for (const r of out.values()) r.total = KILLERS.reduce((t, [k]) => t + r[k], 0);
+  return out;
+}
+
+// ------------------------------------------------------------------ estimated pattern for clubs without enough direction data
+// Uses your own spread from the clubs that do have enough shots (sideways spread as a share of distance, median
+// across clubs), else 7% of distance; distance spread from the club's own 10th-90th percentile, else 6%.
+// Deterministic points (no randomness), so the picture doesn't jump about while you drag.
+export function lateralRatio(ds, patternOf) {
+  const r = ds.clubs.map((c) => patternOf(c.club_id)).filter((p) => p.stats?.enough && p.stats.mean_y_m > 30 && !p.estimated).map((p) => p.stats.sd_lateral_m / p.stats.mean_y_m);
+  return r.length ? median(r) : 0.07;
+}
+export function estimatedPattern(base, latRatio, n = 120) {
+  if (!base || !isNum(base.median_m)) return null;
+  const sdY = isNum(base.p10_m) && isNum(base.p90_m) && base.p90_m > base.p10_m ? (base.p90_m - base.p10_m) / 2.563 : 0.06 * base.median_m;
+  const sdX = latRatio * base.median_m, pts = [];
+  for (let i = 0; i < n; i++) {                                         // Box-Muller on a fixed low-discrepancy sequence
+    const u = (i + 0.5) / n, v = (i * 0.6180339887) % 1, r = Math.sqrt(-2 * Math.log(1 - u * 0.999)), t = 2 * Math.PI * v;
+    pts.push({ x: sdX * r * Math.cos(t), y: base.median_m + sdY * r * Math.sin(t) });
+  }
+  return { ...base, pts, stats: A.dispersionStats(pts), estimated: true, real_n: base.stats?.n || 0 };
 }
