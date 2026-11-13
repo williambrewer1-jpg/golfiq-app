@@ -96,5 +96,15 @@ test('Imaginary fairways and Landing zone targets can now unlock potential', () 
   assert.ok(x && x.hits === 3 && x.credit > 0, JSON.stringify(x));
   assert.ok(sk.skills.find((s) => s.key === 'short').subs.find((s) => s.key === 'chip').practice_hcp !== null, 'chip practice level from Landing zone');
 });
+test('an achieved on-course challenge counts as one hit for its sub-skill', () => {
+  const ch = (sub, ago, achieved = true) => ({ round_id: `r${ago}`, date: day(ago), key: 'x', sub, goal: 5, value: 5, achieved });
+  const base = plan([]).ledger.find((l) => l.sub === 'short.updown');
+  const one = plan([], { challenges: [ch('short.updown', 3)] }).ledger.find((l) => l.sub === 'short.updown');
+  assert.equal(one.hits, base.hits + 1); assert.ok(one.credit > base.credit);
+  assert.equal(plan([], { challenges: [ch('short.updown', 3, false)] }).ledger.find((l) => l.sub === 'short.updown').hits, 0, 'a missed challenge gives nothing');
+  assert.equal(plan([], { challenges: [ch('short.updown', 70)] }).ledger.find((l) => l.sub === 'short.updown').hits, 0, 'older than the 60-day window');
+  assert.equal(plan([], { challenges: [ch('putting.lag', 3)] }).ledger.find((l) => l.sub === 'short.updown').hits, 0, 'a different sub-skill');
+  const mixed = plan([res('chip-updown', 5, 2)], { challenges: [ch('short.updown', 3)] }).ledger.find((l) => l.sub === 'short.updown'); assert.equal(mixed.hits, 2, 'game hit plus course challenge');
+});
 test('POTENTIAL defaults match the plan', () => { assert.deepEqual([P.base, P.momentum2, P.momentum3, P.transfer, P.unlocked_cap, P.total_cap, P.pct_cap, P.hits_needed, P.hit_days, P.active_days], [0.5, 0.5, 0.25, 0.5, 3, 4, 0.3, 3, 60, 14]); });
 console.log(failed ? `\n${failed} failed` : '\nall passed'); process.exit(failed ? 1 : 0);

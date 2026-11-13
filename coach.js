@@ -216,7 +216,7 @@ export const standard = (key, h) => { const v = STANDARDS[key], x = Math.max(0, 
 // baselines: { [sub full_key]: strokes value when the first target hit was scored } so a confirmed sub-skill keeps its credit
 // after the on-course number has caught up (its current strokes value is then zero).
 const hitScore = (r, g) => isNum(r.score) && isNum(g.target) && (g.better === 'lower' ? r.score <= g.target : r.score >= g.target);
-export function potentialPlan({ ratings, results = [], rounds = [], now = Date.now(), baselines = {}, index = null } = {}) {
+export function potentialPlan({ ratings, results = [], rounds = [], now = Date.now(), baselines = {}, index = null, challenges = [] } = {}) {
   const P = POTENTIAL, empty = { base: P.base, momentum: 0, active: [], unlocked: 0, locked: 0, gain: P.base, ledger: [], focus: [], capped: false };
   if (!ratings?.skills) return empty;
   const gid = (r) => r.game ?? r.game_id, res = results.filter((r) => isNum(r.score) && r.date);
@@ -233,7 +233,9 @@ export function potentialPlan({ ratings, results = [], rounds = [], now = Date.n
     const games = sub.games.filter((g) => isNum(g.target)); if (!games.length || !sub.enough) continue;
     const base = Math.max(sub.strokes || 0, baselines[sub.full_key] || 0); if (base <= 0) continue;
     const mine = res.filter((r) => dt(r.date) >= since(P.hit_days)).map((r) => ({ r, g: games.find((g) => g.id === gid(r)) })).filter((x) => x.g && hitScore(x.r, x.g));
-    const hits = mine.reduce((t, x) => t + (x.r.pressure && x.r.pressure_hit !== false ? P.pressure_hit : 1), 0), progress = Math.min(1, hits / P.hits_needed);
+    // an on-course challenge for this sub-skill that was achieved counts as one hit
+    const course = challenges.filter((x) => x.achieved && x.sub === sub.full_key && dt(x.date) >= since(P.hit_days)).length;
+    const hits = mine.reduce((t, x) => t + (x.r.pressure && x.r.pressure_hit !== false ? P.pressure_hit : 1), 0) + course, progress = Math.min(1, hits / P.hits_needed);
     const first = res.filter((r) => games.some((g) => g.id === gid(r) && hitScore(r, g))).map((r) => r.date).sort()[0] || null;
     const after = first ? rounds.filter((r) => r.format === '18' && String(r.date) > String(first)).length : 0;
     const onCourse = isNum(sub.you) && isNum(sub.target_value) && (sub.higher ? sub.you >= sub.target_value : sub.you <= sub.target_value);
@@ -242,7 +244,7 @@ export function potentialPlan({ ratings, results = [], rounds = [], now = Date.n
     const transfer = confirmed ? P.transfer_confirmed : P.transfer, max_credit = base * P.transfer_confirmed, credit = base * transfer * progress;
     const g0 = games[0], step = base * P.transfer / P.hits_needed, left = Math.max(1, Math.ceil(P.hits_needed - hits));
     const next = hits < P.hits_needed ? `Score ${g0.target}${g0.better === 'lower' ? ' or less' : '+'} in ${g0.name}${left > 1 ? ` ${left} more times` : ' once more'} → −${(Math.round(step * 10) / 10).toFixed(1)}`
-      : stalled ? 'Not showing up on the course yet – try the on-course challenge' : confirmed ? 'Showing up on the course ✓' : 'Keep it up: play a few rounds so the course can confirm it';
+      : stalled ? 'Not showing up on the course yet – try the on-course challenge in your next round' : confirmed ? 'Showing up on the course ✓' : 'Keep it up: play a few rounds so the course can confirm it';
     ledger.push({ sub: sub.full_key, skill: sk.key, title: sub.title, base_strokes: base, game: g0.id, game_name: g0.name, hits, need: P.hits_needed, credit, max_credit, confirmed, stalled, next, step: hits < P.hits_needed ? step : 0 });
   }
   ledger.sort((a, b) => b.step - a.step || b.max_credit - a.max_credit);

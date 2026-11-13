@@ -4,6 +4,7 @@ import * as F from './features.js';
 import { registerCompete } from './compete.js';
 import { registerProgress } from './progress.js';
 import { registerGuided } from './guided.js';
+import * as CH from './challenges.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -409,7 +410,9 @@ function killersCard(rid) {
 }
 function sideCard(rid) {
   const sr = (state.journal.sideResults || []).find((x) => x.round_id === rid);
-  return sr ? `<h3>Side games</h3>${EXTRA.play.standingsHtml(sr.game)}` : '';
+  const cc = (state.journal.course_challenges || []).find((x) => x.round_id === rid), chd = cc ? CH.byKey(cc.key) : null;
+  const chal = chd ? `<h3>Round challenge</h3><div class="chal ${cc.achieved ? 'achieved' : 'failed'}"><b>${esc(CH.titleFor(chd, cc.n || 18))}</b><span>${cc.achieved ? 'done ✓' : 'not this time'}</span></div><p class="small muted" style="margin:4px 0 0">${chd.kind === 'zero' ? `${cc.value} ${esc(chd.short)}` : `${cc.value} of ${cc.goal}`}${cc.achieved ? ' · counted as a hit towards your potential' : ''}</p>` : '';
+  return chal + (sr ? `<h3>Side games</h3>${EXTRA.play.standingsHtml(sr.game)}` : '');
 }
 function roundDetail(rid) {
   const row = DS.rounds.find((x) => x.round_id === rid); if (!row) return null;
@@ -853,5 +856,5 @@ addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); ret
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
   PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
   if (window.Plotly || document.readyState === 'complete') render(); else addEventListener('load', render, { once: true });
-  window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; } };
+  window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; }, get progress() { return PROG; } };
 })();
