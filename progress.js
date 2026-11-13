@@ -20,7 +20,13 @@ export function registerProgress(c) {
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
     const savings = fs.slice(0, 2).reduce((t, f) => t + Math.max(0, f.strokes_per_round || 0), 0);
-    const potential = fs.slice(0, 3).reduce((t, f) => t + Math.max(0, f.strokes_per_round || 0), 0);
+    const quick = fs.slice(0, 3).reduce((t, f) => t + Math.max(0, f.strokes_per_round || 0), 0);
+    const off0 = [...(c.state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop()?.handicap_index;
+    const diffs = ds.rounds.filter((r) => A.isNum(r.differential_for_index) && r.date).sort((a, b) => a.date.localeCompare(b.date)).map((r) => r.differential_for_index);
+    const idx = diffs.length >= 3 ? A.whsIndex(diffs.slice(-20)) : off0;
+    const lu = CO.levelUp({ rounds: ds.rounds, holes: ds.holes, hcp: A.isNum(idx) ? idx : null, unitM: unitM(), games: games(), results: J().results || [], findings: fs });
+    // the plan: close the gaps to a golfer 5 shots better (genuine improvement), or your own best rounds if that's bigger
+    const potential = Math.max(lu?.total || 0, quick);
     const fc = CO.forecast(ds.rounds, { savings, potential });
     const ms = CO.milestones(ds.rounds, { shift: 0 });
     const ms6 = fc.ok ? CO.milestones(ds.rounds, { shift: (fc.potential - fc.current) }) : null;
@@ -31,7 +37,7 @@ export function registerProgress(c) {
     const st = CO.streaks(CO.practiceDates(J()));
     const goals = CO.weeklyGoal({ findings: fs, roadmaps: [...short, ...long], results: res, games: g, assigned: CO.assignments(J().notes) });
     const bd = CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] });
-    memo = { ds: c.DS, j: key, v: { fs, savings, fc, ms, ms6, short, long, st, goals, bd } };
+    memo = { ds: c.DS, j: key, v: { fs, lu, savings, fc, ms, ms6, short, long, st, goals, bd } };
     return memo.v;
   }
 
@@ -48,14 +54,31 @@ export function registerProgress(c) {
       { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.low), mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(27,127,75,.18)', line: { width: 0 }, name: 'Potential range' },
       { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.likely), mode: 'lines+markers', name: 'Your potential', line: { color: '#1b7f4b', width: 3 }, marker: { size: 5 } },
     ];
-    const drop = fc.current - fc.potential, fix = v.fs.slice(0, 3).map((f) => f.title.toLowerCase());
+    const drop = fc.current - fc.potential, fix = (v.lu?.areas?.length ? v.lu.areas.filter((a) => a.strokes >= 0.2).map((a) => a.title.toLowerCase()) : v.fs.map((f) => f.title.toLowerCase())).slice(0, 3);
     const when = new Date(d0.getTime() + 182 * 864e5).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     return `<div class="card prog-hero"><h2>Your potential in 6 months</h2>
       <div class="prog-big"><div><span>Now</span><b>${n1(fc.current)}</b></div><i>→</i><div><span>Potential</span><b class="good">${n1(fc.potential)}</b><small>best case ${n1(fc.potential_best)}</small></div></div>
       <p class="prog-claim">${drop >= 0.95 ? `That's <b>${n1(drop)} shots</b> off your handicap by ${when}.` : `Hold your level and shave the leaks – ${n1(fc.potential)} by ${when}.`}</p>
-      <p class="small">${fix.length ? `Win back the strokes you're losing to <b>${esc(fix.join(', '))}</b> – about ${n1(fc.potential_save)} a round – with the plan in This week, the roadmaps and your coach.` : `Follow your weekly goals and roadmaps to win back about ${n1(fc.potential_save)} shots a round.`} Without a plan you'd be around ${n1(fc.likely)}.</p>
+      <p class="small">${fix.length ? v.lu ? `Get your <b>${esc(fix.join(', '))}</b> to the level of a ${v.lu.to} handicapper – about ${n1(fc.potential_save)} shots a round – with the practice games in <a href="#practice" data-practice="focus">Level up</a>.` : `Win back the strokes you're losing to <b>${esc(fix.join(', '))}</b> – about ${n1(fc.potential_save)} a round – with the plan in This week, the roadmaps and your coach.` : `Follow your weekly goals and roadmaps to win back about ${n1(fc.potential_save)} shots a round.`} Without a plan you'd be around ${n1(fc.likely)}.</p>
       ${plot(tr, { height: 250, showlegend: true, legend: { orientation: 'h', y: -0.25 }, yaxis: { title: { text: 'Index' } } })}
-      ${note(`Potential = simulated seasons (${fc.rounds_ahead} rounds at your pace, 500 runs, WHS best 8 of 20) where you win back what your top three priorities cost – ${n1(fc.potential_save)} strokes a round (at least ${CO.POTENTIAL_MIN}, a typical gain from structured practice; at most ${CO.POTENTIAL_MAX}) – phased in over four months, with an improving trend kept at full strength. It's a target to play for, not a promise; "without a plan" continues your current level and trend.`)}</div>`;
+      ${note(`Potential = your current index minus the strokes a round you win back by closing the gaps to a golfer five shots better (Level up) – ${n1(fc.potential_save)} (at least ${CO.POTENTIAL_MIN}, a typical gain from structured practice; at most ${CO.POTENTIAL_MAX}) – phased in over four months, plus any improving trend you already have. The shaded range is the normal ups and downs of a handicap index. It's a target to play for, not a promise; "without a plan" simulates your current level and trend (${fc.rounds_ahead} rounds at your pace, WHS best 8 of 20).`)}</div>`;
+  }
+  // Level up: where a golfer five shots better beats you, what it's worth, and the practice game that trains it
+  function levelUpCard(v = data(), { link = false } = {}) {
+    const lu = v.lu; if (!lu) return '';
+    const f = (x, u) => (u === '%' ? `${Math.round(x)}%` : n1(x));
+    const rows = lu.areas.map((a) => {
+      const ahead = a.strokes < 0.05, w = Math.max(4, Math.min(100, a.std ? (a.higher ? a.you / a.std : a.std / Math.max(a.you, 0.01)) * 100 : 100));
+      return `<div class="lvl ${ahead ? 'ahead' : ''}"><div class="lvl-h"><b>${esc(a.title)}</b><span>${ahead ? '<span class="good">already there ✓</span>' : `<b class="good">≈ ${n1(a.strokes)}</b> shots a round`}</span></div>
+        <div class="bar"><i style="width:${Math.round(w)}%"></i></div>
+        <p class="small">You <b>${f(a.you, a.unit)}</b> · ${a.std_label ? esc(a.std_label) : `a ${lu.to} handicap`} <b>${f(a.std, a.unit)}</b>${ahead ? '' : ` – ${esc(a.how)}`}</p>
+        ${!ahead && a.games.length ? `<div class="lvl-g">${a.games.map((g) => `<a href="#practice" data-practice="games" class="chip">${esc(g.name)}${A.isNum(g.target) ? ` <b>${g.better === 'lower' ? '≤' : '≥'} ${sc(g.target)}</b>` : ''}${A.isNum(g.best) ? ` <small>best ${sc(g.best)}</small>` : ''}</a>`).join('')}</div>` : ''}</div>`;
+    }).join('');
+    return `<div class="card"><h2>Level up: play like a ${lu.to} handicap</h2>
+      <p class="small">Where a golfer ${Math.round(lu.from - lu.to)} shots better than you (index ${n1(lu.from)}) beats you, what closing each gap is worth, and the practice game that trains it – with the score a ${lu.to} handicapper typically posts.</p>
+      <p class="prog-claim">Close these gaps: about <b>${n1(lu.total)} shots a round</b>.</p>${rows}
+      ${link ? '<p class="small"><a href="#practice" data-practice="progress">See your 6-month potential →</a></p>' : ''}
+      ${note(`Standards from Shot Scope data (scratch / 10 / 20 handicap, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}), interpolated to a ${lu.to} handicap. Strokes: extra greens use what a missed green costs you (from your own holes); up and down counts the greens you'd still miss; three-putts and penalties are a stroke each; fairways use your own cost per miss. Areas overlap a little, so treat the total as a target. Last ${lu.rounds} 18-hole rounds.`)}</div>`;
   }
   function milestonesCard(v) {
     const rows = v.ms.rows, m6 = v.ms6?.rows;
@@ -101,7 +124,7 @@ export function registerProgress(c) {
 
   function page() {
     const v = data();
-    return `${forecastCard(v)}${weekCard(v)}${milestonesCard(v)}
+    return `${forecastCard(v)}${levelUpCard(v)}${weekCard(v)}${milestonesCard(v)}
       ${roadmapCard('Short-game roadmap', v.short, 'Putting and chipping games, with the score that matches each scoring level.')}
       ${roadmapCard('Long-game roadmap', v.long, 'Range games, the monthly combine and range rounds.')}
       ${badgesCard(v)}`;
@@ -115,5 +138,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data };
+  return { page, homeCard, data, levelUpCard };
 }
