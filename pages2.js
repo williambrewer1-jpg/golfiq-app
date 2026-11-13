@@ -360,7 +360,7 @@ export function registerPages(c) {
     const cats = [...new Set(entry.map((x) => x.cat))], uM = c.UNIT === 'yd' ? 0.9144 : 1, L = (s) => c.compete.lvlText(c.compete.lvl(g.id, s));
     const bench = B.hasLevel(g.id) ? `<p class="small muted" style="margin:6px 0">Handicap benchmarks: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 hcp ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 hcp ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
     if (c.guided?.screen()) return c.guided.screen();
-    const launch = c.guided ? c.guided.sessionCard() + c.guided.dailyCard() + c.guided.launcher(g) : '';
+    const launch = c.guided ? c.guided.testCard() + c.guided.sessionCard() + c.guided.dailyCard() + c.guided.launcher(g) : '';
     return `<div class="card"><h2>Play a game</h2>${select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
       <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}${launch}
       <details id="pgQuick"><summary><b>Quick entry</b> <span class="small muted">type in a score you already played</span></summary><form id="pgForm" style="margin-top:8px">

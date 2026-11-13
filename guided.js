@@ -3,6 +3,7 @@ import * as B from './bench.js';
 import * as F from './features.js';
 import * as G from './games.js';
 import * as SS from './sessions.js';
+import * as ST from './skillstest.js';
 
 export function registerGuided(c) {
   const { esc, fmt, $, $$ } = c;
@@ -68,7 +69,7 @@ export function registerGuided(c) {
   function sesButtons(g) {
     const r = run();
     if (r && c.ui.game_result?.session_id === r.id) { const last = r.i + 1 >= r.queue.length, nx = gameOf(r.queue[r.i + 1]);
-      return `<p class="small muted" style="margin:0 0 6px">Session: game ${r.i + 1} of ${r.queue.length}</p><div class="row">${last ? '<button class="btn" data-gpsesend>Finish session</button>' : `<button class="btn" data-gpsesnext>Next: ${esc(nx?.name || '')}</button>`}</div>`; }
+      return `<p class="small muted" style="margin:0 0 6px">${r.kind === 'test' ? 'Skills test' : 'Session'}: game ${r.i + 1} of ${r.queue.length}</p><div class="row">${last ? `<button class="btn" data-gpsesend>${r.kind === 'test' ? 'Finish test' : 'Finish session'}</button>` : `<button class="btn" data-gpsesnext>Next: ${esc(nx?.name || '')}</button>`}</div>`; }
     return `<div class="row"><button class="btn" data-gpagain="${esc(g.id)}">Play again</button><button class="btn sec" data-gpnext="${esc(g.id)}">Next game</button><button class="btn sec" data-gpdone>Done</button></div>`;
   }
   function resultScreen() {
@@ -103,8 +104,8 @@ export function registerGuided(c) {
     return `${ladder}${beat}<label class="f" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="gpPressure" style="width:22px;height:22px;flex:0 0 auto"> <span>Pressure finish: the last ${g.id === 'putt-streak' ? 'putt ends it' : 'step counts double'}</span></label>
       <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>`;
   }
-  const screen = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.session_summary ? summaryScreen() : '');
-  function render() { const e = $('#gpRoot'); if (!e) { c.rerender(); return; } const html = draft() ? playScreen() : c.ui.game_result ? resultScreen() : summaryScreen(); e.outerHTML = html; wire(); }
+  const screen = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
+  function render() { const e = $('#gpRoot'); if (!e) { c.rerender(); return; } const html = draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.test_summary ? testSummary() : summaryScreen(); e.outerHTML = html; wire(); }
 
 
   // ------------------------------------------------------------ the daily challenge
@@ -129,7 +130,8 @@ export function registerGuided(c) {
   }
   function homeCard() {
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
-    return dailyCard('home');
+    const due = ST.due(J().skills_tests || [], today());
+    return (due.show ? `<div class="card gp-test"><h2 style="margin:0 0 4px">Time for your monthly skills test</h2><p class="small muted" style="margin:0 0 8px">Five games, about ${ST.TEST_MINUTES} minutes. It re-rates your practice levels.</p><button class="btn" data-gptest>Start the skills test</button></div>` : '') + dailyCard('home');
   }
 
   // ------------------------------------------------------------ sessions: 30, 45 or 60 minutes of back-to-back guided games
@@ -148,8 +150,13 @@ export function registerGuided(c) {
   async function endSession(quiet) {
     const r = run(); if (!r) return; const rs = (J().results || []).filter((x) => r.results.includes(x.id)); J().session_run = null;
     if (rs.length) {
-      J().sessions.push({ id: r.id, date: today(), minutes: r.total, focus: SS.SESSION_SKILL_FOCUS[r.skill] || 'other', notes: `Guided session: ${rs.map((x) => gameOf(x.game)?.name).join(', ')}`, guided: true, results: r.results });
-      if (!quiet) c.ui.session_summary = r.id;
+      const test = r.kind === 'test';
+      J().sessions.push({ id: r.id, date: today(), minutes: r.total, focus: test ? 'other' : SS.SESSION_SKILL_FOCUS[r.skill] || 'other', notes: test ? 'Monthly skills test' : `Guided session: ${rs.map((x) => gameOf(x.game)?.name).join(', ')}`, guided: true, results: r.results });
+      if (test && rs.length >= ST.TEST_GAMES.length) {
+        const scores = Object.fromEntries(rs.map((x) => [x.game, x.score])), rated = ST.rate(scores, games(), unitM());
+        (J().skills_tests = J().skills_tests || []).push({ id: r.id, date: today(), results: r.results, ratings: rated.ratings, per_game: rated.per_game });
+        if (!quiet) c.ui.test_summary = r.id;
+      } else if (!quiet) c.ui.session_summary = r.id;
     }
     c.ui.game_result = null; c.saveUi(); await save(); if (!quiet) { c.rerender(); scrollTo(0, 0); }
   }
@@ -165,6 +172,34 @@ export function registerGuided(c) {
       <button class="btn" data-gpdone>Done</button></div>`;
   }
 
+  // ------------------------------------------------------------ monthly skills test
+  const lastOf = (test) => ST.lastTest(J().skills_tests || [], test ? test.id : null);
+  const dHtml = (v) => (v === null || v === undefined ? '–' : v >= 25 ? '25+' : v <= 0 ? 'scratch' : `≈${Math.round(v)}`);
+  const chg = (x) => (x.change === null ? '' : Math.abs(x.change) < 0.5 ? 'same' : x.change > 0 ? `<span class="good">${fmt(x.change, 1)} better</span>` : `<span class="bad">${fmt(-x.change, 1)} worse</span>`);
+  function testCard() {
+    if (!c.DS.rounds.length && !(J().results || []).length) return '';
+    const tests = J().skills_tests || [], last = lastOf(null), due = ST.due(tests, today());
+    return `<div class="card gp-test"><div class="rv-h"><h2 style="margin:0">Monthly skills test</h2><span class="small muted">${last ? `last ${esc(last.date)}` : 'not done yet'}</span></div>
+      <p class="small muted" style="margin:6px 0 8px">Five games, about ${ST.TEST_MINUTES} minutes: ${ST.TEST_GAMES.map((id) => esc(gameOf(id)?.name || id)).join(', ')}. It gives you a practice handicap for putting, short game and approach, and re-rates your practice levels.</p>
+      ${due.done ? '<p class="small" style="margin:0 0 6px">This month\'s test is done ✓. You can run it again if you like.</p>' : ''}<button class="btn ${due.done ? 'sec' : ''}" data-gptest>Start the skills test</button></div>`;
+  }
+  async function startTest() {
+    const id = `test${Date.now()}`; J().session_run = { id, kind: 'test', minutes: ST.TEST_MINUTES, queue: [...ST.TEST_GAMES], i: 0, results: [], started: new Date().toISOString(), total: ST.TEST_MINUTES, skill: null };
+    await start(ST.TEST_GAMES[0], { session_id: id });
+  }
+  function testSummary() {
+    const t = (J().skills_tests || []).find((x) => x.id === c.ui.test_summary); if (!t) { c.ui.test_summary = null; return ''; }
+    const prev = lastOf(t), cmp = ST.compare(t, prev), rated = cmp.filter((x) => x.now !== null);
+    const games_ = ST.TEST_GAMES.map((id) => { const pg = t.per_game[id], g = gameOf(id); return pg ? `<div class="gp-sumrow"><div><b>${esc(g?.name || id)}</b><div class="small muted">${esc(pg.label || '')}</div></div><div class="gp-sumscore"><b>${sc(pg.score)}</b></div></div>` : ''; }).join('');
+    const radar = (ids) => [{ type: 'scatterpolar', r: rated.map((x) => ST.radarValue(x.now)), theta: rated.map((x) => x.title), fill: 'toself', name: 'This test', line: { color: '#1b7f4b' } },
+      ...(prev ? [{ type: 'scatterpolar', r: rated.map((x) => ST.radarValue(x.before)), theta: rated.map((x) => x.title), fill: 'none', name: `Last test (${prev.date})`, line: { color: '#9a9a8a', dash: 'dot' } }] : [])];
+    return `<div class="card gp-res" id="gpRoot"><h2>Skills test done</h2><p class="small muted" style="margin:0 0 8px">${t.date}. ${prev ? `Compared with ${esc(prev.date)}.` : 'This is your first test, so there is nothing to compare with yet.'}</p>
+      <div class="gp-radar">${rated.length >= 3 ? c.plot(radar(), { height: 270, margin: { t: 20, b: 20, l: 40, r: 40 }, polar: { radialaxis: { range: [0, 36], showticklabels: false } }, showlegend: !!prev, legend: { orientation: 'h', y: -0.1 } }) : ''}</div>
+      <div class="tbl"><table><thead><tr><th>Skill</th><th>Practice handicap</th>${prev ? '<th>Last test</th><th>Change</th>' : ''}</tr></thead><tbody>${cmp.map((x) => `<tr><td>${esc(x.title)}</td><td>${x.now === null ? '<span class="muted">not in the test</span>' : dHtml(x.now)}</td>${prev ? `<td>${dHtml(x.before)}</td><td>${chg(x)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
+      <h3 style="margin:12px 0 4px">Your scores</h3>${games_}
+      <p class="small muted" style="margin:10px 0">These scores are saved as normal results, so your practice levels now use them.</p><button class="btn" data-gpdone>Done</button></div>`;
+  }
+
   function nextGame(id) {
     const v = c.progress.data(), g0 = v.plan.ledger.map((x) => x.game).filter((x) => x !== id && canGuide(x));
     if (g0.length) return g0[0];
@@ -177,9 +212,10 @@ export function registerGuided(c) {
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
     $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { c.ui.game_result = null; c.ui.session_summary = null; c.saveUi(); c.rerender(); }));
+    $$('[data-gptest]').forEach((b) => b.addEventListener('click', startTest));
     $$('[data-gpses]').forEach((b) => b.addEventListener('click', () => startSession(Number(b.dataset.gpses))));
     $$('[data-gpdaily]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpdaily)));
     $$('[data-gpsesnext]').forEach((b) => b.addEventListener('click', sesNext)); $$('[data-gpsesend]').forEach((b) => b.addEventListener('click', () => endSession(false)));
   }
-  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, dailyPick, startSession, afterResult };
+  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, dailyPick, startSession, startTest, testCard, afterResult };
 }
