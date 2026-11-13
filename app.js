@@ -151,6 +151,8 @@ const NAV = [['home', 'Home'], ['play', 'Play'], ['rounds', 'Rounds'], ['stats',
 let EXTRA = null;                         // pages registered from pages2.js / play.js
 let SUBWIRE = [];                         // sub-pages shown inside a hub that need their own event wiring
 let EMBED = null;
+const SETTINGS_PAGES = ['settings', 'data', 'help', 'corrections'];
+let lastMain = '#home';                   // where Done / back returns to from Settings
 let PROG = null;                          // progress: forecast, milestones, roadmaps, badges (progress.js)
 let COMP = null;                          // practice competition + friends (compete.js)
 let E_CACHE = null;
@@ -629,7 +631,14 @@ function render() {
   $('#title').textContent = key === 'rounds' && ui.rd_open ? 'Round' : PAGES[key][0];
   $('#nav').innerHTML = NAV.map(([p, label]) => `<a href="#${p}" class="${p === key ? 'on' : ''}">${icon(PAGES[p][1], 24)}${label}</a>`).join('');
   $('#filterBtn').hidden = !FILTERED.has(key) || !DS.rounds.length || (key === 'rounds' && !!ui.rd_open) || (key === 'stats' && ['handicap', 'insights'].includes(segVal('sx_tab', 'scoring')));
-  $('#gearBtn').classList.toggle('on', ['settings', 'data', 'help', 'corrections'].includes(key));
+  // Settings and its pages: a back arrow on the left and Done on the right take you back to where you were
+  const inSettings = SETTINGS_PAGES.includes(key);
+  if (!inSettings) lastMain = location.hash || '#home';
+  $('header').classList.toggle('sub', inSettings); $('header').classList.remove('away');
+  $('#backBtn').hidden = !inSettings;
+  if (inSettings) $('#backBtn').innerHTML = `${icon('back', 24)}${key === 'settings' ? '' : 'Settings'}`;
+  const gb = $('#gearBtn'); gb.classList.toggle('done', inSettings); gb.innerHTML = inSettings ? 'Done' : icon('gear', 25);
+  gb.setAttribute('href', inSettings ? lastMain : '#settings'); gb.setAttribute('aria-label', inSettings ? 'Close settings' : 'Settings');
   plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = []; SUBWIRE = []; EMBED = null;
   let html;
   try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'corrections', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
@@ -822,7 +831,10 @@ async function loadSample() {
 
 // ------------------------------------------------------------------ boot
 $('#filterBtn').addEventListener('click', filterSheet);
-$('#gearBtn').innerHTML = icon('gear', 22);
+$('#gearBtn').innerHTML = icon('gear', 25);
+$('#backBtn').addEventListener('click', () => { const k = (location.hash.slice(1) || 'home').split('?')[0]; location.hash = k === 'settings' ? lastMain : '#settings'; });
+// the header slides away while you scroll down and comes back as soon as you scroll up
+{ let y0 = scrollY; addEventListener('scroll', () => { const y = scrollY, h = $('header'); if (y < 50 || y < y0 - 6) h.classList.remove('away'); else if (y > y0 + 6 && !document.querySelector('.sheet.open, #sheet.open')) h.classList.add('away'); if (Math.abs(y - y0) > 6) y0 = y; }, { passive: true }); }
 // bottom bar: Play opens the live round, Rounds goes back to the list (like tapping a tab bar twice on iOS)
 $('#nav').addEventListener('click', (e) => { const h = e.target.closest('a')?.getAttribute('href'); if (h === '#play') ui.pl_tab = 'round'; if (h === '#rounds') ui.rd_open = null; saveUi(); if (h === location.hash) render(); });
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#sheet').classList.remove('open'); });
