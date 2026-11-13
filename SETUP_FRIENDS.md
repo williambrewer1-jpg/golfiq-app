@@ -2,7 +2,9 @@
 
 You do this once (about 10 minutes, on the iPhone in Safari or on a computer). Friends don't set anything up; they join with your invite link.
 
-**What gets shared:** game scores (with a handicap level), your nickname, the group name and live side-game scorecards (names, handicap indexes, hole scores). **What stays on your phone:** rounds, shots, Garmin data, coach notes and everything else.
+**What gets shared:** game scores (with a handicap level), your nickname, the group name and live side-game scorecards (names, handicap indexes, hole scores). For guided games it also shares the tier you reached, whether you beat your own target, whether you used a pressure finish, and the result of each step (hit or miss, or strokes) so friends can play against your score. **What stays on your phone:** rounds, shots, Garmin data, coach notes and everything else.
+
+**Weekly league and ghosts need no new setup.** They read the same `scores` documents the leaderboards already use, so there are no new Firestore paths and **the security rules below are unchanged**. If you set up your group before this update, you do not need to touch Firebase. A score document now has up to 17 fields (the rules allow 20), and the league is worked out on each phone from the week's scores. It resets every ISO week (Monday).
 
 **Cost:** Firebase's free Spark plan. A group of friends uses a tiny fraction of its daily limits (50,000 reads and 20,000 writes per day), and the Spark plan has no billing account attached, so it can't charge you.
 

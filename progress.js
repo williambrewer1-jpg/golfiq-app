@@ -4,6 +4,7 @@ import * as F from './features.js';
 import * as B from './bench.js';
 import * as CO from './coach.js';
 import * as SK from './skills.js';
+import * as GM from './games.js';
 
 export function registerProgress(c) {
   const { A, esc, fmt, plot, note } = c;
@@ -16,7 +17,7 @@ export function registerProgress(c) {
 
   let memo = { ds: null, j: null, v: null };
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, Math.floor(Date.now() / 36e5)]);
+    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, Math.floor(Date.now() / 36e5)]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -26,7 +27,7 @@ export function registerProgress(c) {
     const diffs = ds.rounds.filter((r) => A.isNum(r.differential_for_index) && r.date).sort((a, b) => a.date.localeCompare(b.date)).map((r) => r.differential_for_index);
     const idx = diffs.length >= 3 ? A.whsIndex(diffs.slice(-20)) : off0;
     const sk = SK.skillRatings({ rounds: ds.rounds, holes: ds.holes, shots: ds.shots, results: J().results || [], games: games(), unitM: unitM(), findings: fs, pinned: J().focus?.pinned || [] });
-    const plan = CO.potentialPlan({ ratings: sk, results: J().results || [], rounds: ds.rounds, index: A.isNum(idx) ? idx : null, baselines: J().potential_base || {} });
+    const plan = CO.potentialPlan({ ratings: sk, results: J().results || [], rounds: ds.rounds, index: A.isNum(idx) ? idx : null, baselines: J().potential_base || {}, challenges: J().course_challenges || [] });
     const fc = CO.forecast(ds.rounds, { savings, gain: plan.gain });
     // remember the strokes value when a target is first hit, so a sub-skill the course later confirms keeps its credit
     const fresh = plan.ledger.filter((x) => x.hits > 0 && !(J().potential_base || {})[x.sub]);
@@ -39,7 +40,7 @@ export function registerProgress(c) {
     const short = CO.roadmap(CO.SHORT_GAMES, res, g, unitM(), hcp), long = CO.roadmap(CO.LONG_GAMES, res, g, unitM(), hcp);
     const st = CO.streaks(CO.practiceDates(J()));
     const goals = CO.weeklyGoal({ findings: fs, roadmaps: [...short, ...long], results: res, games: g, assigned: CO.assignments(J().notes) });
-    const bd = CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] });
+    const bd = [...CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] }), ...GM.tierBadges(g, res, unitM()).filter((b) => b.earned)];
     memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd } };
     return memo.v;
   }

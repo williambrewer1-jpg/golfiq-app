@@ -3,6 +3,8 @@ import * as A from './analytics.js';
 import * as F from './features.js';
 import { registerCompete } from './compete.js';
 import { registerProgress } from './progress.js';
+import { registerGuided } from './guided.js';
+import * as CH from './challenges.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -154,7 +156,7 @@ let EMBED = null;
 const SETTINGS_PAGES = ['settings', 'data', 'help', 'corrections'];
 let lastMain = '#home';                   // where Done / back returns to from Settings
 let PROG = null;                          // progress: forecast, milestones, roadmaps, badges (progress.js)
-let COMP = null;                          // practice competition + friends (compete.js)
+let COMP = null; let GUIDED = null;                          // practice competition + friends (compete.js)
 let E_CACHE = null;
 // expected strokes to hole out (your strokes-gained model), rebuilt when the data changes
 function expectedFn() { if (!E_CACHE || E_CACHE.ds !== DS) E_CACHE = { ds: DS, f: A.expectedModel(DS, TOUR) }; return E_CACHE.f; }                         // round shown inside the round page (review / edit tabs)
@@ -189,6 +191,7 @@ function pageHome() {
     : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
   <div class="kpis">${kpi('GolfIQ index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
   ${PROG.homeCard()}
+  ${GUIDED.homeCard()}
   ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
@@ -407,7 +410,9 @@ function killersCard(rid) {
 }
 function sideCard(rid) {
   const sr = (state.journal.sideResults || []).find((x) => x.round_id === rid);
-  return sr ? `<h3>Side games</h3>${EXTRA.play.standingsHtml(sr.game)}` : '';
+  const cc = (state.journal.course_challenges || []).find((x) => x.round_id === rid), chd = cc ? CH.byKey(cc.key) : null;
+  const chal = chd ? `<h3>Round challenge</h3><div class="chal ${cc.achieved ? 'achieved' : 'failed'}"><b>${esc(CH.titleFor(chd, cc.n || 18))}</b><span>${cc.achieved ? 'done ✓' : 'not this time'}</span></div><p class="small muted" style="margin:4px 0 0">${chd.kind === 'zero' ? `${cc.value} ${esc(chd.short)}` : `${cc.value} of ${cc.goal}`}${cc.achieved ? ' · counted as a hit towards your potential' : ''}</p>` : '';
+  return chal + (sr ? `<h3>Side games</h3>${EXTRA.play.standingsHtml(sr.game)}` : '');
 }
 function roundDetail(rid) {
   const row = DS.rounds.find((x) => x.round_id === rid); if (!row) return null;
@@ -675,6 +680,7 @@ function wire(page) {
   $$('[data-openround]').forEach((a) => a.addEventListener('click', () => { ui.rd_open = a.dataset.openround; ui.rd_tab = a.dataset.tab || 'card'; saveUi(); }));
   $$('[data-stats]').forEach((a) => a.addEventListener('click', () => { ui.sx_tab = a.dataset.stats; saveUi(); }));
   $$('[data-practice]').forEach((a) => a.addEventListener('click', () => { ui.pr_tab = a.dataset.practice; saveUi(); }));
+  GUIDED?.wire();
   on('#syncNow', 'click', async () => {
     const m = $('#syncMsg'); m.textContent = ' Syncing…';
     try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }
@@ -843,12 +849,12 @@ addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); ret
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
-    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get progress() { return PROG; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
-  COMP = registerCompete(ctx); COMP.handleInvite(); PROG = registerProgress(ctx);
+    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get progress() { return PROG; }, get guided() { return GUIDED; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+  COMP = registerCompete(ctx); COMP.handleInvite(); PROG = registerProgress(ctx); GUIDED = registerGuided(ctx);
   EXTRA = registerPages(ctx);
   const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
   PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
   if (window.Plotly || document.readyState === 'complete') render(); else addEventListener('load', render, { once: true });
-  window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; } };
+  window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; }, get progress() { return PROG; } };
 })();

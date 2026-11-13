@@ -3,6 +3,7 @@
 import * as F from './features.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
+import * as CH from './challenges.js';
 import { registerFriends } from './friends.js';
 
 export function registerPlay(c) {
@@ -30,6 +31,13 @@ export function registerPlay(c) {
     return { known, near };
   }
   const km = (m) => (m === null || m === undefined ? '' : m < 950 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(m < 9500 ? 1 : 0)} km`);
+  // one small goal for the round, chosen from the focus areas (or the sub-skill that is not showing up on the course yet)
+  function challengeOffer() {
+    let ch = null; try { const v = c.progress.data(); ch = CH.pickChallenge({ ratings: v.sk, ledger: v.plan.ledger, history: J().course_challenges || [], n: 18 }); } catch (e) { ch = null; }
+    if (!ch) return '';
+    const why = ch.stalled ? 'Your practice is not showing up on the course yet. This is the way to check.' : 'Matches one of your focus areas. Counts as a hit towards your potential if you do it.';
+    return `<label class="chal-offer"><input type="checkbox" name="chal" value="${esc(ch.key)}" checked><span><b>Round challenge: ${esc(ch.name)}</b><small>${esc(why)}${ch.kind === 'min' ? ' Scaled down for nine holes.' : ''}</small></span></label>`;
+  }
   function startCard() {
     const { known, near } = courseOptions(), all = [...known, ...near];
     const closest = all.filter((x) => x.dist_m !== null && x.dist_m < 3000).sort((a, b) => a.dist_m - b.dist_m)[0];
@@ -45,6 +53,7 @@ export function registerPlay(c) {
       <div class="row"><div><label class="f">Tee</label><input name="tee" value="${esc(last?.tee || '')}"></div><div><label class="f">Course rating</label><input name="rating" type="number" step="0.1" inputmode="decimal" value="${last?.course_rating ?? ''}"></div><div><label class="f">Slope</label><input name="slope" type="number" inputmode="numeric" value="${last?.slope ?? ''}"></div></div>
       <div class="row"><div><label class="f">Holes</label><select name="n"><option value="18">18</option><option value="9">9</option></select></div><div><label class="f">Starting hole</label><select name="first"><option>1</option><option>10</option></select></div></div>
       ${FR.startFields()}
+      ${challengeOffer()}
       <p><button class="btn">Start round</button></p></form>
       ${note('Rating and slope are on the scorecard; they are needed for your handicap and Stableford. Courses near you come from OpenStreetMap, which has names and outlines but not ratings or stroke indexes – add those once from the scorecard. If you also track this round on a Garmin watch, the synced Garmin round replaces this one automatically.')}</div>`;
   }
@@ -75,7 +84,7 @@ export function registerPlay(c) {
     // a course you've played before inherits an outline downloaded for the same course from the map
     if (ex && !c.state.osm[cid]) { const m = Object.entries(c.state.osm).find(([k, v]) => k.startsWith('osm-') && v?.name && norm(v.name) === norm(ex.course_name)); if (m) c.state.osm[cid] = m[1]; }
     J().draft = { id: `m${Date.now()}`, start: localNow(), course_id: ex || osmPick ? cid : null, course_name: ex ? ex.course_name : osmPick ? osmPick.name : String(f.get('name')).trim(), courseGlobalId: ex && cid.startsWith('garmin-') ? cid.slice(7) : null,
-      tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f) };
+      tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f), challenge: CH.byKey(f.get('chal')) ? f.get('chal') : null };
     await saveDraft(); c.rerender();
     if (J().draft.side?.wantLive && c.state.cloud?.group) $('#liveStart')?.click();
     if (osmPick && !c.state.osm[cid]?.features?.length) {
@@ -339,7 +348,9 @@ export function registerPlay(c) {
     const played = order.filter((n) => d.holes[n].strokes > 0), tot = A.sum(played.map((n) => d.holes[n].strokes)), par = A.sum(played.map((n) => d.holes[n].par));
     const putts = played.map((n) => d.holes[n].putts).filter(A.isNum), fw = played.filter((n) => d.holes[n].par >= 4 && d.holes[n].fairway);
     const step = (key, label, val, min) => `<div class="step"><span>${label}</span><div><button type="button" data-step="${key}" data-d="-1" aria-label="less">−</button><b>${val ?? '–'}</b><button type="button" data-step="${key}" data-d="1" aria-label="more">+</button></div></div>`;
-    return `<div class="card"><div class="rv-h"><h2 style="margin:0">Score – hole ${d.hole}</h2><span class="small muted">${idx + 1} of ${d.n}</span></div>
+    const cs = d.challenge ? CH.status(d.challenge, order.map((n) => d.holes[n]), d.n) : null;
+    const chip = cs ? `<div class="chal ${cs.state}" id="plChal"><b>${esc(cs.title)}</b><span>${cs.state === 'failed' ? 'missed' : cs.state === 'achieved' ? 'done ✓' : esc(cs.text)}</span></div>` : '';
+    return `<div class="card"><div class="rv-h"><h2 style="margin:0">Score – hole ${d.hole}</h2><span class="small muted">${idx + 1} of ${d.n}</span></div>${chip}
       <div class="seg" id="plPar">${[3, 4, 5].map((p) => `<button data-par="${p}" class="${h.par === p ? 'on' : ''}">Par ${p}</button>`).join('')}</div>
       <div class="steps2">${step('strokes', 'Score', h.strokes || null)}${step('putts', 'Putts', h.putts)}${step('penalties', 'Penalties', h.penalties)}</div>
       ${h.par >= 4 ? `<label class="f">Fairway</label><div class="seg" id="plFw">${[['LEFT', 'Missed left'], ['HIT', 'Hit'], ['RIGHT', 'Missed right']].map(([v, l]) => `<button data-fw="${v}" class="${h.fairway === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
@@ -399,7 +410,12 @@ export function registerPlay(c) {
       if (res.failed) { toast(`Could not save: ${res.errors[0]}`); return; }
       const rid = `garmin-${d.id}`;
       if (d.side) { J().sideResults = J().sideResults || []; J().sideResults.push({ round_id: rid, date: d.start.slice(0, 10), course: d.course_name, game: FR.gameOf(d, d.side, Object.fromEntries(order.filter((n) => d.holes[n].strokes > 0).map((n) => [n, d.holes[n].strokes]))) }); }
-      J().draft = null; stopGps(); await saveDraft(); c.ui.rd_open = rid; c.saveUi(); c.done('Round saved'); location.hash = '#rounds';
+      let msg = 'Round saved';
+      if (d.challenge) {
+        const o = CH.outcome(d.challenge, order.map((x) => d.holes[x]), d.n), ch = CH.byKey(d.challenge);
+        if (o) { J().course_challenges = J().course_challenges || []; J().course_challenges.push({ round_id: rid, date: d.start.slice(0, 10), key: o.key, sub: ch.sub, goal: o.goal, value: o.value, n: o.n, achieved: o.achieved }); msg = `Round saved – ${CH.titleFor(ch, d.n)}: ${o.achieved ? 'done ✓ (counts as a hit)' : 'not this time'}`; }
+      }
+      J().draft = null; stopGps(); await saveDraft(); c.ui.rd_open = rid; c.saveUi(); c.done(msg); location.hash = '#rounds';
     });
   }
   return { pages: { play: ['Play', 'flag'] }, render: { play: pagePlay }, wire: { play: wirePlay }, noData: ['play'], standingsHtml: FR.standingsHtml, _setFix: (f) => { fix = f; } };
