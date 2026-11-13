@@ -181,13 +181,37 @@ export function courseBBox(ds, courseId, marginDeg = 0.002) {
   // trim GPS outliers so one bad point doesn't make the map area huge
   return [quantile(la, 0.01) - marginDeg, quantile(lo, 0.01) - marginDeg, quantile(la, 0.99) + marginDeg, quantile(lo, 0.99) + marginDeg];
 }
-export const overpassQuery = (b) => `[out:json][timeout:25];(way["golf"~"^(fairway|green|bunker|tee|water_hazard|lateral_water_hazard)$"](${b.map((x) => x.toFixed(5)).join(',')});way["natural"="water"](${b.map((x) => x.toFixed(5)).join(',')}););out geom;`;
+// Course outlines from OpenStreetMap. Version 2 adds trees (woods, tree rows, single trees), rough and the hole centre lines.
+export const OSM_VERSION = 2;
+export const overpassQuery = (b) => { const bb = b.map((x) => x.toFixed(5)).join(',');
+  return `[out:json][timeout:25];(way["golf"~"^(fairway|green|bunker|tee|water_hazard|lateral_water_hazard|rough|hole)$"](${bb});way["natural"~"^(water|wood|scrub|tree_row)$"](${bb});way["landuse"="forest"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});node["natural"="tree"](${bb}););out geom;`; };
+const r6 = (v) => Math.round(v * 1e6) / 1e6;
+function osmKind(t = {}) {
+  const g = t.golf;
+  if (g === 'fairway' || g === 'green' || g === 'bunker' || g === 'tee' || g === 'rough' || g === 'hole') return g;
+  if (g === 'water_hazard' || g === 'lateral_water_hazard' || t.natural === 'water') return 'water';
+  if (t.natural === 'wood' || t.natural === 'scrub' || t.landuse === 'forest') return 'trees';
+  if (t.natural === 'tree_row') return 'treerow';
+  if (t.natural === 'tree') return 'tree';
+  return null;
+}
 export function parseOverpass(json) {
   const out = [];
   for (const e of json?.elements || []) {
-    if (e.type !== 'way' || !Array.isArray(e.geometry) || e.geometry.length < 3) continue;
-    const g = e.tags?.golf, kind = g === 'fairway' ? 'fairway' : g === 'green' ? 'green' : g === 'bunker' ? 'bunker' : g === 'tee' ? 'tee' : (g === 'water_hazard' || g === 'lateral_water_hazard' || e.tags?.natural === 'water') ? 'water' : null;
-    if (kind) out.push({ kind, pts: e.geometry.map((p) => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lon * 1e6) / 1e6]) });
+    const kind = osmKind(e.tags);
+    if (!kind) continue;
+    if (e.type === 'node') { if (kind === 'tree' && isNum(e.lat) && isNum(e.lon)) out.push({ kind, pts: [[r6(e.lat), r6(e.lon)]] }); continue; }
+    if (e.type === 'relation') {                     // multipolygon woods: keep each outer ring
+      if (kind !== 'trees' && kind !== 'water') continue;
+      for (const m of e.members || []) if (m.role === 'outer' && Array.isArray(m.geometry) && m.geometry.length >= 3) out.push({ kind, pts: m.geometry.map((p) => [r6(p.lat), r6(p.lon)]) });
+      continue;
+    }
+    if (e.type !== 'way' || !Array.isArray(e.geometry)) continue;
+    const pts = e.geometry.map((p) => [r6(p.lat), r6(p.lon)]), line = kind === 'hole' || kind === 'treerow';
+    if (pts.length < (line ? 2 : 3)) continue;
+    const f = { kind, pts };
+    if (kind === 'hole') { const n = parseInt(e.tags.ref, 10); f.ref = Number.isFinite(n) ? n : null; f.par = parseInt(e.tags.par, 10) || null; }
+    out.push(f);
   }
   return out;
 }
@@ -199,9 +223,30 @@ export function pointInPolygon(lat, lon, pts) {
   }
   return inside;
 }
+// metres from a point to a polyline (local flat approximation – fine at golf-hole scale)
+export function distToLine(lat, lon, pts) {
+  const kx = Math.cos(lat * Math.PI / 180) * 111320, ky = 110540;
+  let best = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const ax = (pts[i][1] - lon) * kx, ay = (pts[i][0] - lat) * ky;
+    if (pts.length === 1) return Math.hypot(ax, ay);
+    if (i === pts.length - 1) break;
+    const bx = (pts[i + 1][1] - lon) * kx, by = (pts[i + 1][0] - lat) * ky, dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+    const t = L ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L)) : 0;
+    best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+  }
+  return best;
+}
+export const TREE_RADIUS_M = 4;
+// What the ball would be lying on at a point, according to the mapped outlines.
 export function surfaceAt(lat, lon, features) {
   if (!isNum(lat) || !isNum(lon)) return null;
-  for (const kind of ['green', 'bunker', 'water', 'tee', 'fairway']) for (const f of features) if (f.kind === kind && pointInPolygon(lat, lon, f.pts)) return kind;
+  for (const kind of ['green', 'bunker', 'water']) for (const f of features) if (f.kind === kind && pointInPolygon(lat, lon, f.pts)) return kind;
+  for (const f of features) {
+    if (f.kind === 'trees' && pointInPolygon(lat, lon, f.pts)) return 'trees';
+    if ((f.kind === 'tree' || f.kind === 'treerow') && Math.abs(f.pts[0][0] - lat) < 0.002 && distToLine(lat, lon, f.pts) <= TREE_RADIUS_M) return 'trees';
+  }
+  for (const kind of ['tee', 'fairway']) for (const f of features) if (f.kind === kind && pointInPolygon(lat, lon, f.pts)) return kind;
   return 'rough';
 }
 // Map-based stats: where shots really finished according to the mapped course outlines.
@@ -337,4 +382,28 @@ export function manualBundle(d) {
     holes: holes.map((h) => ({ number: h.n, strokes: h.strokes, putts: h.putts ?? null, penalties: h.penalties ?? 0, fairwayShotOutcome: pars[h.n - 1] >= 4 ? (h.fairway || null) : null })) };
   if (d.courseGlobalId) sc.courseGlobalId = d.courseGlobalId;
   return { golfiq_bundle_version: 1, kind: 'round', source: 'manual_entry', scorecard_id: String(d.id), summary: { id: d.id }, detail: { scorecardDetails: [{ scorecard: sc }], courseSnapshots: [snap] }, shots: { holeShots: [] } };
+}
+
+// ------------------------------------------------------------------ short game
+// Scrambling, sand saves and chip/pitch results from your scorecards and tracked shots.
+export function shortGame(holes, shots, rounds) {
+  const key = (r, h) => `${r}|${h}`, hk = new Map(holes.map((h) => [key(h.round_id, h.hole), h]));
+  const pctOf = (arr, f) => (arr.length ? 100 * arr.filter(f).length / arr.length : null);
+  const missed = holes.filter((h) => h.gir_eff === 0 && isNum(h.to_par));
+  const ag = shots.filter((s) => s.category === 'around_green' && !s.excluded);
+  const agByHole = groupBy(ag, (s) => key(s.round_id, s.hole));
+  const agHoles = [...agByHole.keys()].map((k) => ({ h: hk.get(k), n: agByHole.get(k).length })).filter((x) => x.h && isNum(x.h.putts_eff));
+  const sandHoles = [...new Set(ag.filter((s) => s.start_lie === 'Sand').map((s) => key(s.round_id, s.hole)))].map((k) => hk.get(k)).filter((h) => h && isNum(h.to_par));
+  const bands = [[0, 9.144], [9.144, 18.288], [18.288, 27.432]].map(([lo, hi]) => {
+    const g = ag.filter((s) => isNum(s.start_to_pin) && s.start_to_pin > lo && s.start_to_pin <= hi);
+    return { lo_m: lo, hi_m: hi, shots: g.length, on_green_pct: pctOf(g.filter((s) => s.on_green_end !== null), (s) => s.on_green_end === 1), median_left_m: median(g.map((s) => s.end_to_pin).filter(isNum)) };
+  });
+  const byRound = rounds.map((r) => { const m = missed.filter((h) => h.round_id === r.round_id); return { round_id: r.round_id, date: r.date, missed: m.length, scrambling: pctOf(m, (h) => h.to_par <= 0) }; });
+  return {
+    missed_greens: missed.length, missed_per_round: rounds.length ? missed.length / rounds.length : null,
+    scrambling_pct: pctOf(missed, (h) => h.to_par <= 0), double_after_miss_pct: pctOf(missed, (h) => h.to_par >= 2),
+    up_down_pct: pctOf(agHoles, (x) => x.n === 1 && x.h.putts_eff === 1), up_down_n: agHoles.length,
+    chip_on_green_pct: pctOf(ag.filter((s) => s.on_green_end !== null), (s) => s.on_green_end === 1), chips: ag.length,
+    sand_save_pct: pctOf(sandHoles, (h) => h.to_par <= 0), sand_n: sandHoles.length, bands, byRound,
+  };
 }
