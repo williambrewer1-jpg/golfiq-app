@@ -4,6 +4,7 @@ import * as F from './features.js';
 import * as B from './bench.js';
 import * as CO from './coach.js';
 import * as SK from './skills.js';
+import * as GM from './games.js';
 
 export function registerProgress(c) {
   const { A, esc, fmt, plot, note } = c;
@@ -39,7 +40,7 @@ export function registerProgress(c) {
     const short = CO.roadmap(CO.SHORT_GAMES, res, g, unitM(), hcp), long = CO.roadmap(CO.LONG_GAMES, res, g, unitM(), hcp);
     const st = CO.streaks(CO.practiceDates(J()));
     const goals = CO.weeklyGoal({ findings: fs, roadmaps: [...short, ...long], results: res, games: g, assigned: CO.assignments(J().notes) });
-    const bd = CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] });
+    const bd = [...CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] }), ...GM.tierBadges(g, res, unitM()).filter((b) => b.earned)];
     memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd } };
     return memo.v;
   }

@@ -172,7 +172,7 @@ export function registerCompete(c) {
 
   // ------------------------------------------------------------ wiring
   function wire() {
-    $$('[data-record]').forEach((b) => b.addEventListener('click', () => { c.ui.pr_tab = 'games'; c.ui.pg_game = b.dataset.record; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
+    $$('[data-record]').forEach((b) => b.addEventListener('click', () => { if (c.guided?.canGuide(b.dataset.record)) { c.guided.start(b.dataset.record); return; } c.ui.pr_tab = 'games'; c.ui.pg_game = b.dataset.record; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
     $$('[data-prtab]').forEach((b) => b.addEventListener('click', () => { c.ui.pr_tab = b.dataset.prtab; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
     $$('[data-friends]').forEach((a) => a.addEventListener('click', () => { c.ui.st_tab = 'friends'; c.saveUi(); }));
     if ($('#lbWeek') || $('#lbMonth')) loadBoards();

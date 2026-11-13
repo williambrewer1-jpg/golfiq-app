@@ -359,10 +359,13 @@ export function registerPages(c) {
     const games = F.gameStats(allGames(), J().results), entry = games.filter((x) => !x.auto), gid = segVal('pg_game', entry[0].id), g = games.find((x) => x.id === gid) || entry[0];
     const cats = [...new Set(entry.map((x) => x.cat))], uM = c.UNIT === 'yd' ? 0.9144 : 1, L = (s) => c.compete.lvlText(c.compete.lvl(g.id, s));
     const bench = B.hasLevel(g.id) ? `<p class="small muted" style="margin:6px 0">Handicap benchmarks: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 hcp ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 hcp ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
-    return `<div class="card"><h2>Record a score</h2><form id="pgForm">${select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
-      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}
+    if (c.guided?.draft() || c.ui.game_result) return c.guided.screen();
+    const launch = c.guided ? c.guided.launcher(g) : '';
+    return `<div class="card"><h2>Play a game</h2>${select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
+      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}${launch}
+      <details id="pgQuick"><summary><b>Quick entry</b> <span class="small muted">type in a score you already played</span></summary><form id="pgForm" style="margin-top:8px">
       <div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}" required></div><div><label class="f">Score (${esc(g.unit || '')})</label><input name="score" type="number" inputmode="decimal" step="any" ${g.max ? `max="${g.max}"` : ''} min="0" required></div></div>
-      <label class="f">Note (optional)</label><input name="note" style="width:100%" placeholder="conditions, feel, club used…"><p><button class="btn">Save score</button></p></form></div>
+      <label class="f">Note (optional)</label><input name="note" style="width:100%" placeholder="conditions, feel, club used…"><p><button class="btn">Save score</button></p></form></details></div>
       <div class="card"><h2>${esc(g.name)}</h2>${g.n ? `<div class="kpis">${kpi('Best', g.best, null, true, 0)}${B.hasLevel(g.id) ? `<div class="kpi"><div class="l">Best = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.best)?.label || '–')}</div></div><div class="kpi"><div class="l">Last 5 = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.avg5)?.label || '–')}</div></div>` : ''}${kpi('Last 5 average', g.avg5, A.isNum(g.prev5) ? g.avg5 - g.prev5 : null, g.better !== 'lower')}${kpi('Played', g.n, null, true, 0)}</div>
         ${g.n >= 2 ? plot([{ x: g.results.map((r) => r.date), y: g.results.map((r) => r.score), mode: 'lines+markers', line: { color: '#1b7f4b', width: 2.5 }, marker: { size: 7 } }], { height: 220, yaxis: { title: { text: g.unit || 'score' }, ...(g.better === 'lower' ? { autorange: 'reversed' } : {}) } }) : ''}
         ${table([...g.results].reverse().slice(0, 15), [['date', 'Date'], ['score', 'Score', (v) => fmt(v, Number.isInteger(v) ? 0 : 1) + (g.max ? ` / ${g.max}` : '')], ...(B.hasLevel(g.id) ? [['score', 'Level', (v) => L(v)]] : []), ['note', 'Note'], ['id', '', (v) => `<button class="btn sec sm" data-delres="${esc(v)}">Delete</button>`]])}` : '<p class="muted">No scores yet for this game.</p>'}</div>
@@ -431,6 +434,7 @@ export function registerPages(c) {
     });
   }
   function wirePractice() {
+    c.guided?.wire();
     $('#pgForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target);
       const res = { id: `r${Date.now()}`, game: $('[data-sel=pg_game]').value, date: f.get('date'), score: Number(f.get('score')), note: f.get('note') || '' };
       J().results.push(res); const l = c.compete.lvl(res.game, res.score); await saveJ(`Score saved${l ? ` – ${l.label}` : ''}`); c.compete.onScore(res); });

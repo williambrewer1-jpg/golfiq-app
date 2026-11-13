@@ -233,7 +233,7 @@ export function potentialPlan({ ratings, results = [], rounds = [], now = Date.n
     const games = sub.games.filter((g) => isNum(g.target)); if (!games.length || !sub.enough) continue;
     const base = Math.max(sub.strokes || 0, baselines[sub.full_key] || 0); if (base <= 0) continue;
     const mine = res.filter((r) => dt(r.date) >= since(P.hit_days)).map((r) => ({ r, g: games.find((g) => g.id === gid(r)) })).filter((x) => x.g && hitScore(x.r, x.g));
-    const hits = mine.reduce((t, x) => t + (x.r.pressure ? P.pressure_hit : 1), 0), progress = Math.min(1, hits / P.hits_needed);
+    const hits = mine.reduce((t, x) => t + (x.r.pressure && x.r.pressure_hit !== false ? P.pressure_hit : 1), 0), progress = Math.min(1, hits / P.hits_needed);
     const first = res.filter((r) => games.some((g) => g.id === gid(r) && hitScore(r, g))).map((r) => r.date).sort()[0] || null;
     const after = first ? rounds.filter((r) => r.format === '18' && String(r.date) > String(first)).length : 0;
     const onCourse = isNum(sub.you) && isNum(sub.target_value) && (sub.higher ? sub.you >= sub.target_value : sub.you <= sub.target_value);

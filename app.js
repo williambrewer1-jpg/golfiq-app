@@ -3,6 +3,7 @@ import * as A from './analytics.js';
 import * as F from './features.js';
 import { registerCompete } from './compete.js';
 import { registerProgress } from './progress.js';
+import { registerGuided } from './guided.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -154,7 +155,7 @@ let EMBED = null;
 const SETTINGS_PAGES = ['settings', 'data', 'help', 'corrections'];
 let lastMain = '#home';                   // where Done / back returns to from Settings
 let PROG = null;                          // progress: forecast, milestones, roadmaps, badges (progress.js)
-let COMP = null;                          // practice competition + friends (compete.js)
+let COMP = null; let GUIDED = null;                          // practice competition + friends (compete.js)
 let E_CACHE = null;
 // expected strokes to hole out (your strokes-gained model), rebuilt when the data changes
 function expectedFn() { if (!E_CACHE || E_CACHE.ds !== DS) E_CACHE = { ds: DS, f: A.expectedModel(DS, TOUR) }; return E_CACHE.f; }                         // round shown inside the round page (review / edit tabs)
@@ -843,12 +844,12 @@ addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); ret
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
-    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get progress() { return PROG; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
-  COMP = registerCompete(ctx); COMP.handleInvite(); PROG = registerProgress(ctx);
+    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get progress() { return PROG; }, get guided() { return GUIDED; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+  COMP = registerCompete(ctx); COMP.handleInvite(); PROG = registerProgress(ctx); GUIDED = registerGuided(ctx);
   EXTRA = registerPages(ctx);
   const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
   PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
   if (window.Plotly || document.readyState === 'complete') render(); else addEventListener('load', render, { once: true });
-  window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; } };
+  window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; } };
 })();
