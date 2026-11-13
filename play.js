@@ -16,25 +16,75 @@ export function registerPlay(c) {
   const courses = () => [...new Map(c.DS.rounds.filter((r) => r.course_id).map((r) => [r.course_id, r])).values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   // ------------------------------------------------------------ start a round
+  // Courses: ones you've played, plus golf courses near you from OpenStreetMap (worldwide – UK, Australia, everywhere mapped)
+  let autoNear = false;
+  const nearby = () => c.state.osm.__nearby || null;
+  const here = () => (fix ? [fix.lat, fix.lon] : nearby() ? [nearby().lat, nearby().lon] : null);
+  const norm = (x) => String(x || '').toLowerCase().replace(/golf|club|course|country|links|the|&|\band\b|[^a-z0-9]/g, '');
+  function courseOptions() {
+    const cs = courses(), loc = here(), locs = F.courseLocations(c.DS);
+    const known = cs.map((x) => ({ id: x.course_id, name: x.course_name, row: x, dist_m: loc && locs.get(x.course_id) ? A.haversine(loc[0], loc[1], ...locs.get(x.course_id)) : null }));
+    if (loc) known.sort((a, b) => (a.dist_m ?? 1e9) - (b.dist_m ?? 1e9));
+    const kn = new Set(known.map((k) => norm(k.name)));
+    const near = (nearby()?.list || []).filter((n) => !kn.has(norm(n.name))).map((n) => ({ id: n.id, name: n.name, osm: n, dist_m: loc ? A.haversine(loc[0], loc[1], n.lat, n.lon) : n.dist_m }));
+    return { known, near };
+  }
+  const km = (m) => (m === null || m === undefined ? '' : m < 950 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(m < 9500 ? 1 : 0)} km`);
   function startCard() {
-    const cs = courses(), sel = segVal('pl_course', cs[0]?.course_id || 'new'), last = cs.find((x) => x.course_id === sel);
+    const { known, near } = courseOptions(), all = [...known, ...near];
+    const closest = all.filter((x) => x.dist_m !== null && x.dist_m < 3000).sort((a, b) => a.dist_m - b.dist_m)[0];
+    const sel = c.ui.pl_course && (all.some((x) => x.id === c.ui.pl_course) || c.ui.pl_course === 'new') ? c.ui.pl_course : (closest?.id || known[0]?.id || 'new');
+    const last = known.find((x) => x.id === sel)?.row, nb = nearby();
+    const opts = [...known.map((x) => [x.id, `${x.name}${x.dist_m !== null ? ` · ${km(x.dist_m)}` : ''}`]), ...near.map((x) => [x.id, `${x.name} · ${km(x.dist_m)}`]), ['new', 'New course…']];
     return `<div class="card"><h2>Start a round</h2><p class="small">Keep score as you play – strokes, putts, fairways and penalties – with live distances and your shot patterns on the map. It saves as a normal round, so every page of GolfIQ works without a Garmin watch.</p>
-      <form id="plStart">${select('pl_course', [...cs.map((x) => [x.course_id, x.course_name]), ['new', 'New course…']], sel, 'Course')}
+      <div class="nearby"><div class="rv-h"><b>Courses near you</b><button type="button" class="btn sec sm" id="plNear">${nb ? 'Refresh' : 'Find courses near me'}</button></div>
+        <span id="plNearMsg" class="small muted">${nb ? `${nb.list.length} golf courses within 40 km · ${esc(String(nb.at).slice(0, 10))}` : 'Uses your location and OpenStreetMap – works across the UK, Australia and most of the world.'}</span>
+        ${near.length || known.some((k) => k.dist_m !== null) ? `<div class="nlist">${all.filter((x) => x.dist_m !== null).sort((a, b) => a.dist_m - b.dist_m).slice(0, 6).map((x) => `<button type="button" class="nrow ${x.id === sel ? 'on' : ''}" data-pickcourse="${esc(x.id)}"><b>${esc(x.name)}</b><span>${km(x.dist_m)}${x.row ? ' · played before' : ''}</span></button>`).join('')}</div>` : ''}</div>
+      <form id="plStart">${select('pl_course', opts, sel, 'Course')}
       ${sel === 'new' ? '<label class="f">Course name</label><input name="name" required style="width:100%">' : ''}
       <div class="row"><div><label class="f">Tee</label><input name="tee" value="${esc(last?.tee || '')}"></div><div><label class="f">Course rating</label><input name="rating" type="number" step="0.1" inputmode="decimal" value="${last?.course_rating ?? ''}"></div><div><label class="f">Slope</label><input name="slope" type="number" inputmode="numeric" value="${last?.slope ?? ''}"></div></div>
       <div class="row"><div><label class="f">Holes</label><select name="n"><option value="18">18</option><option value="9">9</option></select></div><div><label class="f">Starting hole</label><select name="first"><option>1</option><option>10</option></select></div></div>
       ${FR.startFields()}
       <p><button class="btn">Start round</button></p></form>
-      ${note('Rating and slope are on the scorecard; they are needed for your handicap and Stableford. If you also track this round on a Garmin watch, the synced Garmin round replaces this one automatically (same course and start time).')}</div>`;
+      ${note('Rating and slope are on the scorecard; they are needed for your handicap and Stableford. Courses near you come from OpenStreetMap, which has names and outlines but not ratings or stroke indexes – add those once from the scorecard. If you also track this round on a Garmin watch, the synced Garmin round replaces this one automatically.')}</div>`;
+  }
+  async function findNearby(msgEl) {
+    const say = (t) => { if (msgEl) msgEl.textContent = t; };
+    say('Finding your location…');
+    const pos = fix ? [fix.lat, fix.lon] : await new Promise((res, rej) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude]), (e) => rej(new Error(e.code === 1 ? 'Location permission declined' : 'No location yet')), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }) : rej(new Error('No location service')));
+    say('Looking for golf courses…');
+    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(F.nearbyQuery(pos[0], pos[1])) });
+    if (!r.ok) throw new Error(`OpenStreetMap is busy (${r.status}) – try again in a minute`);
+    c.state.osm.__nearby = { at: new Date().toISOString(), lat: pos[0], lon: pos[1], list: F.parseNearby(await r.json(), pos[0], pos[1]) };
+    await S.saveOsm(c.state);
+  }
+  // Download the outline (fairways, greens, trees, hole lines with pars) for a course picked from the map
+  async function fetchOutline(id) {
+    const n = (nearby()?.list || []).find((x) => x.id === id); if (!n) return null;
+    const b = n.bbox || [n.lat - 0.012, n.lon - 0.012, n.lat + 0.012, n.lon + 0.012], pad = 0.002;
+    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(F.overpassQuery([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])) });
+    if (!r.ok) throw new Error(`outline download failed (${r.status})`);
+    c.state.osm[id] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), name: n.name, features: F.parseOverpass(await r.json()) };
+    await S.saveOsm(c.state); return c.state.osm[id];
   }
   async function start(e) {
     e.preventDefault(); const f = new FormData(e.target), cid = $('[data-sel=pl_course]').value, ex = courses().find((x) => x.course_id === cid);
-    const known = ex ? F.courseHoles(c.DS, cid) : {}, holes = {};
-    for (let i = 1; i <= 18; i++) holes[i] = { par: known[i]?.par || 4, si: known[i]?.si || null, strokes: 0, putts: null, fairway: null, penalties: 0 };
-    J().draft = { id: `m${Date.now()}`, start: localNow(), course_id: ex ? cid : null, course_name: ex ? ex.course_name : String(f.get('name')).trim(), courseGlobalId: ex && cid.startsWith('garmin-') ? cid.slice(7) : null,
+    const osmPick = cid.startsWith('osm-') ? (nearby()?.list || []).find((x) => x.id === cid) : null;
+    const known = ex ? F.courseHoles(c.DS, cid) : {}, holes = {}, opar = F.osmPars(c.state.osm[cid]?.features);
+    for (let i = 1; i <= 18; i++) holes[i] = { par: known[i]?.par || opar[i] || 4, si: known[i]?.si || null, strokes: 0, putts: null, fairway: null, penalties: 0 };
+    // a course you've played before inherits an outline downloaded for the same course from the map
+    if (ex && !c.state.osm[cid]) { const m = Object.entries(c.state.osm).find(([k, v]) => k.startsWith('osm-') && v?.name && norm(v.name) === norm(ex.course_name)); if (m) c.state.osm[cid] = m[1]; }
+    J().draft = { id: `m${Date.now()}`, start: localNow(), course_id: ex || osmPick ? cid : null, course_name: ex ? ex.course_name : osmPick ? osmPick.name : String(f.get('name')).trim(), courseGlobalId: ex && cid.startsWith('garmin-') ? cid.slice(7) : null,
       tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f) };
     await saveDraft(); c.rerender();
     if (J().draft.side?.wantLive && c.state.cloud?.group) $('#liveStart')?.click();
+    if (osmPick && !c.state.osm[cid]?.features?.length) {
+      try {
+        const o = await fetchOutline(cid), d = J().draft, pars = F.osmPars(o?.features);
+        if (d && d.course_id === cid) { for (const [h, p] of Object.entries(pars)) if (!d.holes[h].strokes) d.holes[h].par = p; await saveDraft(); }
+        toast(`Course outline loaded${Object.keys(pars).length ? ` – pars for ${Object.keys(pars).length} holes` : ''}`); c.rerender();
+      } catch (err) { toast(`Playing without the outline: ${err.message}`); }
+    }
   }
 
   // ------------------------------------------------------------ GPS
@@ -311,6 +361,10 @@ export function registerPlay(c) {
   function wirePlay() {
     const d = D(), re = async () => { await saveDraft(); c.rerender(); };
     $('#plStart')?.addEventListener('submit', start);
+    $('#plNear')?.addEventListener('click', async (e) => { e.target.disabled = true; try { await findNearby($('#plNearMsg')); c.ui.pl_course = null; c.saveUi(); c.rerender(); } catch (err) { $('#plNearMsg').textContent = err.message; e.target.disabled = false; } });
+    $$('[data-pickcourse]').forEach((b) => b.addEventListener('click', () => { c.ui.pl_course = b.dataset.pickcourse; c.saveUi(); c.rerender(); }));
+    // first visit with location already allowed: look up nearby courses straight away
+    if ($('#plNear') && !nearby() && !autoNear && navigator.permissions?.query) { autoNear = true; navigator.permissions.query({ name: 'geolocation' }).then((p) => { if (p.state === 'granted') findNearby($('#plNearMsg')).then(() => c.rerender()).catch(() => {}); }).catch(() => {}); }
     FR.wireJoin();
     if (!d) return;
     FR.wireGroup(d, re);

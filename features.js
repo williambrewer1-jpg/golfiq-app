@@ -505,3 +505,28 @@ export function estimatedPattern(base, latRatio, n = 120) {
   }
   return { ...base, pts, stats: A.dispersionStats(pts), estimated: true, real_n: base.stats?.n || 0 };
 }
+
+// ------------------------------------------------------------------ golf courses near you (OpenStreetMap, worldwide incl. UK & Australia)
+export const nearbyQuery = (lat, lon, radiusM = 40000) => `[out:json][timeout:25];(way["leisure"="golf_course"](around:${Math.round(radiusM)},${lat.toFixed(5)},${lon.toFixed(5)});relation["leisure"="golf_course"](around:${Math.round(radiusM)},${lat.toFixed(5)},${lon.toFixed(5)}););out tags center bb;`;
+export function parseNearby(json, lat, lon) {
+  const seen = new Map();
+  for (const e of json?.elements || []) {
+    const name = (e.tags?.name || '').trim(), c = e.center || (isNum(e.lat) ? { lat: e.lat, lon: e.lon } : null);
+    if (!name || !c) continue;
+    const b = e.bounds ? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
+    const row = { id: `osm-${e.type}-${e.id}`, name, lat: c.lat, lon: c.lon, bbox: b, dist_m: A.haversine(lat, lon, c.lat, c.lon), holes: parseInt(e.tags['golf:course:holes'] || e.tags.holes, 10) || null, par: parseInt(e.tags.par, 10) || null };
+    const k = name.toLowerCase(), prev = seen.get(k);
+    if (!prev || row.dist_m < prev.dist_m) seen.set(k, row);           // one entry per name (a club often maps several layouts)
+  }
+  return [...seen.values()].sort((a, b) => a.dist_m - b.dist_m).slice(0, 40);
+}
+// Where a course you've played is, from your tracked shots (median tee position)
+export function courseLocations(ds) {
+  const out = new Map();
+  for (const [cid, g] of groupBy(ds.shots.filter((s) => isNum(s.start_lat) && s.course_id), (s) => s.course_id)) out.set(cid, [median(g.map((s) => s.start_lat)), median(g.map((s) => s.start_lon))]);
+  return out;
+}
+// Pars from the mapped hole lines, when the mapper added them
+export function osmPars(features) {
+  const out = {}; for (const f of features || []) if (f.kind === 'hole' && f.ref >= 1 && f.ref <= 18 && f.par) out[f.ref] = f.par; return out;
+}
