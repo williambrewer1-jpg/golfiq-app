@@ -192,6 +192,27 @@ details.sgset{border:1px solid var(--line);border-radius:13px;padding:10px 12px;
 .plan{display:grid;gap:4px;margin:8px 0 6px;padding:10px 12px;border-radius:12px;background:var(--tint);font-size:13.5px}
 .step .pu{width:auto;padding:0 10px;font-size:12px;margin-left:4px}
 .card.sub{box-shadow:none;border:1px solid var(--line);margin:8px 0}
+/* ---- progress */
+.prog-big{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;margin:6px 0 10px}.prog-big>div{display:grid}.prog-big span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.prog-big b{font:700 40px/1 var(--serif)}.prog-big small{color:var(--muted);font-size:12.5px}.prog-big i{font-style:normal;font-size:24px;color:var(--muted);padding-bottom:10px}
+b.gold,.gold{color:var(--goldtext,#a88620)}b.good{color:var(--good)}
+.ms-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.ms,.goal,.lad{border:1px solid var(--line);border-radius:13px;padding:10px 12px;background:var(--card)}.ms p,.goal p{margin:4px 0}
+.ms.done{background:var(--tint)}.ms.next{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}.goal{margin-bottom:8px}.goal.done{background:var(--tint)}
+.ms-h{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.streak{display:flex;align-items:center;gap:16px;margin:10px 0 4px}.streak>div:not(.strip12){display:grid;text-align:center}.streak b{font:700 28px/1 var(--serif)}.streak span{font-size:11px;color:var(--muted)}
+.strip12{display:grid;grid-template-columns:repeat(12,1fr);gap:3px;flex:1}.strip12 i{height:22px;border-radius:5px;background:var(--chip)}.strip12 i.h1{background:#b9dca5}.strip12 i.h2{background:#6fb85a}.strip12 i.h3{background:#1b7f4b}
+.lad{margin-bottom:8px}.rungs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px}
+.rung{border-radius:9px;background:var(--chip);padding:6px 4px;text-align:center;display:grid}.rung span{font-size:10.5px;color:var(--muted);font-weight:700}.rung b{font:700 16px var(--serif)}
+.rung.on{background:var(--head);color:#fff}.rung.on span{color:var(--flag)}.rung.nx{box-shadow:inset 0 0 0 2px var(--gold)}
+.badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(102px,1fr));gap:8px}
+.bdg{display:grid;justify-items:center;text-align:center;gap:2px;padding:10px 6px;border-radius:13px;background:var(--chip);opacity:.6}.bdg.on{opacity:1;background:var(--tint);box-shadow:inset 0 0 0 1px var(--gold)}
+.bdg i{font-style:normal;font-size:22px;color:var(--gold)}.bdg b{font-size:12.5px;line-height:1.2}.bdg span{font-size:10.5px;color:var(--muted);line-height:1.25}.bdg small{font-size:10.5px;font-weight:700}
+a.prog-home{display:block;text-decoration:none;color:var(--ink)}.ph-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.ph-row>div{display:grid}.ph-row span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700}.ph-row b{font:700 26px/1.1 var(--serif)}.ph-row small{color:var(--muted);font-size:12px}
+/* ---- AI coach */
+.tpls{display:grid;gap:6px}.tpl{display:grid;text-align:left;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:13px;padding:10px 12px;font:500 14px var(--sans);min-height:52px}
+.tpl b{font-weight:700}.tpl span{font-size:12.5px;color:var(--muted)}.tpl.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);background:var(--tint)}
+.aireply{white-space:pre-wrap;font-size:14.5px;line-height:1.5;border-left:3px solid var(--gold);padding:4px 0 4px 12px;margin:10px 0}
 /* ---- club distances editor */
 .cdrow{display:grid;grid-template-columns:1fr 1.25fr;grid-template-areas:"n n" "i s";gap:6px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
 .cdrow .cdn{grid-area:n;display:flex;justify-content:space-between;gap:8px;align-items:baseline}.cdrow input{grid-area:i}.cdrow select{grid-area:s}

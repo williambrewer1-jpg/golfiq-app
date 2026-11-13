@@ -2,6 +2,7 @@
 import * as A from './analytics.js';
 import * as F from './features.js';
 import { registerCompete } from './compete.js';
+import { registerProgress } from './progress.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -150,6 +151,7 @@ const NAV = [['home', 'Home'], ['play', 'Play'], ['rounds', 'Rounds'], ['stats',
 let EXTRA = null;                         // pages registered from pages2.js / play.js
 let SUBWIRE = [];                         // sub-pages shown inside a hub that need their own event wiring
 let EMBED = null;
+let PROG = null;                          // progress: forecast, milestones, roadmaps, badges (progress.js)
 let COMP = null;                          // practice competition + friends (compete.js)
 let E_CACHE = null;
 // expected strokes to hole out (your strokes-gained model), rebuilt when the data changes
@@ -184,6 +186,7 @@ function pageHome() {
   ${d ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(d.course_name)} · hole ${d.hole}</b><em>Continue ›</em></a>`
     : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
   <div class="kpis">${kpi('GolfIQ index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
+  ${PROG.homeCard()}
   ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
@@ -828,8 +831,8 @@ addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); ret
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
-    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
-  COMP = registerCompete(ctx); COMP.handleInvite();
+    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get progress() { return PROG; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+  COMP = registerCompete(ctx); COMP.handleInvite(); PROG = registerProgress(ctx);
   EXTRA = registerPages(ctx);
   const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }

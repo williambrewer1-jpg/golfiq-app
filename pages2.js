@@ -4,6 +4,7 @@ import * as F from './features.js';
 import * as B from './bench.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
+import * as AI from './aicoach.js';
 
 export function registerPages(c) {
   const { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, n0, n1, n2, p0, COLORS } = c;
@@ -386,10 +387,10 @@ export function registerPages(c) {
       ${table(W.entries.filter((e) => e.club_id === hist).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30), [['date', 'Date'], ['length', 'Swing'], ['carry_m', U, c.d0], ['id', '', (v) => `<button class="btn sec sm" data-delwg="${esc(v)}">Delete</button>`]], { empty: 'No entries for this club.' })}</div>`;
   }
   function pagePractice() {
-    const tab = segVal('pr_tab', 'games');
-    const body = { focus: () => c.coachingPriorities(), games: practiceGames, board: () => c.compete.pageBoard(), combine: () => c.compete.pageCombine(), range: () => c.compete.pageRange(),
+    const tab = segVal('pr_tab', 'progress');
+    const body = { progress: () => c.progress.page(), focus: () => c.coachingPriorities(), games: practiceGames, board: () => c.compete.pageBoard(), combine: () => c.compete.pageCombine(), range: () => c.compete.pageRange(),
       wedges: practiceWedges, log: practiceLog, notes: coachNotes, thoughts: coachThoughts }[tab] || practiceGames;
-    return `${seg('pr_tab', [['focus', 'Focus'], ['games', 'Games'], ['board', 'Leaderboard'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach notes'], ['thoughts', 'Swing thoughts']], 'games', 'tabs')}${body()}`;
+    return `${seg('pr_tab', [['progress', 'Progress'], ['focus', 'Focus'], ['games', 'Games'], ['board', 'Leaderboard'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach'], ['thoughts', 'Swing thoughts']], 'progress', 'tabs')}${body()}`;
   }
   function wirePlaybook() {
     $('#pbElev')?.addEventListener('click', async (e) => {
@@ -441,20 +442,76 @@ export function registerPages(c) {
     L.push('## How to reply', 'You are my golf coach. After your advice, finish with a note I can paste into GolfIQ, as one JSON object in a code block, in exactly this shape (2–4 feels, 1–4 drills, today\'s date unless I say otherwise):', '', '```json', F.COACH_FORMAT, '```');
     return L.join('\n');
   }
+  const gameName = (id) => allGames().find((g) => g.id === id)?.name || id;
+  const ai = () => { c.state.ai = c.state.ai || {}; c.state.ai.keys = c.state.ai.keys || {}; c.state.ai.models = c.state.ai.models || {}; return c.state.ai; };
+  // what each request adds on top of the general briefing
+  function promptExtra(tid, p) {
+    const ds = c.DS, U = c.UNIT, f1 = (v, d = 1) => (A.isNum(v) ? v.toFixed(d) : '–');
+    if (tid === 'preround' && p.course) {
+      const pb = F.playbook(ds, p.course);
+      return [`## My history at ${p.courseName} (per hole: average vs par, fairways, greens, putts, usual tee club)`, ...pb.map((h) => `- H${h.hole} par ${h.par}${A.isNum(h.si) ? ` SI ${h.si}` : ''}: ${h.avg_to_par >= 0 ? '+' : ''}${f1(h.avg_to_par, 2)} (${h.n} plays), FW ${f1(h.fw_pct, 0)}%, GIR ${f1(h.gir_pct, 0)}%, putts ${f1(h.putts, 2)}${h.usual_club ? `, tee ${h.usual_club.club}` : ''}${h.tips.length ? `. ${h.tips.join(' ')}` : ''}`)].join('\n');
+    }
+    if (tid === 'postround' && p.round) {
+      const hh = ds.holes.filter((h) => h.round_id === p.round).sort((a, b) => a.hole - b.hole), r = ds.rounds.find((x) => x.round_id === p.round);
+      const k = F.scoreKillers(hh, ds.shots.filter((s) => s.round_id === p.round), F.shortIronRange(ds)).get(p.round) || {};
+      return [`## The round: ${r.date} ${r.course_name}: ${r.gross} (${r.to_par > 0 ? '+' : ''}${r.to_par}), ${f1(r.stableford_round, 0)} pts, GIR ${f1(r.gir_pct, 0)}%, FW ${f1(r.fw_pct, 0)}%, ${f1(r.putts_round, 0)} putts, ${f1(r.penalties, 0)} penalties`,
+        `Score killers: ${F.KILLERS.map(([key, l]) => `${l} ${k[key] ?? 0}`).join(', ')}`,
+        ...hh.map((h) => `- H${h.hole} par ${h.par}: ${h.strokes}${A.isNum(h.putts_eff) ? `, ${h.putts_eff} putts` : ''}${h.fairway && h.fairway !== 'NA' ? `, FW ${h.fairway}` : ''}${h.gir_eff === 1 ? ', GIR' : ''}${h.penalties_eff ? `, ${h.penalties_eff} pen` : ''}`)].join('\n');
+    }
+    if (tid === 'miss' && p.club) {
+      const pt = F.clubPattern(ds, p.club), s2 = pt.stats, row = A.clubTable(ds.shots, ds.clubs).find((x) => x.club_id === p.club);
+      return [`## ${p.clubName}: shot pattern (${U}, GPS)`, s2.enough ? `- ${s2.n} shots: mean ${f1(c.cv(s2.mean_lateral_m))} ${U} ${s2.mean_lateral_m >= 0 ? 'right' : 'left'} of the target line, left/right spread (SD) ${f1(c.cv(s2.sd_lateral_m))}, distance ${f1(c.cv(s2.mean_y_m), 0)} ± ${f1(c.cv(s2.sd_y_m))}; ${f1(s2.pct_left, 0)}% finish left, ${f1(s2.pct_right, 0)}% right` : `- only ${s2.n} shots with direction`,
+        row ? `- median ${c.d0(row.median_m)}, consistency CV ${f1(row.cv_pct)}%, mishits ${f1(row.partial_pct, 0)}%` : ''].join('\n');
+    }
+    return '';
+  }
+  function promptFor(tid) {
+    const p = { ...(c.ui.ai_p || {}) };
+    if (p.course) p.courseName = [...new Map(c.DS.rounds.map((r) => [r.course_id, r.course_name]))].find(([k]) => k === p.course)?.[1];
+    if (p.round) { const r = c.DS.rounds.find((x) => x.round_id === p.round); p.roundLabel = r ? `${r.course_name} on ${r.date}` : ''; }
+    if (p.club) p.clubName = c.DS.clubs.find((x) => x.club_id === p.club)?.name;
+    return AI.buildPrompt({ template: tid, params: p, briefing: briefing().split('## How to reply')[0].trim(), extra: promptExtra(tid, p), games: allGames(), today: today() });
+  }
+  function askCoachCard() {
+    const a = ai(), prov = c.ui.ai_prov || a.provider || 'claude', P = AI.PROVIDERS[prov], tid = c.ui.ai_tpl || 'leak', t = AI.TEMPLATES.find((x) => x.id === tid) || AI.TEMPLATES[0];
+    const p = c.ui.ai_p || {}, key = a.keys[prov], last = J().ai_last;
+    const courses = [...new Map(c.DS.rounds.filter((r) => r.course_id).map((r) => [r.course_id, r.course_name]))];
+    const rounds = [...c.DS.rounds].reverse().slice(0, 40), clubs = c.DS.clubs.filter((x) => x.category !== 'putter' && c.DS.shots.some((s) => s.club_id === x.club_id));
+    const opt = (list, cur) => list.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
+    const needs = t.needs === 'time' ? `<div class="row"><div><label class="f">Sessions this week</label><input data-aip="sessions" type="number" inputmode="numeric" value="${esc(p.sessions || 3)}"></div><div><label class="f">Minutes each</label><input data-aip="minutes" type="number" inputmode="numeric" value="${esc(p.minutes || 60)}"></div></div><label class="f">Where (optional)</label><input data-aip="where" placeholder="e.g. range + putting green" value="${esc(p.where || '')}">`
+      : t.needs === 'course' ? (courses.length ? `<label class="f">Course</label><select data-aip="course">${opt(courses, p.course || courses[0][0])}</select>` : '<p class="small muted">No courses yet.</p>')
+        : t.needs === 'round' ? (rounds.length ? `<label class="f">Round</label><select data-aip="round">${opt(rounds.map((r) => [r.round_id, `${r.date} · ${r.course_name} (${r.gross ?? '–'})`]), p.round || rounds[0].round_id)}</select>` : '<p class="small muted">No rounds yet.</p>')
+          : t.needs === 'club' ? (clubs.length ? `<label class="f">Club</label><select data-aip="club">${opt(clubs.map((x) => [x.club_id, x.name]), p.club || clubs[0].club_id)}</select>` : '')
+            : t.needs === 'text' ? '<label class="f">Your question</label><textarea data-aip="text" rows="3" placeholder="e.g. My driver goes right under pressure – what should I check?">' + esc(p.text || '') + '</textarea>' : '';
+    return `<div class="card"><h2>Ask your coach</h2>
+      <div class="seg" data-seg="ai_prov">${Object.entries(AI.PROVIDERS).map(([k, x]) => `<button data-v="${k}" class="${k === prov ? 'on' : ''}">${x.name}</button>`).join('')}</div>
+      <div class="tpls">${AI.TEMPLATES.map((x) => `<button type="button" class="tpl ${x.id === tid ? 'on' : ''}" data-tpl="${x.id}"><b>${esc(x.title)}</b><span>${esc(x.desc)}</span></button>`).join('')}</div>
+      ${needs}<label class="f">Anything to add? (optional)</label><textarea data-aip="note" rows="2" placeholder="e.g. what you felt today, or what your coach told you">${esc(p.note || '')}</textarea>
+      <p><button class="btn" id="aiCopy">Copy & open ${P.name}</button>${key ? `<button class="btn" id="aiAsk">Ask ${P.name} now</button>` : ''} <span id="aiMsg" class="small"></span></p>
+      <p class="small muted">${key ? `Asking now sends this request and your stats to ${P.name} with your own API key; the reply is saved below as a dated note.` : `Copy & open: paste into ${P.name}, then copy its whole reply and tap <b>Paste reply</b>. Or add your own API key below to get replies here in one tap.`}</p>
+      <button class="btn sec" id="cnPaste">Paste reply</button>
+      ${last ? `<div class="aireply-wrap"><h3>Latest reply · ${esc(last.provider)} · ${esc(last.date)} · ${esc(last.template)}</h3><div class="aireply">${esc(last.advice).slice(0, 6000)}</div></div>` : ''}
+      <details style="margin-top:8px"><summary class="small">AI settings – your own API key (optional)</summary>
+        <form id="aiSet"><label class="f">${P.name} API key</label><input name="key" type="password" autocomplete="off" placeholder="${esc(P.keyHint)}" value="">
+        <p class="small muted">${key ? `A key is saved (ending …${esc(key.slice(-4))}). Leave blank to keep it.` : 'No key saved.'}</p>
+        <label class="f">Model</label><input name="model" value="${esc(a.models[prov] || P.model)}"><p><button class="btn sec sm">Save</button> ${key ? '<button class="btn sec sm" type="button" id="aiForget">Remove key</button>' : ''}</p></form>
+        ${note(`Your key stays on this phone only (not in backups, sync or the shared database) and is sent only to ${P.name}'s own API. Use costs money on your ${P.name} API account – roughly a few cents a request. Anyone with this phone unlocked could use it, so set a spending limit in the provider's console.`)}</details>
+      ${note('Every request includes your stats, club distances, practice scores, recent notes and swing thoughts. Nothing leaves the phone until you copy it or tap Ask.')}</div>`;
+  }
   function coachNotes() {
     const notes = [...J().notes].sort((a, b) => b.date.localeCompare(a.date) || String(b.added_at).localeCompare(String(a.added_at)));
     const card = (n) => `<div class="card notecard"><div class="rv-h"><b>${esc(n.title)}</b><span class="small muted">${esc(n.date)}${n.focus ? ` · ${esc(n.focus)}` : ''}</span></div>
       ${n.feedback ? `<p>${esc(n.feedback)}</p>` : ''}
       ${n.feels?.length ? `<h3>Feels</h3><ul class="tips">${n.feels.map((f) => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
       ${n.drills?.length ? `<h3>Drills</h3>${n.drills.map((d) => `<div class="drill"><b>${esc(d.name)}</b>${d.reps ? ` <span class="pill">${esc(d.reps)}</span>` : ''}${d.how ? `<br><span class="small">${esc(d.how)}</span>` : ''}</div>`).join('')}` : ''}
-      <p class="small muted" style="margin:10px 0 0">${esc(n.source === 'me' ? 'Written by you' : 'From Claude')} <button class="btn sec sm" data-delnote="${esc(n.id)}">Delete</button></p></div>`;
-    return `<div class="card"><h2>Coaching with Claude</h2><ol class="small steps"><li>Tap <b>Copy briefing</b> and paste it into your chat with Claude, with your question or a description of what you're seeing.</li><li>Claude replies with advice and a note in GolfIQ's format.</li><li>Copy Claude's reply, come back here and tap <b>Paste note</b>.</li></ol>
-      <button class="btn" id="cnBrief">Copy briefing for Claude</button><button class="btn sec" id="cnPaste">Paste note from Claude</button>
-      <details id="cnManual"><summary class="small">Paste manually / write your own note</summary><textarea id="cnText" rows="5" placeholder="Paste Claude's reply here (the JSON note can be anywhere in the text)"></textarea><p><button class="btn sec" id="cnImport">Import pasted text</button></p>
+      ${n.assign?.length ? `<h3>Practice assignments</h3>${n.assign.map((a) => `<p class="small" style="margin:4px 0">${esc(gameName(a.game))}${A.isNum(a.target) ? ` – target ${a.target}` : ''} · ${a.per_week}× a week</p>`).join('')}` : ''}
+      <p class="small muted" style="margin:10px 0 0">${esc(n.source === 'me' ? 'Written by you' : n.source === 'claude' ? 'From Claude' : `From ${n.source}`)} <button class="btn sec sm" data-delnote="${esc(n.id)}">Delete</button></p></div>`;
+    return `${askCoachCard()}
+      <details class="card" id="cnManual"><summary>Paste a reply or write your own note</summary><textarea id="cnText" rows="5" placeholder="Paste the AI's reply here (the JSON note can be anywhere in the text)"></textarea><p><button class="btn sec" id="cnImport">Import pasted text</button></p>
       <form id="cnOwn"><div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}"></div><div class="wide"><label class="f">Title</label><input name="title" required></div></div>
-      <label class="f">Feedback / what I noticed</label><textarea name="feedback" rows="3" style="font:15px inherit"></textarea><label class="f">Feels (one per line)</label><textarea name="feels" rows="2" style="font:15px inherit"></textarea>
-      <label class="f">Drills (one per line)</label><textarea name="drills" rows="2" style="font:15px inherit"></textarea><p><button class="btn sec">Save my note</button></p></form></details>
-      ${note('The briefing contains your stats, club distances, practice scores and recent notes – nothing is sent anywhere until you paste it yourself. If you use cloud sync, notes saved in your private repo at data/coach/notes.json are also imported on Sync.')}</div>
+      <label class="f">Feedback / what I noticed</label><textarea name="feedback" rows="3"></textarea><label class="f">Feels (one per line)</label><textarea name="feels" rows="2"></textarea>
+      <label class="f">Drills (one per line)</label><textarea name="drills" rows="2"></textarea><p><button class="btn sec">Save my note</button></p></form>
+      ${note('If you use cloud sync, notes saved in your private repo at data/coach/notes.json are also imported on Sync.')}</details>
       ${notes.length ? notes.map(card).join('') : emptyCard('No coaching notes yet.')}`;
   }
   function coachThoughts() {
@@ -466,12 +523,35 @@ export function registerPages(c) {
     const tab = segVal('coach_tab', 'priorities');
     return `${seg('coach_tab', [['priorities', 'Priorities'], ['notes', 'Coach notes'], ['thoughts', 'Swing thoughts']], 'priorities')}${tab === 'notes' ? coachNotes() : tab === 'thoughts' ? coachThoughts() : c.coachingPriorities()}`;
   }
-  async function importNotes(text) {
-    const parsed = F.parseCoachNotes(text);
-    if (!parsed.length) { toast('No GolfIQ note found in that text. Ask Claude to include the JSON note.'); return; }
-    const n = S.addCoachNotes(c.state, parsed, 'claude'); await saveJ(n ? `${n} note(s) added` : 'That note is already saved');
+  async function importNotes(text, source) {
+    const tpl = AI.TEMPLATES.find((x) => x.id === (c.ui.ai_tpl || 'leak')), prov = AI.PROVIDERS[c.ui.ai_prov || ai().provider || 'claude'];
+    let parsed = F.parseCoachNotes(text), advice = AI.adviceText(text);
+    if (!parsed.length) {
+      if (String(text).trim().length < 40) { toast('Nothing to import – paste the whole reply.'); return; }
+      parsed = [{ date: today(), title: tpl?.title || 'Coach reply', feedback: advice.slice(0, 4000), feels: [], drills: [], focus: '' }];
+    }
+    if (advice.length) J().ai_last = { date: today(), template: tpl?.title || '', provider: source || prov.name, advice: advice.slice(0, 8000) };
+    const n = S.addCoachNotes(c.state, parsed, source || prov.name); await saveJ(n ? `${n} note(s) saved${parsed.some((x) => x.assign?.length) ? ' – practice assignments added to this week' : ''}` : 'That note is already saved');
   }
   function wireCoach() {
+    $$('[data-tpl]').forEach((b) => b.addEventListener('click', () => { c.ui.ai_tpl = b.dataset.tpl; c.saveUi(); c.rerender(); }));
+    $$('[data-aip]').forEach((el) => el.addEventListener('change', () => { c.ui.ai_p = { ...(c.ui.ai_p || {}), [el.dataset.aip]: el.value }; c.saveUi(); }));
+    const syncParams = () => { const p = { ...(c.ui.ai_p || {}) }; $$('[data-aip]').forEach((el) => { p[el.dataset.aip] = el.value; }); c.ui.ai_p = p; c.saveUi(); };
+    $('#aiCopy')?.addEventListener('click', async () => {
+      syncParams(); const P = AI.PROVIDERS[c.ui.ai_prov || ai().provider || 'claude'], t = promptFor(c.ui.ai_tpl || 'leak');
+      try { await navigator.clipboard.writeText(t); toast(`Copied – paste it into ${P.name}, then bring the reply back with Paste reply`); window.open(P.open, '_blank'); }
+      catch { $('#cnManual').open = true; $('#cnText').value = t; toast('Copy the request from the box below'); }
+    });
+    $('#aiAsk')?.addEventListener('click', async (e) => {
+      syncParams(); const prov = c.ui.ai_prov || ai().provider || 'claude', P = AI.PROVIDERS[prov], m = $('#aiMsg'); e.target.disabled = true; m.textContent = ` Asking ${P.name}…`;
+      try { const reply = await AI.ask({ provider: prov, model: ai().models[prov], key: ai().keys[prov], prompt: promptFor(c.ui.ai_tpl || 'leak') }); await importNotes(reply, P.name); }
+      catch (err) { m.textContent = ` ${err.message}`; e.target.disabled = false; }
+    });
+    $('#aiSet')?.addEventListener('submit', async (e) => {
+      e.preventDefault(); const f = new FormData(e.target), prov = c.ui.ai_prov || ai().provider || 'claude', k = String(f.get('key') || '').trim(), m = String(f.get('model') || '').trim();
+      const a = ai(); a.provider = prov; if (k) a.keys[prov] = k; if (m) a.models[prov] = m; await S.saveAi(c.state); toast(k ? 'Key saved on this phone' : 'Saved'); c.rerender();
+    });
+    $('#aiForget')?.addEventListener('click', async () => { const prov = c.ui.ai_prov || ai().provider || 'claude'; delete ai().keys[prov]; await S.saveAi(c.state); toast('Key removed'); c.rerender(); });
     $('#cnBrief')?.addEventListener('click', async () => { const t = briefing(); try { await navigator.clipboard.writeText(t); toast('Briefing copied – paste it into your chat with Claude'); } catch { $('#cnManual').open = true; $('#cnText').value = t; toast('Copy the text from the box below'); } });
     $('#cnPaste')?.addEventListener('click', async () => { try { const t = await navigator.clipboard.readText(); if (!t) throw new Error('empty'); await importNotes(t); } catch { $('#cnManual').open = true; $('#cnText').focus(); toast('Paste Claude\'s reply into the box, then tap Import'); } });
     $('#cnImport')?.addEventListener('click', () => importNotes($('#cnText').value));

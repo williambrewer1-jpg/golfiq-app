@@ -348,7 +348,8 @@ export function parseCoachNotes(text) {
     out.push({ date: /^\d{4}-\d{2}-\d{2}/.test(o.date || '') ? o.date.slice(0, 10) : new Date().toISOString().slice(0, 10), title: String(o.title || 'Coach note').slice(0, 120),
       feedback: String(o.feedback || o.summary || '').slice(0, 4000), feels: list(o.feels).map((x) => String(x).slice(0, 300)).slice(0, 12),
       drills: list(o.drills).map((d) => (typeof d === 'string' ? { name: d } : { name: String(d.name || 'Drill').slice(0, 120), how: String(d.how || d.description || '').slice(0, 800), reps: String(d.reps || d.dose || '').slice(0, 120) })).slice(0, 12),
-      focus: String(o.focus || '').slice(0, 60), source: 'claude' });
+      focus: String(o.focus || '').slice(0, 60), source: 'claude',
+      assign: (Array.isArray(o.assign) ? o.assign : []).filter((x) => x && x.game).slice(0, 3).map((x) => ({ game: String(x.game).slice(0, 40), target: Number.isFinite(Number(x.target)) ? Number(x.target) : null, per_week: Math.max(1, Math.min(14, Math.round(Number(x.per_week) || 2))) })) });
   };
   // accept raw JSON, or JSON inside a ```code block``` / surrounding chat text
   const candidates = [text, ...[...String(text).matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1])];
@@ -356,7 +357,7 @@ export function parseCoachNotes(text) {
   for (const c of candidates) { try { tryAdd(JSON.parse(c)); } catch { /* next */ } if (out.length) break; }
   return out;
 }
-export const COACH_FORMAT = `{"golfiq_coach_note":1,"date":"YYYY-MM-DD","title":"short title","focus":"e.g. driver / wedges / putting","feedback":"what you saw and why it matters","feels":["feel 1","feel 2"],"drills":[{"name":"drill name","how":"how to do it","reps":"e.g. 3 x 10 balls"}]}`;
+export const COACH_FORMAT = `{"golfiq_coach_note":1,"date":"YYYY-MM-DD","title":"short title","focus":"e.g. driver / wedges / putting","feedback":"what you saw and why it matters","feels":["feel 1","feel 2"],"drills":[{"name":"drill name","how":"how to do it","reps":"e.g. 3 x 10 balls"}],"assign":[{"game":"practice game id","target":6,"per_week":3}]}`;
 
 // ------------------------------------------------------------------ live play: course knowledge + shot pattern on the map
 const RE = 6371008.8, rad = (d) => d * Math.PI / 180, deg = (r) => r * 180 / Math.PI;
