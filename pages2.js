@@ -359,8 +359,8 @@ export function registerPages(c) {
     const games = F.gameStats(allGames(), J().results), entry = games.filter((x) => !x.auto), gid = segVal('pg_game', entry[0].id), g = games.find((x) => x.id === gid) || entry[0];
     const cats = [...new Set(entry.map((x) => x.cat))], uM = c.UNIT === 'yd' ? 0.9144 : 1, L = (s) => c.compete.lvlText(c.compete.lvl(g.id, s));
     const bench = B.hasLevel(g.id) ? `<p class="small muted" style="margin:6px 0">Handicap benchmarks: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 hcp ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 hcp ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
-    if (c.guided?.draft() || c.ui.game_result) return c.guided.screen();
-    const launch = c.guided ? c.guided.launcher(g) : '';
+    if (c.guided?.screen()) return c.guided.screen();
+    const launch = c.guided ? c.guided.sessionCard() + c.guided.dailyCard() + c.guided.launcher(g) : '';
     return `<div class="card"><h2>Play a game</h2>${select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
       <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}${launch}
       <details id="pgQuick"><summary><b>Quick entry</b> <span class="small muted">type in a score you already played</span></summary><form id="pgForm" style="margin-top:8px">
@@ -434,10 +434,9 @@ export function registerPages(c) {
     });
   }
   function wirePractice() {
-    c.guided?.wire();
     $('#pgForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target);
       const res = { id: `r${Date.now()}`, game: $('[data-sel=pg_game]').value, date: f.get('date'), score: Number(f.get('score')), note: f.get('note') || '' };
-      J().results.push(res); const l = c.compete.lvl(res.game, res.score); await saveJ(`Score saved${l ? ` – ${l.label}` : ''}`); c.compete.onScore(res); });
+      c.guided?.afterResult(res); J().results.push(res); const l = c.compete.lvl(res.game, res.score); await saveJ(`Score saved${l ? ` – ${l.label}` : ''}`); c.compete.onScore(res); });
     $$('[data-delres]').forEach((b) => b.addEventListener('click', async () => { J().results = J().results.filter((r) => r.id !== b.dataset.delres); await saveJ('Deleted'); }));
     $('#pgNew')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target), id = `g${Date.now()}`;
       J().games.push({ id, name: f.get('name'), cat: f.get('cat'), better: f.get('better'), max: c.numOrNull(f.get('max')), how: f.get('how') || '', unit: c.numOrNull(f.get('max')) ? `/ ${f.get('max')}` : 'score' }); c.ui.pg_game = id; c.saveUi(); await saveJ('Game added'); });

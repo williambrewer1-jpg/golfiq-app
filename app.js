@@ -190,6 +190,7 @@ function pageHome() {
     : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
   <div class="kpis">${kpi('GolfIQ index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
   ${PROG.homeCard()}
+  ${GUIDED.homeCard()}
   ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
@@ -676,6 +677,7 @@ function wire(page) {
   $$('[data-openround]').forEach((a) => a.addEventListener('click', () => { ui.rd_open = a.dataset.openround; ui.rd_tab = a.dataset.tab || 'card'; saveUi(); }));
   $$('[data-stats]').forEach((a) => a.addEventListener('click', () => { ui.sx_tab = a.dataset.stats; saveUi(); }));
   $$('[data-practice]').forEach((a) => a.addEventListener('click', () => { ui.pr_tab = a.dataset.practice; saveUi(); }));
+  GUIDED?.wire();
   on('#syncNow', 'click', async () => {
     const m = $('#syncMsg'); m.textContent = ' Syncing…';
     try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }

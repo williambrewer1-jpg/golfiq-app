@@ -224,7 +224,7 @@ export function potentialPlan({ ratings, results = [], rounds = [], now = Date.n
   // active skills: two scored games (or one guided session) in the skill's games within the last 14 days
   const active = ratings.skills.filter((s) => s.rated).filter((s) => {
     const ids = new Set(s.subs.flatMap((x) => x.games.map((g) => g.id))), mine = res.filter((r) => ids.has(gid(r)) && dt(r.date) >= since(P.active_days));
-    return mine.length >= P.active_games || mine.some((r) => r.mode === 'guided');
+    return mine.length >= P.active_games || mine.some((r) => r.mode === 'guided' || r.challenge);
   }).map((s) => s.key);
   const focus = ratings.focus || [], focusActive = focus.filter((k) => active.includes(k)).length;
   const momentum = focusActive >= 2 ? P.momentum2 + (active.length >= 3 ? P.momentum3 : 0) : 0;
