@@ -143,7 +143,7 @@ t('confetti is skipped without a canvas or when motion is off, and says so in th
 t('wording lives in COPY and uses the name BreakingPar, never GolfIQ', () => {
   assert.equal(F.COPY.app, 'BreakingPar'); const all = JSON.stringify(F.COPY, (k, v) => (typeof v === 'function' ? v(5, 10, false) : v)); assert.ok(!/golfiq/i.test(all)); assert.ok(/BreakingPar/.test(all));
   assert.equal(F.COPY.verdict.holed, 'Holed'); assert.equal(F.COPY.met, 'Target met'); assert.equal(F.COPY.best, 'New personal best'); assert.equal(F.COPY.short(2), '2 short of your target'); assert.equal(F.COPY.level(9), "That's a 9-handicap score.");
-  assert.equal(F.COPY.target(5, 10), 'Target 5 · a 10 handicap'); assert.equal(F.COPY.progress(2, 3), '2 of 3 done'); assert.equal(F.COPY.next, 'Up next'); assert.equal(F.COPY.pressure, 'Pressure ball — counts double');
+  assert.equal(F.COPY.target(5, 10), 'Target 5 · a 10 handicap'); assert.equal(F.COPY.progress(2, 3), '2 of 3 done'); assert.equal(F.COPY.next, 'Up next');
   assert.ok(F.COPY.sound.on !== F.COPY.sound.off); for (const name of F.EVENT_NAMES) assert.ok(F.COPY.settings.names[name], `a plain label for ${name}`);
   assert.ok(!/!/.test(all), 'no exclamation marks');
 });

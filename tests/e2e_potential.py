@@ -13,7 +13,7 @@ def check(name, ok, extra=''):
 num = lambda s: float(re.search(r'-?\d+(\.\d+)?', s).group())
 AUDIT = "() => { const s = document.querySelector('.prog-hero'); const bad = []; for (const el of s.querySelectorAll('button, a.btn')) { const r = el.getBoundingClientRect(); if (r.height && r.height < 38) bad.push(el.textContent.trim().slice(0, 24) + ' ' + Math.round(r.height)); } return { overflow: document.documentElement.scrollWidth > innerWidth + 1, small: bad }; }"
 with sync_playwright() as p:
-    b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); pg = ctx.new_page(); errs = []
+    b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); ctx.add_init_script('window.__feelDelay = 0'); pg = ctx.new_page(); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e))); pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort())
     pg.goto(f'http://127.0.0.1:{port}/index.html'); pg.wait_for_selector('#loadSample'); pg.click('#loadSample'); pg.wait_for_timeout(1500)
     pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'progress'}))"); pg.goto(f'http://127.0.0.1:{port}/index.html#practice'); pg.reload(); pg.wait_for_selector('.prog-hero .pot-bar', timeout=15000)

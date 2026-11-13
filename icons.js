@@ -8,6 +8,9 @@ const P = {
   grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/>',
   score: '<path d="M9 4L7 20M17 4l-2 16M4.5 9h16M3.5 15h16"/>',
   crosshair: '<circle cx="12" cy="12" r="7"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
+  tick: '<path d="M5 12.500l4.500 4.500L19 7"/>',
+  cross: '<path d="M6 6l12 12M18 6L6 18"/>',
+  flame: '<path d="M12 3c.5 3.200 4.500 5 4.500 9.500a4.500 4.500 0 01-9 0c0-1.700.8-3 1.800-4 .2 1.200.9 1.900 1.700 2.100C11 8.500 11.200 5.500 12 3z"/>',
   sound: '<path d="M4 9.5v5h3.5l4.500 4v-13l-4.500 4z"/><path d="M15.500 9.200a4 4 0 010 5.600"/><path d="M18 6.800a7.500 7.500 0 010 10.400"/>',
   soundoff: '<path d="M4 9.500v5h3.500l4.500 4v-13l-4.500 4z"/><path d="M16 9.500l5 5M21 9.500l-5 5"/>',
   putt: '<ellipse cx="12" cy="17" rx="7.5" ry="2.8"/><path d="M12 17V4l6 2.6-6 2.6"/>',
@@ -31,3 +34,17 @@ const P = {
   chevron: '<path d="M9 5l7 7-7 7"/>',
 };
 export const icon = (name, size = 22) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.700" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || P.chart}</svg>`;
+
+// Small shot illustrations for the game screen (240 x 84, drawn in the current text colour; gold for the flag and ball). Decoration only, so hidden from screen readers.
+const ART = {
+  putt: '<path d="M8 68Q120 58 232 68" opacity=".35"/><path d="M46 56C92 50 150 53 186 53" stroke-dasharray="4 5"/><circle cx="38" cy="57" r="5.500" style="fill:var(--flag);stroke:none"/><ellipse cx="196" cy="53" rx="9" ry="3.500" opacity=".55" style="fill:currentColor"/><path d="M196 53V12"/><path d="M196 12l22 8-22 8z" style="fill:var(--flag);stroke:none"/>',
+  lag: '<path d="M8 70Q120 60 232 70" opacity=".35"/><path d="M40 58C100 52 160 55 168 55" stroke-dasharray="4 5"/><circle cx="32" cy="59" r="5.500" style="fill:var(--flag);stroke:none"/><ellipse cx="196" cy="55" rx="30" ry="10" stroke-dasharray="3 4" opacity=".7"/><ellipse cx="196" cy="55" rx="8" ry="3" opacity=".55" style="fill:currentColor"/><path d="M196 55V14"/><path d="M196 14l20 7-20 7z" style="fill:var(--flag);stroke:none"/>',
+  chip: '<path d="M8 70Q120 62 232 70" opacity=".35"/><path d="M36 62Q98 -8 166 58"/><path d="M166 58L198 57" stroke-dasharray="3 4"/><circle cx="30" cy="64" r="5.500" style="fill:var(--flag);stroke:none"/><path d="M206 58V16"/><path d="M206 16l20 7-20 7z" style="fill:var(--flag);stroke:none"/>',
+  zone: '<path d="M8 70Q120 62 232 70" opacity=".35"/><path d="M34 62Q92 -6 168 58"/><rect x="152" y="60" width="38" height="8" rx="2.500" style="fill:var(--flag);stroke:none" opacity=".9"/><circle cx="28" cy="64" r="5.500" style="fill:var(--flag);stroke:none"/>',
+  target: '<ellipse cx="172" cy="56" rx="50" ry="16" opacity=".5"/><ellipse cx="172" cy="56" rx="28" ry="9" opacity=".7"/><path d="M42 68Q112 -8 166 52" stroke-dasharray="4 5"/><circle cx="36" cy="70" r="5.500" style="fill:var(--flag);stroke:none"/><path d="M172 56V14"/><path d="M172 14l20 7-20 7z" style="fill:var(--flag);stroke:none"/>',
+  fairway: '<path d="M64 80L108 8M176 80L132 8"/><path d="M120 78V12" stroke-dasharray="3 6" opacity=".5"/><path d="M86 52l-1-12M154 52l1-12" style="stroke:var(--flag)" stroke-width="3"/><circle cx="120" cy="72" r="5.500" style="fill:var(--flag);stroke:none"/>',
+  drive: '<path d="M60 80L100 8M180 80L140 8" opacity=".55"/><path d="M120 74Q128 40 122 10" stroke-dasharray="4 5"/><circle cx="120" cy="74" r="5.500" style="fill:var(--flag);stroke:none"/><path d="M104 16h32" opacity=".6"/>',
+  long: '<path d="M8 68Q120 60 232 68" opacity=".35"/><path d="M34 62Q120 -22 214 60"/><circle cx="30" cy="64" r="5.500" style="fill:var(--flag);stroke:none"/><path d="M200 22l14 6-4 14" opacity=".8"/>',
+};
+export const shotArt = (kind) => `<svg class="gp-art-svg" viewBox="0 0 240 84" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ART[kind] || ART.putt}</svg>`;
+export const ART_KINDS = Object.keys(ART);

@@ -96,6 +96,39 @@ export const pressureScore = (game, list, answers, balls) => {
   return p ? Math.max(0, s + p.delta) : s;
 };
 
+// ------------------------------------------------------------------ feedback on the game screen
+// What one answer means for the screen: good (true), not good (false) or neither (null), and a verdict key. The words themselves live in feel.js COPY.verdict.
+const WORDS = { 'putt-369': ['missed', 'holed'], 'putt-streak': ['missed', 'holed'], 'putt-lag': ['missed', 'inside'], 'chip-updown': ['missed', 'saved'], 'chip-zone': ['missed', 'on'], 'range-fairways': ['missed', 'fairway'], 'range-greens': ['outside', 'inside'], 'range-wedge': ['outside', 'inside'], 'range-round': ['missed', 'worked'] };
+export const VERDICT_KEYS = ['holed', 'missed', 'inside', 'outside', 'saved', 'on', 'worked', 'fairway', 'wide', 'longest', 'logged', 'birdie', 'par', 'bogey', 'double', 'over'];
+export function outcomeOf(game, step, answer, { ball, before } = {}) {
+  if (!step || !Number.isFinite(answer)) return { good: null, key: 'logged' };
+  if (step.input === 'distance') {
+    if (step.results) return ball?.r === 'f' ? { good: true, key: 'fairway' } : ball?.r === 'w' ? { good: false, key: 'wide' } : { good: false, key: 'missed' };
+    const prev = (before || []).filter(Number.isFinite);                                   // Max out: a ball that matches or beats your longest so far is "longest"; the first ball is not
+    return prev.length && answer >= Math.max(...prev) ? { good: true, key: 'longest' } : { good: null, key: 'logged' };
+  }
+  if (step.input === 'strokes') { const par = step.par ?? 2; return { good: answer <= par, key: answer <= par - 1 ? 'birdie' : answer === par ? 'par' : answer === par + 1 ? 'bogey' : answer === par + 2 ? 'double' : 'over' }; }
+  const w = WORDS[game.id] || ['missed', 'holed']; return answer === 1 ? { good: true, key: w[1] } : { good: false, key: w[0] };
+}
+export const STREAK_MILESTONES = [3, 5, 10];                                               // good in a row: these get a banner and a sound
+export const countsStreak = (game) => game.id !== 'range-speed';                          // Max out has no hit or miss
+// how many good answers in a row end the list (worked out from the answers, so undo and reload always agree)
+export function streakOf(game, list, answers, balls) {
+  if (!countsStreak(game)) return 0;
+  const a = answers || []; let n = 0;
+  for (let k = a.length - 1; k >= 0; k--) { if (outcomeOf(game, list?.[k], a[k], { ball: (balls || [])[k], before: a.slice(0, k) }).good !== true) break; n++; }
+  return n;
+}
+// true on the answer that takes the running score to the target for the first time (games where more is better, and only if there is a target)
+export function targetPassed(game, list, answers, balls, target) {
+  if (!Number.isFinite(target) || game.better === 'lower') return false;
+  const a = answers || [], k = a.length; if (!k) return false;
+  const at = (j) => scoreOf(game, list, a.slice(0, j)).score;
+  if (at(k) < target) return false;
+  for (let j = 1; j < k; j++) if (at(j) >= target) return false;
+  return true;
+}
+
 // ------------------------------------------------------------------ tiers: Bronze, Silver, Gold, Platinum = what a 20, 10, 5 and 0 handicapper scores
 export const TIERS = [{ key: 'bronze', name: 'Bronze', h: 20 }, { key: 'silver', name: 'Silver', h: 10 }, { key: 'gold', name: 'Gold', h: 5 }, { key: 'platinum', name: 'Platinum', h: 0 }];
 export function tierScores(game, unitM = YD, history = null) {

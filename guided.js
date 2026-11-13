@@ -6,7 +6,7 @@ import * as SS from './sessions.js';
 import * as ST from './skillstest.js';
 import * as LG from './league.js';
 import * as FEEL from './feel.js';
-import { icon } from './icons.js';
+import { icon, shotArt } from './icons.js';
 
 export function registerGuided(c) {
   const { esc, fmt, $, $$ } = c;
@@ -40,6 +40,7 @@ export function registerGuided(c) {
 
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
+    seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
     J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.ghost?.seed, adj: c.state.settings?.range_ball_adj });
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.saveUi(); await save();
@@ -47,12 +48,57 @@ export function registerGuided(c) {
     scrollTo(0, 0);
   }
   const draft = () => J().game_draft || null, draft0 = draft, run = () => J().session_run || null;
-  async function answer(v, ball) {
+
+  // ------------------------------------------------------------ one tap: record it at once, answer back on screen, then move on
+  // The answer is saved the moment the button is pressed. Only the screen waits (FEEL.feedbackMs, about 450 ms) so the verdict can be read; taps in that
+  // window are ignored, so a double tap can never answer two balls.
+  let busy = false, seq = 0, timers = [];
+  const view = { banner: null };                                                 // the mid-game banner, kept across the re-render so it does not restart
+  const later = (ms, f) => { const t = seq; timers.push(setTimeout(() => { if (t === seq) f(); }, ms)); };
+  const word = (key) => FEEL.COPY.verdict[key] || key;
+  const artFor = (g, step) => ({ 'putt-lag': 'lag', 'chip-updown': 'chip', 'chip-par18': 'chip', 'chip-zone': 'zone', 'range-greens': 'target', 'range-wedge': 'target', 'range-fairways': 'fairway', 'range-driver': 'drive', 'range-speed': 'long' })[g.id]
+    || (g.id === 'range-round' ? (/tee shot/i.test(step.prompt) ? 'fairway' : 'target') : 'putt');
+  const barOf = (g, list, answers, score, inf) => (G.isOpen(g.id) ? Math.min(1, score / (Number.isFinite(inf.target) && inf.target > 0 ? inf.target : 10)) : Math.min(1, answers.length / list.length));
+  const scoreText = (g, v, i) => (G.isDistance(g) && !i ? '–' : sc(v));
+  // if anything goes wrong while the tap is being saved, the screen must not stay locked
+  async function answer(v, ball, btn) { if (busy) return; try { await answerNow(v, ball, btn); } catch (e) { busy = false; $('#gpRoot')?.removeAttribute('data-busy'); $('#gpSheet')?.classList.remove('gp-locked'); throw e; } }
+  async function answerNow(v, ball, btn) {
+    busy = true; const tap0 = Date.now();
     const d = draft(); if (!d) return; const g = gameOf(d.game), list = G.steps(g, { seed: d.seed, unitM: d.unitM }), sc0 = G.scoreOf(g, list, d.answers);
-    if (sc0.done) return; d.answers.push(v); if (ball) (d.balls = d.balls || []).push(ball); await save();
-    if (G.scoreOf(g, list, d.answers).done) return finish(); render();
+    if (sc0.done) return;
+    const k = d.answers.length, step = list[k], inf = info(g.id);
+    d.answers.push(v); if (ball) (d.balls = d.balls || []).push(ball);
+    const sc1 = G.scoreOf(g, list, d.answers), out = G.outcomeOf(g, step, v, { ball, before: d.answers.slice(0, k) });
+    const streak = G.streakOf(g, list, d.answers, d.balls), passed = G.targetPassed(g, list, d.answers, d.balls, inf.target), mile = out.good === true && G.STREAK_MILESTONES.includes(streak), ms = FEEL.feedbackMs();
+    // sound: a soft click, then the verdict; a milestone sound lands just after the verdict, and the light "step" tick comes when the next step arrives
+    FEEL.play('tap'); if (out.good === true) FEEL.play('good'); else if (out.good === false) FEEL.play('miss');
+    const moment = passed ? () => FEEL.play('target') : mile ? () => FEEL.play('streak', { level: FEEL.streakLevel(streak) }) : null;
+    if (moment) later(330, moment);
+    const text = passed ? FEEL.COPY.reachedTarget : mile ? FEEL.COPY.streak(streak) : '';
+    if (text) view.banner = { text, t0: Date.now() };
+    feedbackDom({ k, out, sc0, sc1, streak, mile, passed, text, btn, g, list, d, inf });
+    if (sc1.done) { await save(); return finish({ delay: Math.max(0, ms - (Date.now() - tap0)) }); }     // the wait counts from the tap, not from the end of the saves
+    later(Math.max(0, ms - 220), () => FEEL.pulse($('#gpMain'), 'slide-out'));
+    later(ms, () => { busy = false; if (!draft()) return; if (!moment) FEEL.play('step'); render(); FEEL.pulse($('#gpMain'), 'slide-next'); });
+    await save();
   }
-  async function undo() { const d = draft(); if (!d || !d.answers.length) return; d.answers.pop(); d.balls?.pop(); await save(); render(); }
+  // everything the golfer sees change at the moment of the tap, done in place on the screen that is already up
+  function feedbackDom({ k, out, sc0, sc1, streak, mile, text, btn, g, list, d, inf }) {
+    const root = $('#gpRoot'); if (!root) return;
+    $('#gpSheet')?.classList.add('gp-locked'); root.setAttribute('data-busy', '1');
+    if (btn) FEEL.pulse(btn, out.good === false ? 'shake' : 'pop');
+    const dots = $$('#gpRoot .gp-dots i'); if (dots[k]) dots[k].className = out.good === true ? 'hit' : out.good === false ? 'miss' : 'done'; if (dots[k + 1]) dots[k + 1].className = 'now';
+    const ve = $('#gpVerdict');
+    if (ve) { ve.className = `gp-verdict ${out.good === true ? 'good' : out.good === false ? 'miss' : ''}`; ve.innerHTML = `<span>${out.good === true ? '<i class="gp-ball"></i>' : ''}${out.good === true ? icon('tick', 22) : out.good === false ? icon('cross', 22) : ''}${esc(word(out.key))}</span>`; FEEL.pulse(ve, 'rise'); const ball = ve.querySelector('.gp-ball'); if (ball) FEEL.pulse(ball, 'drop'); }
+    $('#gpBar')?.style.setProperty('--p', String(barOf(g, list, d.answers, sc1.score, inf)));
+    $('#gpBar')?.parentElement?.setAttribute('aria-valuenow', String(Math.round(barOf(g, list, d.answers, sc1.score, inf) * 100)));
+    const se = $('#gpScore'); if (se) { const from = G.isDistance(g) && !k ? sc1.score : sc0.score; FEEL.countUp(se, from, sc1.score, 300, (v) => sc(Math.round(v * 10) / 10)); }
+    const sl = $('#gpScoreLbl'); if (sl) sl.textContent = scoreLabel(g, d.answers.length, list.length);
+    const st = $('#gpStreak'); if (st) { st.hidden = streak < 2; const n = st.querySelector('b'); if (n) n.textContent = String(streak); if (mile) FEEL.pulse(st, 'flame'); }
+    const bn = $('#gpBanner'); if (bn && text) { bn.hidden = true; bn.textContent = text; bn.style.animationDelay = ''; void bn.offsetWidth; bn.hidden = false; }
+  }
+  const scoreLabel = (g, i, n) => `${G.isDistance(g) ? `${g.id === 'range-speed' ? 'Longest' : 'Average'} ${c.UNIT}` : 'Score'}${(g.max || G.isDistance(g)) && !G.isOpen(g.id) ? ` · after ${i} of ${n}` : ''}`;
+  async function undo() { if (busy) return; const d = draft(); if (!d || !d.answers.length) return; FEEL.play('tap'); d.answers.pop(); d.balls?.pop(); view.banner = null; await save(); render(); }
   // Driver test / Max out: the distance the golfer set (slider or typed), plus where it finished, becomes one ball
   const distLimits = (d, g) => { const start = distStart(d, g), step = B.DRIVER_TEST.step; return { min: Math.max(step, Math.round(start * 0.5 / step) * step), max: Math.round(start * 1.5 / step) * step, start }; };
   function distStart(d, g) {                                     // where the slider opens: the last ball, else the usual driver distance, else the table value for a mid handicap
@@ -61,32 +107,34 @@ export function registerGuided(c) {
     const usual = sub && Number.isFinite(sub.you) ? sub.you : B.driverYd(15) * 0.9144 / d.unitM;
     return Math.round(usual / B.DRIVER_TEST.step) * B.DRIVER_TEST.step;
   }
-  async function answerBall(result) {
-    const d = draft(); if (!d) return; const g = gameOf(d.game), inp = $('#gpDtype'), sl = $('#gpDist');
+  async function answerBall(result, btn) {
+    if (busy) return; const d = draft(); if (!d) return; const g = gameOf(d.game), inp = $('#gpDtype'), sl = $('#gpDist');
     const typed = inp && inp.value !== '' ? Number(inp.value) : NaN, dist = Number.isFinite(typed) && typed > 0 ? typed : Number(sl?.value);
     if (!Number.isFinite(dist) || dist <= 0) { c.toast('Enter how far it went'); render(); return; }
     const ball = { d: Math.round(dist), r: result, a: d.premium ? 0 : d.adj || 0 };
-    await answer(G.ballValue(ball, d.unitM), ball);
+    await answer(G.ballValue(ball, d.unitM), ball, btn);
   }
-  async function quit() { if (!confirm(run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
+  async function quit() { if (busy) return; if (!confirm(run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
   // a saved result's tier: benchmark games use the handicap table, own-history games judge it against the scores before it
   const tierOf = (g, r) => (G.isOwn(g) ? G.tierFor(g, r.score, unitM(), G.scoresBefore(g, J().results || [], r.id)) : G.tierFor(g, r.score, unitM()));
-  async function finish() {
+  async function finish(opts = {}) {
     const d = draft(), g = gameOf(d.game); const before = G.bestScore(g, J().results || []), v0 = c.progress.data(), led0 = v0.plan.ledger.find((x) => x.game === g.id);
     const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
     c.ui.game_result = { id: res.id, prev_best: before, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
     c.saveUi(); await save(); c.compete.onScore(res);
-    c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0);
+    // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
+    const show = () => { busy = false; c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0); };
+    if (opts.delay > 0) later(opts.delay, show); else show();
   }
 
   // ------------------------------------------------------------ screens
   function playScreen() {
     const d = draft(), g = gameOf(d.game), list = G.steps(g, { seed: d.seed, unitM: d.unitM }), a = d.answers, sc0 = G.scoreOf(g, list, a), i = a.length, step = list[Math.min(i, list.length - 1)];
-    const inf = info(g.id), lower = g.better === 'lower', last = i === list.length - 1 && !G.isOpen(g.id), pr = d.pressure && last;
+    const inf = info(g.id), lower = g.better === 'lower', open = G.isOpen(g.id), last = i === list.length - 1 && !open, pr = d.pressure && last;
     const isD = step.input === 'distance', bl = d.balls || [], un = d.unitM === 1 ? 'm' : 'yd';
-    const dot = (s, k) => (list[k].input === 'distance' ? (list[k].results ? (bl[k]?.r === 'f' ? 'hit' : 'miss') : 'done') : list[k].input === 'strokes' ? 'done' : a[k] ? 'hit' : 'miss');
-    const dots = list.slice(0, G.isOpen(g.id) ? Math.max(10, i + 1) : list.length).map((s, k) => `<i class="${k < i ? dot(s, k) : k === i ? 'now' : ''}"></i>`).join('');
+    const outs = a.map((v, k) => G.outcomeOf(g, list[k], v, { ball: bl[k], before: a.slice(0, k) }));
+    const dots = list.slice(0, open ? Math.max(10, i + 1) : list.length).map((s, k) => `<i class="${k < i ? (outs[k].good === true ? 'hit' : outs[k].good === false ? 'miss' : 'done') : k === i ? 'now' : ''}"></i>`).join('');
     let dist = '';
     if (isD) {
       const lim = distLimits(d, g);
@@ -95,20 +143,27 @@ export function registerGuided(c) {
         <label class="f" for="gpDtype">Or type the exact number (launch monitor)</label><input type="number" id="gpDtype" inputmode="decimal" min="1" placeholder="${un}">
         ${d.adj > 0 ? `<label class="gp-prem"><input type="checkbox" id="gpPrem" ${d.premium ? 'checked' : ''}> <span>Premium ball: skip the ${d.adj}% range-ball adjustment</span></label>` : ''}</div>`;
     }
+    const X = icon('cross', 22), T = icon('tick', 22);
     const btns = isD
-      ? (step.results ? `<button class="gp-b hit" data-gpball="f">Fairway</button><button class="gp-b" data-gpball="m">Missed</button><button class="gp-b miss" data-gpball="w">Wide</button>` : `<button class="gp-b hit" data-gpball="f">Save ball</button>`)
+      ? (step.results ? `<button class="gp-b hit" data-gpball="f">${T}<span>Fairway</span></button><button class="gp-b" data-gpball="m">${X}<span>Missed</span></button><button class="gp-b miss" data-gpball="w">${X}<span>Wide</span></button>` : `<button class="gp-b hit" data-gpball="f">Save ball</button>`)
       : step.input === 'strokes'
       ? [1, 2, 3, 4, 5].map((n) => `<button class="gp-b ${n <= (step.par || 2) ? 'good' : ''}" data-gp="${n}">${n === 5 ? '5+' : n}</button>`).join('')
-      : `<button class="gp-b miss" data-gp="0">Miss</button><button class="gp-b hit" data-gp="1">${/holed|Holed/.test(step.sub) ? 'Holed' : 'Hit'}</button>`;
+      : `<button class="gp-b miss" data-gp="0">${X}<span>Miss</span></button><button class="gp-b hit" data-gp="1">${T}<span>${/holed|Holed/.test(step.sub) ? 'Holed' : 'Hit'}</span></button>`;
     const gh = d.ghost && i > 0 ? LG.compareAt(g, a, d.ghost.detail, i) : null;
     const ghostLine = d.ghost ? `<div class="gp-ghost ${gh ? gh.state : 'level'}">${esc(d.ghost.nick)}${gh ? ` had ${sc(gh.ghost)} after ${i} · ${gh.state === 'level' ? 'you are level' : `you are ${gh.state} by ${sc(Math.abs(gh.diff))}`}` : `'s ${sc(d.ghost.score)} to beat`}</div>` : '';
-    const tgt = inf.target !== undefined && inf.target !== null ? `Target ${sc(inf.target)}${lower ? ' or fewer' : '+'} · a ${inf.skill_h}-handicapper` : '';
-    return `<div class="card gp" id="gpRoot"><div class="gp-top"><button class="btn sec sm" data-gpquit>Quit</button><b>${esc(g.name)}</b><span class="small muted">~${G.minutesFor(g.id)} min</span>${soundBtn()}</div>
+    const tgt = inf.target !== undefined && inf.target !== null ? FEEL.COPY.target(sc(inf.target), inf.skill_h, lower) : '';
+    const streak = G.streakOf(g, list, a, bl), prog = barOf(g, list, a, sc0.score, inf), ban = view.banner && Date.now() - view.banner.t0 < 1450 ? view.banner : null;
+    return `<div class="gp gp-full${pr ? ' gp-pr' : ''}" id="gpRoot"${busy ? ' data-busy="1"' : ''}>
+      <div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button>
+        <div class="gp-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(prog * 100)}"><i id="gpBar" class="fx-fill" style="--p:${prog}"></i></div>${soundBtn()}</div>
+      <div class="gp-strip"><div class="gp-sc"><div class="gp-name">${esc(g.name)}</div><b id="gpScore">${scoreText(g, sc0.score, i)}</b><span id="gpScoreLbl">${scoreLabel(g, i, list.length)}</span></div>
+        <div class="gp-side"><span class="gp-streak" id="gpStreak" ${streak >= 2 ? '' : 'hidden'}>${icon('flame', 18)}<b>${streak}</b></span><span class="gp-tgt">${esc(tgt)}</span></div>
+        <div class="gp-banner" id="gpBanner" ${ban ? `style="animation-delay:-${Date.now() - ban.t0}ms"` : 'hidden'}>${ban ? esc(ban.text) : ''}</div></div>
       <div class="gp-dots">${dots}</div>
       ${ghostLine}${pr ? `<div class="gp-pressure">${esc(G.pressureBanner(g))}</div>` : ''}
-      <div class="gp-main"><div class="gp-prompt">${esc(step.prompt)}</div><div class="gp-sub">${esc(step.sub || '')}</div></div>${dist}
-      <div class="gp-btns ${isD ? (step.results ? 'three' : 'one') : step.input === 'strokes' ? 'five' : 'two'}">${btns}</div>
-      <div class="gp-foot"><button class="btn sec" data-gpundo ${i ? '' : 'disabled'}>Undo</button><div><b>${isD ? (g.id === 'range-speed' ? 'Longest' : 'Average') : 'Score'} ${isD && !i ? '–' : sc(sc0.score)}${isD && i ? ` ${un}` : ''}</b>${(g.max || isD) && !G.isOpen(g.id) ? ` <span class="muted">after ${i} of ${list.length}</span>` : ''}<div class="small muted">${esc(tgt)}</div></div></div></div>`;
+      <div class="gp-main" id="gpMain"><div class="gp-art">${shotArt(artFor(g, step))}</div><div class="gp-prompt">${esc(step.prompt)}</div><div class="gp-sub">${esc(step.sub || '')}</div><div class="gp-verdict" id="gpVerdict" aria-live="polite"></div></div>
+      <div class="gp-sheet${busy ? ' gp-locked' : ''}" id="gpSheet">${dist}<div class="gp-btns ${isD ? (step.results ? 'three' : 'one') : step.input === 'strokes' ? 'five' : 'two'}">${btns}</div>
+        <div class="gp-foot"><button class="btn sec" data-gpundo ${i ? '' : 'disabled'}>Undo</button></div></div></div>`;
   }
   function sesButtons(g) {
     const r = run();
@@ -275,8 +330,8 @@ export function registerGuided(c) {
     const ids = F.DEFAULT_GAMES.filter((g) => canGuide(g.id)).map((g) => g.id), i = ids.indexOf(id); return ids[(i + 1) % ids.length];
   }
   function wire() {
-    $$('[data-gp]').forEach((b) => b.addEventListener('click', () => answer(Number(b.dataset.gp)), { once: true }));
-    $$('[data-gpball]').forEach((b) => b.addEventListener('click', () => answerBall(b.dataset.gpball), { once: true }));
+    $$('[data-gp]').forEach((b) => b.addEventListener('click', () => answer(Number(b.dataset.gp), null, b)));
+    $$('[data-gpball]').forEach((b) => b.addEventListener('click', () => answerBall(b.dataset.gpball, b)));
     const sl = $('#gpDist'), ty = $('#gpDtype'), num = $('#gpDnum');
     sl?.addEventListener('input', () => { num.textContent = sl.value; if (ty) ty.value = ''; });
     ty?.addEventListener('input', () => { num.textContent = ty.value !== '' ? ty.value : sl.value; });
