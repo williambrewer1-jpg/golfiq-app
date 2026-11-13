@@ -3,6 +3,7 @@
 import * as F from './features.js';
 import * as B from './bench.js';
 import * as CO from './coach.js';
+import * as SK from './skills.js';
 
 export function registerProgress(c) {
   const { A, esc, fmt, plot, note } = c;
@@ -15,7 +16,7 @@ export function registerProgress(c) {
 
   let memo = { ds: null, j: null, v: null };
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT]);
+    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -27,6 +28,7 @@ export function registerProgress(c) {
     const lu = CO.levelUp({ rounds: ds.rounds, holes: ds.holes, hcp: A.isNum(idx) ? idx : null, unitM: unitM(), games: games(), results: J().results || [], findings: fs });
     // the plan: close the gaps to a golfer 5 shots better (genuine improvement), or your own best rounds if that's bigger
     const potential = Math.max(lu?.total || 0, quick);
+    const sk = SK.skillRatings({ rounds: ds.rounds, holes: ds.holes, shots: ds.shots, results: J().results || [], games: games(), unitM: unitM(), findings: fs, pinned: J().focus?.pinned || [] });
     const fc = CO.forecast(ds.rounds, { savings, potential });
     const ms = CO.milestones(ds.rounds, { shift: 0 });
     const ms6 = fc.ok ? CO.milestones(ds.rounds, { shift: (fc.potential - fc.current) }) : null;
@@ -37,7 +39,7 @@ export function registerProgress(c) {
     const st = CO.streaks(CO.practiceDates(J()));
     const goals = CO.weeklyGoal({ findings: fs, roadmaps: [...short, ...long], results: res, games: g, assigned: CO.assignments(J().notes) });
     const bd = CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] });
-    memo = { ds: c.DS, j: key, v: { fs, lu, savings, fc, ms, ms6, short, long, st, goals, bd } };
+    memo = { ds: c.DS, j: key, v: { fs, lu, sk, savings, fc, ms, ms6, short, long, st, goals, bd } };
     return memo.v;
   }
 
@@ -63,22 +65,54 @@ export function registerProgress(c) {
       ${plot(tr, { height: 250, showlegend: true, legend: { orientation: 'h', y: -0.25 }, yaxis: { title: { text: 'Index' } } })}
       ${note(`Potential = your current index minus the strokes a round you win back by closing the gaps to a golfer five shots better (Level up) – ${n1(fc.potential_save)} (at least ${CO.POTENTIAL_MIN}, a typical gain from structured practice; at most ${CO.POTENTIAL_MAX}) – phased in over four months, plus any improving trend you already have. The shaded range is the normal ups and downs of a handicap index. It's a target to play for, not a promise; "without a plan" simulates your current level and trend (${fc.rounds_ahead} rounds at your pace, WHS best 8 of 20).`)}</div>`;
   }
-  // Level up: where a golfer five shots better beats you, what it's worth, and the practice game that trains it
+  // Level up: each skill has its own handicap; tap a skill to see its sub-skills, the target-level numbers and the games that train them
+  const NOUN = { 'putting.short': 'holes', 'putting.mid': 'holes', 'putting.lag': 'holes', 'short.updown': 'holes', 'short.chip': 'shots', 'approach.gir': 'holes', 'approach.wedge': 'shots',
+    'approach.mid': 'shots', 'approach.long': 'shots', 'driving.distance': 'drives', 'driving.penalties': 'tee shots', 'driving.accuracy': 'holes' };
+  const hc = (x) => (A.isNum(x) ? String(Math.round(x)) : '–');
+  const val = (x, u) => (!A.isNum(x) ? '–' : u === '%' ? `${Math.round(x)}%` : u === '/rd' ? `${n1(x)} a round` : u === 'm' ? `${x >= 100 ? Math.round(x) : n1(x)} m` : `${Math.round(x)} ${u}`);
+  const gameBtn = (g) => {
+    const tab = g.id === 'combine' ? 'combine' : g.id === 'range-course' ? 'range' : null, lower = g.better === 'lower';
+    const label = A.isNum(g.target) ? `${esc(g.name)} · score ${sc(g.target)}${lower ? ' or less' : '+'}` : esc(g.name);
+    return `<button class="btn sec gbtn" ${tab ? `data-prtab="${tab}"` : `data-record="${esc(g.id)}"`}>${label}</button>`;
+  };
+  function subRow(s, skill) {
+    const has = A.isNum(s.you), tv = s.target_value, ahead = has && s.strokes < 0.05 && !s.context_only;
+    const w = has && A.isNum(tv) && tv > 0 ? Math.max(4, Math.min(100, (s.higher ? s.you / tv : tv / Math.max(s.you, 1e-9)) * 100)) : has ? 100 : 0;
+    const head = s.hcp !== null ? `${hc(s.hcp)} handicap${s.source === 'practice' ? ' <small class="muted">from practice</small>' : ''}` : s.own_history ? '<small class="muted">your own history</small>' : '<small class="muted">not enough data yet</small>';
+    const gain = s.context_only ? '<span class="muted">for context</span>' : !has ? '' : ahead ? '<span class="good">already there ✓</span>' : `<b class="good">≈ ${n1(s.strokes)}</b> shots a round`;
+    return `<div class="lvl ${ahead ? 'ahead' : ''}"><div class="lvl-h"><b>${esc(s.title)}</b><span>${head}</span></div>
+      ${has ? `<div class="bar"><i style="width:${Math.round(w)}%"></i></div>
+      <p class="small">You <b>${val(s.you, s.unit)}</b>${A.isNum(tv) ? ` · ${s.std_label ? esc(s.std_label) : `a ${skill.target} handicapper`} <b>${val(tv, s.unit)}</b>` : ''} · ${gain}</p>`
+      : `<p class="small muted">${s.n ? `Only ${s.n} ${NOUN[s.full_key]} so far` : `No ${NOUN[s.full_key]} yet`} – a few more rounds with shot tracking will rate this.</p>`}
+      <p class="small muted" style="margin:0">${has ? `From ${s.n} ${NOUN[s.full_key]}. ` : ''}${A.isNum(s.practice_hcp) ? `Practice level ${hc(s.practice_hcp)}. ` : ''}${esc(s.how)}</p>
+      ${!ahead && s.games.length ? `<div class="lvl-g">${s.games.map(gameBtn).join('')}</div>` : ''}</div>`;
+  }
   function levelUpCard(v = data(), { link = false } = {}) {
-    const lu = v.lu; if (!lu) return '';
-    const f = (x, u) => (u === '%' ? `${Math.round(x)}%` : n1(x));
-    const rows = lu.areas.map((a) => {
-      const ahead = a.strokes < 0.05, w = Math.max(4, Math.min(100, a.std ? (a.higher ? a.you / a.std : a.std / Math.max(a.you, 0.01)) * 100 : 100));
-      return `<div class="lvl ${ahead ? 'ahead' : ''}"><div class="lvl-h"><b>${esc(a.title)}</b><span>${ahead ? '<span class="good">already there ✓</span>' : `<b class="good">≈ ${n1(a.strokes)}</b> shots a round`}</span></div>
-        <div class="bar"><i style="width:${Math.round(w)}%"></i></div>
-        <p class="small">You <b>${f(a.you, a.unit)}</b> · ${a.std_label ? esc(a.std_label) : `a ${lu.to} handicap`} <b>${f(a.std, a.unit)}</b>${ahead ? '' : ` – ${esc(a.how)}`}</p>
-        ${!ahead && a.games.length ? `<div class="lvl-g">${a.games.map((g) => `<a href="#practice" data-practice="games" class="chip">${esc(g.name)}${A.isNum(g.target) ? ` <b>${g.better === 'lower' ? '≤' : '≥'} ${sc(g.target)}</b>` : ''}${A.isNum(g.best) ? ` <small>best ${sc(g.best)}</small>` : ''}</a>`).join('')}</div>` : ''}</div>`;
-    }).join('');
-    return `<div class="card"><h2>Level up: play like a ${lu.to} handicap</h2>
-      <p class="small">Where a golfer ${Math.round(lu.from - lu.to)} shots better than you (index ${n1(lu.from)}) beats you, what closing each gap is worth, and the practice game that trains it – with the score a ${lu.to} handicapper typically posts.</p>
-      <p class="prog-claim">Close these gaps: about <b>${n1(lu.total)} shots a round</b>.</p>${rows}
+    const sk = v.sk; if (!sk) return '';
+    const anyRated = sk.skills.some((s) => s.rated), open = sk.skills.find((s) => s.key === c.ui.lv_skill), pinned = J().focus?.pinned || [];
+    if (!anyRated && !(J().results || []).length) return `<div class="card"><h2>Level up</h2><p class="muted">Play ${Math.max(1, SK.RATING.min_rounds - sk.rounds)} more 18-hole round${SK.RATING.min_rounds - sk.rounds === 1 ? '' : 's'} with a scorecard and each skill (putting, short game, approach, driving) gets its own handicap, with games to improve it.</p></div>`;
+    const tile = (s) => `<button class="skill-tile ${s.focus ? 'focus' : ''} ${open === s ? 'open' : ''}" data-skill="${s.key}" aria-expanded="${open === s}">
+      <span class="st-top"><b>${esc(s.title)}</b>${s.focus ? '<em class="tag">Focus</em>' : ''}</span>
+      <span class="st-hcp">${hc(s.hcp)}</span>
+      <span class="st-go">${s.rated ? `${hc(s.hcp)} → ${s.target}` : 'not rated yet'}</span>
+      <span class="small ${s.strokes >= 0.05 ? 'good' : 'muted'}">${s.rated ? (s.strokes >= 0.05 ? `≈ ${n1(s.strokes)} shots a round` : 'nothing big to win') : 'needs more rounds'}</span>
+      ${A.isNum(s.practice_hcp) ? `<span class="small muted">practice level ${hc(s.practice_hcp)}</span>` : ''}</button>`;
+    const detail = open ? `<div class="skill-detail"><div class="rv-h"><h3 style="margin:0">${esc(open.title)}</h3>${open.rated ? `<span class="small muted">${hc(open.hcp)} → ${open.target} handicap</span>` : ''}</div>
+      ${open.subs.map((s) => subRow(s, open)).join('')}
+      <p style="margin:8px 0 0"><button class="btn sec gbtn" data-pin="${open.key}">${pinned.includes(open.key) ? 'Stop pinning this focus' : open.focus ? 'Pin as a focus area' : 'Make this a focus area'}</button></p></div>` : '';
+    const own = sk.skills.flatMap((s) => s.subs).filter((s) => s.own_history).map((s) => s.title.toLowerCase());
+    return `<div class="card" id="levelUp"><h2>Level up</h2>
+      <p class="small">Every skill has its own handicap, rated against what golfers of each level typically do. Aim for the next level: ${sk.skills.some((s) => s.rated) ? 'three shots better' : 'play five full rounds to rate them'}. Tap a skill to see why.</p>
+      <div class="skill-grid">${sk.skills.map(tile).join('')}</div>${detail}
       ${link ? '<p class="small"><a href="#practice" data-practice="progress">See your 6-month potential →</a></p>' : ''}
-      ${note(`Standards from Shot Scope data (scratch / 10 / 20 handicap, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}), interpolated to a ${lu.to} handicap. Strokes: extra greens use what a missed green costs you (from your own holes); up and down counts the greens you'd still miss; three-putts and penalties are a stroke each; fairways use your own cost per miss. Areas overlap a little, so treat the total as a target. Last ${lu.rounds} 18-hole rounds.`)}</div>`;
+      ${note(`Your last ${sk.rounds} 18-hole rounds against Shot Scope data (putting make %, approach proximity, up-and-down %, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}; sources: ${[...B.SOURCES, CO.STANDARD_SOURCE].map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t.split(' (')[0])}</a>`).join(', ')}). ${own.length ? `No published standard exists for ${esc(own.join(' or '))}, so they use your own best quarter of rounds and don't count towards the handicap. ` : ''}Proximity compares your median finish with the published averages. Practice level comes from your last 5 game scores and is shown separately, because practice is easier than the course. Strokes are what reaching the next level would save per round; skills overlap a little, so treat the total as a target.`)}</div>`;
+  }
+  function wire() {
+    c.$$('[data-skill]').forEach((b) => b.addEventListener('click', () => { c.ui.lv_skill = c.ui.lv_skill === b.dataset.skill ? null : b.dataset.skill; c.saveUi(); c.rerender(); }));
+    c.$$('[data-pin]').forEach((b) => b.addEventListener('click', async () => {
+      const j = J(), cur = j.focus?.pinned || [], k = b.dataset.pin; j.focus = { ...(j.focus || {}), pinned: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k].slice(-2) };
+      await c.S.saveJournal(c.state); c.rerender();
+    }));
   }
   function milestonesCard(v) {
     const rows = v.ms.rows, m6 = v.ms6?.rows;
@@ -138,5 +172,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard };
+  return { page, homeCard, data, levelUpCard, wire };
 }
