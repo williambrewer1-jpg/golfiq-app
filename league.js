@@ -50,6 +50,7 @@ export function ghostsFor(scores, game, myUid, limit = 3) {
 // the score after k steps from a list of answers
 export function partial(game, detail, k) {
   const a = (detail || []).slice(0, k);
+  if (G.isDistance(game)) return G.distanceScore(game, a);               // Driver test: the average so far; Max out: the longest so far
   if (G.isOpen(game.id)) { const m = a.indexOf(0); return m < 0 ? a.length : m; }
   return a.reduce((t, x) => t + (Number.isFinite(x) ? x : 0), 0);
 }

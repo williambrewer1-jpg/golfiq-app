@@ -96,7 +96,7 @@ export function milestones(rounds, { now = Date.now(), shift = 0 } = {}) {
 // Typical standard: breaking 100 regularly ≈ 24 handicap, 90 ≈ 14, 80 ≈ 5.
 export const RUNGS = [['Break 100', 24], ['Break 90', 14], ['Break 80', 5], ['Scratch', 0]];
 export const SHORT_GAMES = ['putt-369', 'putt-lag', 'putt-par18', 'putt-streak', 'chip-updown', 'chip-par18'];
-export const LONG_GAMES = ['range-greens', 'range-wedge', 'combine', 'range-course'];
+export const LONG_GAMES = ['range-greens', 'range-wedge', 'range-driver', 'combine', 'range-course'];
 // Range round: per-18-hole score over par typical of each standard (break 90 ≈ +17 etc.)
 const rrRung = (h) => h + 3;
 function rangeRoundLevel(perHoleOver) {           // handicap that typically scores this over par per 18 holes

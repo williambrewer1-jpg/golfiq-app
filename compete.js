@@ -54,7 +54,7 @@ export function registerCompete(c) {
       <p class="small muted" style="margin:8px 0 0">${LG.LEAGUE.hit} points for beating your own target, ${LG.LEAGUE.play} for playing, +${LG.LEAGUE.pressure} for a pressure finish. Your first ${LG.LEAGUE.cap} scores of the week count. It starts again each Monday.</p></div>` : ''}
     <div class="card challenge"><div class="rv-h"><h2 style="margin:0">This week's challenge</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div>
       <h3 style="margin-top:6px">${esc(g.name)}</h3><p class="small">${esc(g.how || '')}</p>
-      ${B.hasLevel(gid) ? `<p class="small muted">Benchmarks: scratch ${t(0)} · 10 hcp ${t(10)} · 20 hcp ${t(20)} ${esc(g.unit || '')}</p>` : ''}
+      ${B.hasLevel(gid) ? `<p class="small muted">Benchmarks: scratch ${t(0)} · 10 hcp ${t(10)} · 20 hcp ${t(20)} ${esc(F.unitOf(g, c.UNIT) || '')}</p>` : ''}
       <div class="kpis">${kpi('Your best this week', best, null, true, Number.isInteger(best) ? 0 : 1)}<div class="kpi"><div class="l">Level</div><div class="v sm">${l ? esc(l.label) : '–'}</div></div><div class="kpi"><div class="l">Attempts</div><div class="v">${mine.length}</div></div></div>
       <p><button class="btn" data-record="${esc(gid)}">Record a score</button></p>
       ${groupOn() ? `<h3>${esc(cloud().groupName || 'Group')} leaderboard</h3><div id="lbWeek">${boardHtml('w', cache.get(`w|${week}|${gid}`), g.better)}</div>` : friendsHint()}</div>

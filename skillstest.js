@@ -1,14 +1,15 @@
 // Monthly skills test: five guided games in a fixed order, rated per skill. Pure logic so Node can test it.
 import * as B from './bench.js';
+import { minutesFor } from './games.js';
 
-export const TEST_GAMES = ['putt-369', 'putt-lag', 'chip-updown', 'range-wedge', 'range-greens'];
-export const TEST_MINUTES = 30;
-export const TEST_SKILLS = { putting: ['putt-369', 'putt-lag'], short: ['chip-updown'], approach: ['range-wedge', 'range-greens'] };
+export const TEST_GAMES = ['putt-369', 'putt-lag', 'chip-updown', 'range-wedge', 'range-greens', 'range-driver'];
+export const TEST_MINUTES = Math.round(TEST_GAMES.reduce((t, id) => t + minutesFor(id), 0) / 5) * 5;       // the games' own time estimates added up, to the nearest 5
+export const TEST_SKILLS = { putting: ['putt-369', 'putt-lag'], short: ['chip-updown'], approach: ['range-wedge', 'range-greens'], driving: ['range-driver'] };
 export const SKILL_TITLES = { putting: 'Putting', short: 'Short game', approach: 'Approach', driving: 'Driving' };
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 export const monthOf = (date) => String(date).slice(0, 7);
 
-// practice handicap per skill from one test: the average handicap level of its games. Driving is not in the test.
+// practice handicap per skill from one test: the average handicap level of its games.
 export function rate(scores, games, unitM = 0.9144) {
   const per_game = {};
   for (const id of TEST_GAMES) {
@@ -18,7 +19,6 @@ export function rate(scores, games, unitM = 0.9144) {
   }
   const ratings = {};
   for (const [skill, ids] of Object.entries(TEST_SKILLS)) { const hs = ids.map((id) => per_game[id]?.h).filter(isNum); ratings[skill] = hs.length === ids.length ? hs.reduce((a, b) => a + b, 0) / hs.length : null; }
-  ratings.driving = null;
   return { ratings, per_game };
 }
 // this test against the one before it: change > 0 means better (a lower handicap)

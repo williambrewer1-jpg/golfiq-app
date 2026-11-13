@@ -1,6 +1,8 @@
 """Browser test for the monthly skills test (phase 7). Run: python3 tests/e2e_skillstest.py"""
 import http.server, threading, functools, sys, os, re
 from playwright.sync_api import sync_playwright
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from play_helpers import answer_step
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a, **k): pass
@@ -11,19 +13,19 @@ def check(name, ok, extra=''):
     print(('ok   ' if ok else 'FAIL ') + name + (f'  {extra}' if extra and not ok else ''))
     if not ok: fails.append(name)
 URL = f'http://127.0.0.1:{port}/index.html'
+N = 6                                               # games in the test
 def play_out(pg, every=3):
     taps = 0
     while pg.query_selector('#gpRoot .gp-btns'):
-        if pg.query_selector('[data-gp="5"]'): pg.click('[data-gp="2"]')
-        else: pg.click('[data-gp="1"]' if taps % every != every - 1 else '[data-gp="0"]')
+        answer_step(pg, taps, every)
         taps += 1; pg.wait_for_timeout(40)
         if taps > 60: break
     pg.wait_for_selector('.gp-res', timeout=3000)
 def run_test(pg, every):
     pg.click('[data-gptest]'); pg.wait_for_selector('#gpRoot .gp-prompt'); order = []
-    for i in range(5):
+    for i in range(N):
         order.append(pg.evaluate("() => window.__golfiq.state.journal.game_draft.game")); play_out(pg, every)
-        if i < 4: pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
+        if i < N - 1: pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
     return order
 with sync_playwright() as p:
     b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); pg = ctx.new_page(); errs = []
@@ -34,22 +36,22 @@ with sync_playwright() as p:
     check('Home reminds you in the first week of the month', 'monthly skills test' in pg.inner_text('.gp-test').lower())
     pg.screenshot(path='/tmp/test_home.png')
     pg.click('.gp-test [data-gptest]'); pg.wait_for_selector('#gpRoot .gp-prompt'); order = []
-    for i in range(5):
+    for i in range(N):
         order.append(pg.evaluate("() => window.__golfiq.state.journal.game_draft.game")); play_out(pg, 2)
-        if i < 4:
-            check(f'game {i + 1}: result says skills test, game {i + 1} of 5', f'Skills test: game {i + 1} of 5' in pg.inner_text('.gp-res'), pg.inner_text('.gp-res')[-100:])
+        if i < N - 1:
+            check(f'game {i + 1}: result says skills test, game {i + 1} of {N}', f'Skills test: game {i + 1} of {N}' in pg.inner_text('.gp-res'), pg.inner_text('.gp-res')[-100:])
             pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
-    check('the test runs the five fixed games in order', order == ['putt-369', 'putt-lag', 'chip-updown', 'range-wedge', 'range-greens'], order)
+    check('the test runs the six fixed games in order, the Driver test last', order == ['putt-369', 'putt-lag', 'chip-updown', 'range-wedge', 'range-greens', 'range-driver'], order)
     check('the last result offers Finish test', 'Finish test' in pg.inner_text('[data-gpsesend]'))
     pg.click('[data-gpsesend]'); pg.wait_for_selector('text=Skills test done')
     sm = pg.inner_text('#gpRoot'); check('summary lists the skills with a practice handicap', all(w in sm for w in ['Putting', 'Short game', 'Approach', 'Driving']) and 'first test' in sm, sm[:400])
-    check('driving is marked as not in the test', 'not in the test' in sm)
+    check('every skill, Driving included, has a practice handicap', 'not in the test' not in sm)
     t1 = pg.evaluate("() => { const j = window.__golfiq.state.journal, t = j.skills_tests; return { n: t.length, r: t[0].ratings, results: t[0].results.length, linked: t[0].results.every(id => j.results.find(r => r.id === id && r.session_id === t[0].id)), ses: j.sessions.slice(-1)[0].notes }; }")
-    check('test stored with ratings per skill and linked results', t1['n'] == 1 and all(isinstance(t1['r'][k], (int, float)) for k in ['putting', 'short', 'approach']) and t1['r']['driving'] is None and t1['results'] == 5 and t1['linked'], t1)
+    check('test stored with ratings per skill and linked results', t1['n'] == 1 and all(isinstance(t1['r'][k], (int, float)) for k in ['putting', 'short', 'approach', 'driving']) and t1['results'] == N and t1['linked'], t1)
     check('the test also logs a practice session', t1['ses'] == 'Monthly skills test')
     pg.screenshot(path='/tmp/test_summary1.png')
     pr = pg.evaluate("() => window.__golfiq.progress.data().sk.skills.map(s => [s.key, s.practice_hcp])")
-    check('practice levels are re-rated from the test scores', all(v is not None for k, v in pr if k in ('putting', 'short', 'approach')), pr)
+    check('practice levels are re-rated from the test scores', all(v is not None for k, v in pr), pr)
     pg.click('[data-gpdone]'); pg.goto(URL + '#home'); pg.wait_for_selector('.kpis')
     check('reminder is gone once the test is done', pg.query_selector('.gp-test') is None)
     # second test, better scores: compares with the first

@@ -50,9 +50,9 @@ with sync_playwright() as p:
     pg.click('.skill-tile[data-skill=short]'); pg.wait_for_selector('.skill-detail')
     btn = pg.query_selector('.skill-detail button[data-record=chip-updown]'); check('Up & down game button present', btn is not None)
     label = btn.inner_text(); check('button label has game and target score', 'score' in label and 'Up' in label, label)
-    btn.click(); pg.wait_for_selector('#pgForm')
-    check('lands on the Games tab', pg.query_selector('#pgForm') is not None)
-    check('with that game selected', pg.eval_on_selector('[data-sel=pg_game]', 'e => e.value') == 'chip-updown')
+    btn.click(); pg.wait_for_selector('#gpRoot .gp-prompt')                  # since phase 4 a game button starts guided play directly
+    check('game button starts guided play for that game', pg.evaluate("() => window.__golfiq.state.journal.game_draft?.game") == 'chip-updown')
+    pg.evaluate("() => { window.__golfiq.state.journal.game_draft = null; }")        # leave no draft behind for the steps below
     # combine button opens its own tab
     pg.evaluate("() => { const u = JSON.parse(localStorage.getItem('golfiq-ui')); u.pr_tab = 'focus'; localStorage.setItem('golfiq-ui', JSON.stringify(u)); }"); pg.reload(); pg.wait_for_selector('#levelUp')
     pg.click('.skill-tile[data-skill=approach]'); pg.click('.skill-detail button[data-prtab=combine]'); pg.wait_for_timeout(300)
@@ -61,12 +61,27 @@ with sync_playwright() as p:
     pg.evaluate("() => { const u = JSON.parse(localStorage.getItem('golfiq-ui')); u.pr_tab = 'focus'; u.lv_skill = 'driving'; localStorage.setItem('golfiq-ui', JSON.stringify(u)); }"); pg.reload(); pg.wait_for_selector('.skill-detail')
     pg.click('[data-pin=driving]'); pg.wait_for_timeout(500)
     check('pinning makes Driving a focus area', 'focus' in pg.inner_text('.skill-tile[data-skill=driving]').lower())
+    dd = pg.inner_text('.skill-detail')
+    check('Driving drill-down: distance has a strokes value (no longer "for context")', 'for context' not in dd and 'Distance' in dd, dd[:300])
+    gb = [x.inner_text() for x in pg.query_selector_all('.skill-detail .gbtn')]
+    check('Driving drill-down offers the Driver test and Max out', any('Driver test' in x for x in gb) and any('Max out' in x for x in gb), gb)
     # Progress page: tiles below the hero
     pg.evaluate("() => { const u = JSON.parse(localStorage.getItem('golfiq-ui')); u.pr_tab = 'progress'; u.lv_skill = null; localStorage.setItem('golfiq-ui', JSON.stringify(u)); }"); pg.reload(); pg.wait_for_selector('#levelUp')
     order = pg.evaluate("() => [...document.querySelectorAll('.prog-hero, #levelUp')].map(e => e.id || e.className)")
     check('Progress shows the tiles below the hero', order[0].endswith('prog-hero') and order[1] == 'levelUp', order)
     a = pg.evaluate(AUDIT); check('no horizontal overflow (Progress)', not a['overflow']); check('tap targets >= 38px (Progress)', not a['small'], a['small'])
     pg.screenshot(path='/tmp/levelup_progress.png', full_page=False)
+    # Badges header: "X of Y" counts the game tier badges still to win (four per benchmark game, three per own-history game), not just the earned ones
+    hdr = pg.inner_text('.card:has(.badges) h2'); import re
+    m = re.search(r'(\d+) of (\d+)', hdr); got, total = (int(m.group(1)), int(m.group(2))) if m else (None, None)
+    shown = len(pg.query_selector_all('.badges .bdg')); on = len(pg.query_selector_all('.badges .bdg.on'))
+    exp = pg.evaluate("() => { const v = window.__golfiq.progress.data(); return { total: v.bd_total, shown: v.bd.length }; }")
+    tb = pg.evaluate("""async () => { const G = await import('./games.js'), F = await import('./features.js'); const v = window.__golfiq.progress.data();
+      const base = v.bd.filter((b) => !String(b.id).startsWith('tier-')).length, all = G.tierBadges(F.DEFAULT_GAMES, [], 0.9144);
+      return { tiers_total: v.bd_total - base, expect: all.length, own: all.filter((b) => /range-speed|range-round/.test(b.id)).length, bench: all.length - all.filter((b) => /range-speed|range-round/.test(b.id)).length }; }""")
+    check('Badges header reads "X of Y" with X = badges lit on screen', m is not None and got == on, hdr)
+    check('Y counts every badge that can be won, so it is larger than the number on show', total == exp['total'] and total > shown and total >= got, (hdr, exp, shown))
+    check('Y includes every tier badge still to win: four per benchmark game, three per own-history game', tb['tiers_total'] == tb['expect'] and tb['own'] == 6 and tb['bench'] % 4 == 0, tb)
     check('no page errors', not errs, errs)
     b.close()
 srv.shutdown()

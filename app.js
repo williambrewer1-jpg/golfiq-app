@@ -1,6 +1,7 @@
 // GolfIQ for iPhone — UI. All data lives in this browser's on-device storage (store.js).
 import * as A from './analytics.js';
 import * as F from './features.js';
+import * as B from './bench.js';
 import { registerCompete } from './compete.js';
 import { registerProgress } from './progress.js';
 import { registerGuided } from './guided.js';
@@ -588,8 +589,9 @@ function pageSettings() {
       ${note('The token is stored only on this phone and is used only to read your private repo. It\'s never included in backups.')}`;
   }
   const unitsCard = `<div class="card"><h2>Distance units</h2><div class="seg" id="unitSeg">${[['yd', 'Yards (putts in feet)'], ['m', 'Metres']].map(([v, l]) => `<button data-u="${v}" class="${UNIT === v ? 'on' : ''}">${l}</button>`).join('')}</div><p class="note">Display only – data is stored unchanged, so you can switch any time.</p></div>`;
+  const rangeCard = `<div class="card"><h2>Range ball adjustment</h2><label class="f" for="rangeAdj">Extra distance for a course ball (%)</label><input id="rangeAdj" type="number" inputmode="numeric" min="0" max="${B.DRIVER_TEST.adj_max}" step="1" value="${Number(state.settings.range_ball_adj) || 0}" style="width:100%"><p class="note">Range balls and mats usually fly shorter than a course ball. The Driver test and Max out add this percentage to every distance you enter, so your level is closer to the course. 0 means no adjustment (up to ${B.DRIVER_TEST.adj_max}). If a distance comes from a premium ball on a launch monitor, tick Premium ball in the game to skip it.</p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${unitsCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
+  return `${demoBanner()}${links}${unitsCard}${rangeCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
@@ -778,6 +780,10 @@ function wireSettings() {
     if (st.units === b.dataset.u || (!st.units && b.dataset.u === 'yd')) return;
     st.units = b.dataset.u; await S.saveSettings(state, 'set_units', null, { units: st.units }); done(`Distances now in ${b.dataset.u === 'yd' ? 'yards' : 'metres'}`);
   }));
+  $('#rangeAdj')?.addEventListener('change', async (e) => {
+    const v = Math.max(0, Math.min(B.DRIVER_TEST.adj_max, Math.round(Number(e.target.value) || 0)));
+    st.range_ball_adj = v; await S.saveSettings(state, 'set_range_adj', null, { range_ball_adj: v }); done(v ? `Range ball adjustment ${v}%` : 'Range ball adjustment off');
+  });
   $('#clubForm')?.addEventListener('submit', async (e) => {
     e.preventDefault(); let n = 0;
     for (const card of $$('[data-c]', e.target)) {
