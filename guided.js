@@ -4,6 +4,7 @@ import * as F from './features.js';
 import * as G from './games.js';
 import * as SS from './sessions.js';
 import * as ST from './skillstest.js';
+import * as LG from './league.js';
 
 export function registerGuided(c) {
   const { esc, fmt, $, $$ } = c;
@@ -28,7 +29,7 @@ export function registerGuided(c) {
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
-    J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure, session_id: opts.session_id || null, ghost: opts.ghost || null });
+    J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.ghost?.seed });
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
     scrollTo(0, 0);
@@ -45,7 +46,7 @@ export function registerGuided(c) {
     const d = draft(), g = gameOf(d.game); const before = G.bestScore(g, J().results || []), v0 = c.progress.data(), led0 = v0.plan.ledger.find((x) => x.game === g.id);
     const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.tierUp(g, before, res.score, unitM());
-    c.ui.game_result = { id: res.id, prev_best: before, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null };
+    c.ui.game_result = { id: res.id, prev_best: before, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
     c.saveUi(); await save(); c.compete.onScore(res);
     c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0);
   }
@@ -58,10 +59,12 @@ export function registerGuided(c) {
     const btns = step.input === 'strokes'
       ? [1, 2, 3, 4, 5].map((n) => `<button class="gp-b ${n <= (step.par || 2) ? 'good' : ''}" data-gp="${n}">${n === 5 ? '5+' : n}</button>`).join('')
       : `<button class="gp-b miss" data-gp="0">Miss</button><button class="gp-b hit" data-gp="1">${/holed|Holed/.test(step.sub) ? 'Holed' : 'Hit'}</button>`;
+    const gh = d.ghost && i > 0 ? LG.compareAt(g, a, d.ghost.detail, i) : null;
+    const ghostLine = d.ghost ? `<div class="gp-ghost ${gh ? gh.state : 'level'}">${esc(d.ghost.nick)}${gh ? ` had ${sc(gh.ghost)} after ${i} · ${gh.state === 'level' ? 'you are level' : `you are ${gh.state} by ${sc(Math.abs(gh.diff))}`}` : `'s ${sc(d.ghost.score)} to beat`}</div>` : '';
     const tgt = inf.target !== undefined && inf.target !== null ? `Target ${sc(inf.target)}${lower ? ' or fewer' : '+'} · a ${inf.skill_h}-handicapper` : '';
     return `<div class="card gp" id="gpRoot"><div class="gp-top"><button class="btn sec sm" data-gpquit>Quit</button><b>${esc(g.name)}</b><span class="small muted">~${G.minutesFor(g.id)} min</span></div>
       <div class="gp-dots">${dots}</div>
-      ${pr ? '<div class="gp-pressure">Pressure shot: it counts double</div>' : ''}
+      ${ghostLine}${pr ? '<div class="gp-pressure">Pressure shot: it counts double</div>' : ''}
       <div class="gp-main"><div class="gp-prompt">${esc(step.prompt)}</div><div class="gp-sub">${esc(step.sub || '')}</div></div>
       <div class="gp-btns ${step.input === 'strokes' ? 'five' : 'two'}">${btns}</div>
       <div class="gp-foot"><button class="btn sec" data-gpundo ${i ? '' : 'disabled'}>Undo</button><div><b>Score ${sc(sc0.score)}</b>${g.max && !G.isOpen(g.id) ? ` <span class="muted">after ${i} of ${list.length}</span>` : ''}<div class="small muted">${esc(tgt)}</div></div></div></div>`;
@@ -90,6 +93,7 @@ export function registerGuided(c) {
       ${lv ? `<p class="small" style="margin:0 0 6px">Handicap level: <b>${esc(lv.label)}</b>${info0.prev_best !== null && info0.prev_best !== undefined ? ` · your best before was ${sc(info0.prev_best)}` : ''}</p>` : ''}
       ${nextT ? `<p class="small" style="margin:0 0 6px">${nextT}</p>` : ''}
       ${beat !== null ? `<p class="small" style="margin:0 0 6px">${beat ? '✓ You beat' : 'Beat'} the ${inf.skill_h}-handicapper: ${sc(inf.target)}${lower ? ' or fewer' : '+'}.</p>` : ''}
+      ${info0.ghost ? `<p class="small" style="margin:0 0 6px"><b>${info0.ghost.state === 'won' ? `You beat ${esc(info0.ghost.nick)}` : info0.ghost.state === 'lost' ? `${esc(info0.ghost.nick)} wins` : `Level with ${esc(info0.ghost.nick)}`}</b> · ${sc(r.score)} to ${sc(info0.ghost.score)}</p>` : ''}
       ${pr ? `<p class="small" style="margin:0 0 6px">${esc(pr.label)}.${pr.hit ? ' Counts as 1.5 hits.' : ''}</p>` : ''}
       ${credit ? `<p class="small" style="margin:0 0 8px">${credit}</p>` : ''}
       ${sesButtons(g)}</div>`;
@@ -102,6 +106,7 @@ export function registerGuided(c) {
     const beat = inf.target !== undefined && inf.target !== null ? `<p class="small" style="margin:0 0 8px">Beat the ${inf.skill_h}-handicapper: <b>${sc(inf.target)}${g.better === 'lower' ? ' or fewer' : '+'}</b> (${esc(inf.sub)}).</p>` : '';
     if (!canGuide(g.id)) return '';
     return `${ladder}${beat}<label class="f" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="gpPressure" style="width:22px;height:22px;flex:0 0 auto"> <span>Pressure finish: the last ${g.id === 'putt-streak' ? 'putt ends it' : 'step counts double'}</span></label>
+      ${c.compete.groupOn() ? `<div id="gpGhost" data-ghostgame="${esc(g.id)}"></div>` : ''}
       <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>`;
   }
   const screen = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
@@ -200,6 +205,23 @@ export function registerGuided(c) {
       <p class="small muted" style="margin:10px 0">These scores are saved as normal results, so your practice levels now use them.</p><button class="btn" data-gpdone>Done</button></div>`;
   }
 
+  // friends' guided scores this week for this game: play the same steps and see who is ahead after each one
+  let ghosts = [];
+  async function loadGhosts() {
+    const el = $('#gpGhost'); if (!el) return; const g = gameOf(el.dataset.ghostgame); if (!g) return;
+    try {
+      ghosts = LG.ghostsFor(await c.compete.weekScores(B.isoWeek()), g, c.compete.myUid());
+      const cur = $('#gpGhost'); if (!cur || cur.dataset.ghostgame !== g.id) return;
+      cur.innerHTML = ghosts.map((x, i) => `<button class="btn sec" data-gpghost="${i}">Play against ${esc(x.nick)}'s ${sc(x.score)}</button>`).join('');
+      $$('[data-gpghost]').forEach((b) => b.addEventListener('click', () => start(g.id, { ghost: ghosts[Number(b.dataset.gpghost)] })));
+    } catch (e) { const cur = $('#gpGhost'); if (cur) cur.innerHTML = ''; }
+  }
+  // what a posted score also carries: did it beat your own target, and which tier it reached
+  function shareInfo(res) {
+    const g = gameOf(res.game); if (!g) return {}; const inf = info(g.id), out = {};
+    if (inf.target !== undefined && inf.target !== null) out.hit = g.better === 'lower' ? res.score <= inf.target : res.score >= inf.target;
+    const t = G.tierFor(g, res.score, unitM())?.tier; if (t) out.tier = t.key; return out;
+  }
   function nextGame(id) {
     const v = c.progress.data(), g0 = v.plan.ledger.map((x) => x.game).filter((x) => x !== id && canGuide(x));
     if (g0.length) return g0[0];
@@ -212,10 +234,11 @@ export function registerGuided(c) {
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
     $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { c.ui.game_result = null; c.ui.session_summary = null; c.saveUi(); c.rerender(); }));
+    loadGhosts();
     $$('[data-gptest]').forEach((b) => b.addEventListener('click', startTest));
     $$('[data-gpses]').forEach((b) => b.addEventListener('click', () => startSession(Number(b.dataset.gpses))));
     $$('[data-gpdaily]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpdaily)));
     $$('[data-gpsesnext]').forEach((b) => b.addEventListener('click', sesNext)); $$('[data-gpsesend]').forEach((b) => b.addEventListener('click', () => endSession(false)));
   }
-  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, dailyPick, startSession, startTest, testCard, afterResult };
+  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, dailyPick, startSession, startTest, testCard, afterResult, shareInfo };
 }

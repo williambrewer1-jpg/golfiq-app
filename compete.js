@@ -5,6 +5,7 @@ import * as CL from './cloud.js';
 import * as F from './features.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
+import * as LG from './league.js';
 
 export function registerCompete(c) {
   const { A, S, $, $$, esc, fmt, note, table, kpi, select, toast } = c;
@@ -18,14 +19,20 @@ export function registerCompete(c) {
   const inWeek = (date, week) => B.isoWeek(new Date(`${date}T12:00:00`)) === week;
   const groupOn = () => CL.ready(cloud()) && !!cloud().group;
 
+  // this week's scores for the whole group (kept for 30 seconds so the league, the ghost list and the board share one fetch)
+  const weekCache = new Map();
+  async function weekScores(week) {
+    const e = weekCache.get(week); if (e && Date.now() - e.at < 30000) return e.rows;
+    const rows = await CL.scoresWhere(cloud(), cloud().group, 'week', week); weekCache.set(week, { at: Date.now(), rows }); return rows;
+  }
   // ------------------------------------------------------------ posting scores to the group
   async function onScore(res) {
     if (!groupOn()) return;
     const g = gameById(res.game), l = lvl(res.game, res.score), d = new Date(`${res.date}T12:00:00`);
     try {
       await CL.postScore(cloud(), cloud().group, { game: res.game, game_name: g.name, better: g.better || 'higher', score: res.score, level_h: l ? Math.round(l.h * 10) / 10 : null,
-        date: res.date, week: B.isoWeek(d), month: B.monthKey(d), nick: cloud().nick || 'Golfer', ...(res.course ? { course: res.course } : {}) });
-      await S.saveCloud(c.state);
+        date: res.date, week: B.isoWeek(d), month: B.monthKey(d), nick: cloud().nick || 'Golfer', ...(res.course ? { course: res.course } : {}), ...LG.shareExtras(res, c.guided ? c.guided.shareInfo(res) : {}) });
+      weekCache.clear(); await S.saveCloud(c.state);
     } catch (e) { toast(`Saved here; not shared: ${e.message}`); }
   }
 
@@ -43,7 +50,9 @@ export function registerCompete(c) {
     const t = (h) => fmt(B.expectedFor(gid, h, unitM()), 1);
     const month = B.monthKey(), combineMine = J().results.filter((r) => r.game === 'combine' && r.date.startsWith(month));
     const bg = c.ui.lb_game || gid;
-    return `<div class="card challenge"><div class="rv-h"><h2 style="margin:0">This week's challenge</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div>
+    return `${groupOn() ? `<div class="card" id="lbLeagueCard"><div class="rv-h"><h2 style="margin:0">Weekly league</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div><div id="lbLeague"><p class="small muted">Loading…</p></div>
+      <p class="small muted" style="margin:8px 0 0">${LG.LEAGUE.hit} points for beating your own target, ${LG.LEAGUE.play} for playing, +${LG.LEAGUE.pressure} for a pressure finish. Your first ${LG.LEAGUE.cap} scores of the week count. It starts again each Monday.</p></div>` : ''}
+    <div class="card challenge"><div class="rv-h"><h2 style="margin:0">This week's challenge</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div>
       <h3 style="margin-top:6px">${esc(g.name)}</h3><p class="small">${esc(g.how || '')}</p>
       ${B.hasLevel(gid) ? `<p class="small muted">Benchmarks: scratch ${t(0)} · 10 hcp ${t(10)} · 20 hcp ${t(20)} ${esc(g.unit || '')}</p>` : ''}
       <div class="kpis">${kpi('Your best this week', best, null, true, Number.isInteger(best) ? 0 : 1)}<div class="kpi"><div class="l">Level</div><div class="v sm">${l ? esc(l.label) : '–'}</div></div><div class="kpi"><div class="l">Attempts</div><div class="v">${mine.length}</div></div></div>
@@ -58,6 +67,12 @@ export function registerCompete(c) {
     ${note('Levels compare your score with what golfers of each handicap would be expected to score, from Shot Scope on-course data (putting make %, approach proximity, up-and-down %). Practice greens and ranges are easier than the course, so most scores read a few shots better than your handicap – use them to track progress and compare with friends.')}`;
   }
   function friendsHint() { return `<p class="small">Compare with friends: set up a group in <a href="#settings" data-friends>Settings → Friends</a>.</p>`; }
+  function leagueHtml(rows, prev) {
+    const uid = cloud().auth?.uid;
+    if (!rows.length) return '<p class="small muted">No scores yet this week. Play any game to get on the board.</p>';
+    const last = prev.length ? `<p class="small" style="margin:8px 0 0">Last week's winner: <b>${LG.winners(prev).map((r) => esc(r.nick)).join(' and ')}</b> · ${LG.winners(prev)[0].points} points</p>` : '';
+    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small></div>`).join('')}</div>${last}`;
+  }
   async function loadBoards() {
     if (!groupOn()) return;
     const cl = cloud(), week = B.isoWeek(), gid = B.weeklyChallenge(week), month = B.monthKey(), bg = c.ui.lb_game || gid;
@@ -66,6 +81,7 @@ export function registerCompete(c) {
       catch (e) { const el = $(sel); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; }
     };
     await Promise.all([
+      (async () => { try { const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]); const el = $('#lbLeague'); if (el) el.innerHTML = leagueHtml(LG.league(cur), prev.length ? LG.league(prev) : []); } catch (e) { const el = $('#lbLeague'); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; } })(),
       fill('#lbWeek', `w|${week}|${gid}`, async () => (await CL.scoresWhere(cl, cl.group, 'week', week)).filter((s) => s.game === gid), gameById(gid).better),
       fill('#lbMonth', `m|${month}`, async () => (await CL.scoresWhere(cl, cl.group, 'month', month)).filter((s) => s.game === 'combine'), 'higher'),
       $('#lbAll') ? fill('#lbAll', `a|${bg}`, () => CL.scoresWhere(cl, cl.group, 'game', bg), gameById(bg).better) : null,
@@ -175,7 +191,7 @@ export function registerCompete(c) {
     $$('[data-record]').forEach((b) => b.addEventListener('click', () => { if (c.guided?.canGuide(b.dataset.record)) { c.guided.start(b.dataset.record); return; } c.ui.pr_tab = 'games'; c.ui.pg_game = b.dataset.record; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
     $$('[data-prtab]').forEach((b) => b.addEventListener('click', () => { c.ui.pr_tab = b.dataset.prtab; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
     $$('[data-friends]').forEach((a) => a.addEventListener('click', () => { c.ui.st_tab = 'friends'; c.saveUi(); }));
-    if ($('#lbWeek') || $('#lbMonth')) loadBoards();
+    if ($('#lbWeek') || $('#lbMonth') || $('#lbLeague')) loadBoards();
     // combine
     $$('[data-cmb]').forEach((b) => b.addEventListener('click', async () => {
       const [i, p] = b.dataset.cmb.split('|').map(Number), d = J().combine_draft || (J().combine_draft = { date: today(), pts: [] });
@@ -248,5 +264,5 @@ export function registerCompete(c) {
     const inv = CL.parseInvite(location.hash); if (!inv) return false;
     cloud().pending = inv; S.saveCloud(c.state); c.ui.st_tab = 'friends'; c.saveUi(); history.replaceState(null, '', '#settings'); return true;
   }
-  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, handleInvite, lvl, lvlText };
+  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, handleInvite, lvl, lvlText, groupOn, weekScores, myUid: () => cloud().auth?.uid || null };
 }
