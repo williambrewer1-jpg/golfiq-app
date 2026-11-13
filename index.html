@@ -192,6 +192,9 @@ details.sgset{border:1px solid var(--line);border-radius:13px;padding:10px 12px;
 .plan{display:grid;gap:4px;margin:8px 0 6px;padding:10px 12px;border-radius:12px;background:var(--tint);font-size:13.5px}
 .step .pu{width:auto;padding:0 10px;font-size:12px;margin-left:4px}
 .card.sub{box-shadow:none;border:1px solid var(--line);margin:8px 0}
+/* ---- club distances editor */
+.cdrow{display:grid;grid-template-columns:1fr 1.25fr;grid-template-areas:"n n" "i s";gap:6px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.cdrow .cdn{grid-area:n;display:flex;justify-content:space-between;gap:8px;align-items:baseline}.cdrow input{grid-area:i}.cdrow select{grid-area:s}
 /* ---- hole map */
 .hmwrap{position:relative;margin:0 -6px;border-radius:16px;overflow:hidden;border:1px solid var(--gold);background:#33402f}
 .holemap{display:block;width:100%;height:auto;touch-action:none;-webkit-user-select:none;user-select:none;cursor:crosshair}
