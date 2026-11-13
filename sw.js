@@ -1,5 +1,5 @@
 // Offline cache for the app shell (code only - your golf data lives in IndexedDB, not here).
-const CACHE = 'golfiq-v13';
+const CACHE = 'golfiq-v14';
 const SHELL = ['./', 'index.html', 'app.js', 'analytics.js', 'store.js', 'sync.js', 'baseline.js', 'bookmarklet.js', 'features.js', 'pages2.js', 'play.js', 'holemap.js', 'strategy.js', 'bench.js', 'sidegames.js', 'cloud.js', 'compete.js', 'friends.js', 'coach.js', 'progress.js', 'skills.js', 'aicoach.js', 'wallpaper.js', 'icons.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js'];
