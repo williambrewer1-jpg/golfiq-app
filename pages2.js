@@ -51,7 +51,7 @@ export function registerPages(c) {
   }
   function pageReview() {
     const rounds = [...c.DS.rounds].reverse(); if (!rounds.length) return emptyCard('No rounds yet.');
-    const rid = segVal('rv_round', rounds[0].round_id), row = rounds.find((r) => r.round_id === rid) || rounds[0];
+    const rid = c.embedRound || segVal('rv_round', rounds[0].round_id), row = c.DS.rounds.find((r) => r.round_id === rid) || rounds[0];
     const needs = reviewNeeds(c.DS, row.round_id), todo = needs.filter((n) => n.any), U = c.UNIT, PU = c.PUNIT;
     const hh = needs.map((n) => n.hole), complete = hh.filter((h) => h.chain_complete).length, fp = hh.filter((h) => h.first_putt_m !== null).length;
     const clubOpts = (cur) => `<option value="">Club…</option>${c.DS.clubs.filter((x) => x.active !== 0).map((x) => `<option value="${esc(x.club_id)}" ${x.club_id === cur ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}`;
@@ -68,7 +68,7 @@ export function registerPages(c) {
         ${n.firstPutt ? `<label class="f">First putt distance (${PU})${A.isNum(h.first_putt_est_m) ? ` – GPS guess ${c.DP(h.first_putt_est_m)}` : ''}</label><input name="fp" type="number" inputmode="decimal" step="0.5" style="width:110px" placeholder="${PU}">` : ''}
         <input type="hidden" name="lastorder" value="${last ? last.shot_order : 0}"></div>`;
     };
-    return `${select('rv_round', rounds.map((r) => [r.round_id, r.label]), row.round_id, 'Round')}
+    return `${c.embedRound ? `<input type="hidden" data-sel="rv_round" value="${esc(row.round_id)}">` : select('rv_round', rounds.map((r) => [r.round_id, r.label]), row.round_id, 'Round')}
       <div class="kpis" style="margin-top:10px">${kpi('Holes fully tracked', complete, null, true, 0).replace('</div></div>', ` / ${hh.length}</div></div>`)}${kpi('First putts entered', fp, null, true, 0).replace('</div></div>', ` / ${hh.length}</div></div>`)}</div>
       ${note('A few minutes here after each round makes putting stats and strokes gained far more complete. Every field is optional – fill what you remember.')}
       ${todo.length ? `<form id="rvForm">${todo.map(card).join('')}<label class="f">Reason (optional)</label><input name="_reason" value="post-round review" style="width:100%"><p><button class="btn">Save review</button></p></form>`
@@ -169,7 +169,7 @@ export function registerPages(c) {
     return `<div class="card"><h2>Timeline</h2><p class="small">Mark when something changed – new clubs, a re-shaft, a lesson or swing change – then compare your golf before and after.</p>
       ${markers.length ? table(markers, [['date', 'Date'], ['type', 'Type'], ['label', 'What changed'], ['id', '', (v) => `<button class="btn sec sm" data-delmarker="${esc(v)}">Delete</button>`]]) : ''}
       <form id="mkForm" class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}" required></div><div><label class="f">Type</label><select name="type">${['Equipment', 'Lesson', 'Swing change', 'Other'].map((t) => `<option>${t}</option>`).join('')}</select></div>
-      <div style="flex:2"><label class="f">What changed</label><input name="label" placeholder="e.g. new wedges" required></div><div><button class="btn">Add</button></div></form></div>
+      <div class="wide"><label class="f">What changed</label><input name="label" placeholder="e.g. new wedges" required></div><div><button class="btn">Add</button></div></form></div>
       <div class="card"><h2>Compare</h2>${select('cmp_marker', [...markers.map((m) => [m.id, `${m.date} · ${m.label}`]), ['custom', 'Custom date…']], sel, 'Before / after')}
       ${sel === 'custom' ? `<label class="f">Date</label><input type="date" id="cmpDate" value="${esc(date)}">` : ''}
       ${seg('cmp_win', [['all', 'All rounds'], ['10', '10 each side'], ['5', '5 each side']], 'all')}
@@ -194,7 +194,7 @@ export function registerPages(c) {
       try {
         const r = await fetch(`${host}?data=${encodeURIComponent(q)}`); if (!r.ok) { lastErr = `HTTP ${r.status}`; continue; }
         const feats = F.parseOverpass(await r.json());
-        c.state.osm[courseId] = { fetched_at: new Date().toISOString(), features: feats }; await S.saveOsm(c.state);
+        c.state.osm[courseId] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: feats }; await S.saveOsm(c.state);
         return feats;
       } catch (e) { lastErr = e.message; }
     }
@@ -335,7 +335,8 @@ export function registerPages(c) {
   }
   function pagePractice() {
     const tab = segVal('pr_tab', 'games');
-    return `${seg('pr_tab', [['games', 'Games'], ['wedges', 'Wedge matrix'], ['log', 'Practice log']], 'games')}${tab === 'games' ? practiceGames() : tab === 'wedges' ? practiceWedges() : practiceLog()}`;
+    const body = { focus: () => c.coachingPriorities(), games: practiceGames, wedges: practiceWedges, log: practiceLog, notes: coachNotes, thoughts: coachThoughts }[tab] || practiceGames;
+    return `${seg('pr_tab', [['focus', 'Focus'], ['games', 'Games'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach notes'], ['thoughts', 'Swing thoughts']], 'games', 'tabs')}${body()}`;
   }
   function wirePractice() {
     $('#pgForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target);
@@ -386,7 +387,7 @@ export function registerPages(c) {
     return `<div class="card"><h2>Coaching with Claude</h2><ol class="small steps"><li>Tap <b>Copy briefing</b> and paste it into your chat with Claude, with your question or a description of what you're seeing.</li><li>Claude replies with advice and a note in GolfIQ's format.</li><li>Copy Claude's reply, come back here and tap <b>Paste note</b>.</li></ol>
       <button class="btn" id="cnBrief">Copy briefing for Claude</button><button class="btn sec" id="cnPaste">Paste note from Claude</button>
       <details id="cnManual"><summary class="small">Paste manually / write your own note</summary><textarea id="cnText" rows="5" placeholder="Paste Claude's reply here (the JSON note can be anywhere in the text)"></textarea><p><button class="btn sec" id="cnImport">Import pasted text</button></p>
-      <form id="cnOwn"><div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}"></div><div style="flex:2"><label class="f">Title</label><input name="title" required></div></div>
+      <form id="cnOwn"><div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}"></div><div class="wide"><label class="f">Title</label><input name="title" required></div></div>
       <label class="f">Feedback / what I noticed</label><textarea name="feedback" rows="3" style="font:15px inherit"></textarea><label class="f">Feels (one per line)</label><textarea name="feels" rows="2" style="font:15px inherit"></textarea>
       <label class="f">Drills (one per line)</label><textarea name="drills" rows="2" style="font:15px inherit"></textarea><p><button class="btn sec">Save my note</button></p></form></details>
       ${note('The briefing contains your stats, club distances, practice scores and recent notes – nothing is sent anywhere until you paste it yourself. If you use cloud sync, notes saved in your private repo at data/coach/notes.json are also imported on Sync.')}</div>
@@ -421,8 +422,8 @@ export function registerPages(c) {
     pages: { caddie: ['Caddie', 'target'], review: ['Post-round review', 'check'], handicap: ['Handicap', 'trend'], conditions: ['Conditions', 'wind'], compare: ['Before & after', 'swap'], playbook: ['Course playbook', 'flag'],
       bests: ['Personal bests', 'trophy'], practice: ['Practice', 'dumbbell'], coaching: ['Coach', 'compass'] },
     render: { caddie: pageCaddie, review: pageReview, handicap: pageHandicap, conditions: pageConditions, compare: pageCompare, playbook: pagePlaybook, bests: pageBests, practice: pagePractice, coaching: pageCoach },
-    wire: { caddie: wireCaddie, review: wireReview, conditions: wireConditions, compare: wireCompare, practice: wirePractice, coaching: wireCoach },
+    wire: { caddie: wireCaddie, review: wireReview, conditions: wireConditions, compare: wireCompare, practice: () => { wirePractice(); wireCoach(); }, coaching: wireCoach },
     noData: ['practice', 'coaching'],        // usable before any rounds are imported
-    shareRound, wireOsm, osmCard, fetchWeather, briefing, reviewNeeds,
+    shareRound, wireOsm, osmCard, fetchWeather, briefing, reviewNeeds, practiceWedges, wireCoach, coachThoughts,
   };
 }

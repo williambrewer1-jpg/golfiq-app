@@ -1113,7 +1113,7 @@ export function findings(ds, unit = 'm') {
         `Misses: ${f1(d.miss_left_pct, 0)}% left, ${f1(d.miss_right_pct, 0)}% right`],
       why: 'Your own scores show missing the fairway costs you strokes on the hole.',
       focus: 'Driver start-line and face control: alignment-stick gate drill, ' + (side ? `with a specific fix for the ${side} miss (dominant in your data).` : 'both-way misses suggest face-to-path consistency rather than aim.'),
-      target_text: `Fairways >= ${f1(tgt, 0)}% (rolling 10)`, tracking: 'Fairways % on Ball striking page', consistency: consistencyText(fw, tgt, true), confidence: conf(n), extra: {} });
+      target_text: `Fairways >= ${f1(tgt, 0)}% (rolling 10)`, tracking: 'Fairways % on Stats → Tee', consistency: consistencyText(fw, tgt, true), confidence: conf(n), extra: {} });
   }
   // GIR
   c = contrast(h, 'gir_eff'); const gir = r.map((x) => x.gir_pct);
@@ -1128,12 +1128,12 @@ export function findings(ds, unit = 'm') {
       const top = [...miss].sort((a, b) => b.count - a.count)[0]; const dir = top.direction.toLowerCase();
       ev.push(`Missed greens are most often ${dir} (${f1(top.pct, 0)}% of misses)`);
       focus = ['Short', 'Long'].includes(top.direction)
-        ? `Distance control: your dominant green miss is ${dir}. Practise to known stock distances (use your GPS medians on the Clubs page, not book numbers) and club up/down accordingly.`
+        ? `Distance control: your dominant green miss is ${dir}. Practise to known stock distances (use your GPS medians on Stats → Bag, not book numbers) and club up/down accordingly.`
         : `Direction control: your dominant green miss is ${dir}. Work on start line with irons (gate drill) and aim away from the ${dir} side of greens.`;
     }
     out.push({ key: 'gir', title: 'Greens in regulation / approach', strokes_per_round: (tgt - cur) / 100 * 18 * c.delta, current: cur, target: tgt, unit: '%', evidence: ev,
       why: 'Missing greens forces an up-and-down; your own data shows what that costs.', focus, target_text: `GIR >= ${f1(tgt, 0)}% (rolling 10)`,
-      tracking: 'GIR % on Ball striking page', consistency: consistencyText(gir, tgt, true), confidence: conf(n), extra: { note: 'upper bound - overlaps with short game' } });
+      tracking: 'GIR % on Stats → Approach', consistency: consistencyText(gir, tgt, true), confidence: conf(n), extra: { note: 'upper bound - overlaps with short game' } });
   }
   // scrambling
   const mh = h.filter((x) => x.gir_eff === 0);
@@ -1147,7 +1147,7 @@ export function findings(ds, unit = 'm') {
     out.push({ key: 'scrambling', title: 'Short game (scrambling)', strokes_per_round: (tgt - cur) / 100 * per, current: cur, target: tgt, unit: '%', evidence: ev,
       why: 'Converting more missed greens into pars directly removes bogeys.',
       focus: `Up-and-down games from mixed lies within ${DU(25)}: 9 balls, score par/bogey, chip to a ${DP(2)} circle then hole out.`,
-      target_text: `Scrambling >= ${f1(tgt, 0)}% (rolling 10)`, tracking: 'Scrambling on Coaching page', consistency: consistencyText(pr, tgt, true), confidence: conf(pr.length), extra: {} });
+      target_text: `Scrambling >= ${f1(tgt, 0)}% (rolling 10)`, tracking: 'Scrambling on Stats → Short game', consistency: consistencyText(pr, tgt, true), confidence: conf(pr.length), extra: {} });
   }
   // blow-ups
   const bl = [...groupBy(h, (x) => x.round_id).values()].map((g) => sum(g.map((x) => Math.max(0, x.to_par - 2))));

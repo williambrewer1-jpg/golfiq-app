@@ -1,6 +1,7 @@
 // GolfIQ "Play" page: live distances from the phone's GPS, your shot pattern drawn on the course,
 // and hole-by-hole score entry (score, putts, fairway, penalties) that saves as a normal round.
 import * as F from './features.js';
+import * as HM from './holemap.js';
 
 export function registerPlay(c) {
   const { A, S, $, $$, esc, fmt, note, plot, seg, segVal, select, toast, COLORS } = c;
@@ -40,77 +41,151 @@ export function registerPlay(c) {
       if (!first && moved <= 6) { fix.acc = p.coords.accuracy; return; }           // ignore GPS jitter while standing still
       if (!first && Date.now() - lastDraw <= 4000) return;                          // redraw at most every 4 s while walking
       fix = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() }; gpsErr = '';
-      if ((location.hash.slice(1) || '') === 'play' && !document.activeElement?.matches?.('input,select,textarea')) c.rerender();
+      if ((location.hash.slice(1) || '').startsWith('play') && !dragging && !document.activeElement?.matches?.('input,select,textarea')) c.rerender();
     }, (e) => { gpsErr = e.code === 1 ? 'Location permission was declined – allow it for this site in Settings → Safari → Location' : 'No GPS signal yet'; if ((location.hash.slice(1) || '') === 'play') c.rerender(); },
     { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
   }
   function stopGps() { if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
 
   // ------------------------------------------------------------ live view for the current hole
-  function liveCard(d) {
-    const U = c.UNIT, hole = d.hole, known = d.course_id ? F.courseHoles(c.DS, d.course_id) : {}, kh = known[hole] || null;
-    const feats = (d.course_id && c.state.osm[d.course_id]?.features) || c.state.osm.__live?.features || [];
-    const mode = segVal('pl_pos', 'gps'), usingTee = mode === 'tee' || !fix;
-    const pos = !usingTee ? [fix.lat, fix.lon] : kh?.tee || null;
-    let target = kh?.pin || null, targetLabel = 'middle of the green', alts = [];
-    if (!target && pos && feats.length) { alts = F.nearestGreens(pos[0], pos[1], feats); const i = Math.min(Number(c.ui.pl_green) || 0, alts.length - 1); if (alts.length) { target = alts[i].pin; targetLabel = `green ${i + 1} of ${alts.length} nearest (mapped)`; } }
-    const gpsLine = fix ? `GPS ±${fmt(c.cv(fix.acc), 0)} ${U}` : (gpsErr || 'Waiting for GPS…');
-    const head = `<div class="card"><div class="rv-h"><h2 style="margin:0">Hole ${hole}${kh ? ` <span class="small muted">par ${d.holes[hole].par}</span>` : ''}</h2><span class="small muted">${esc(gpsLine)}</span></div>
-      ${seg('pl_pos', [['gps', 'My position'], ['tee', 'From the tee']], 'gps')}`;
-    if (!pos) return head + `<p class="muted">${mode === 'tee' ? 'No tee position known for this hole yet (it comes from your earlier tracked rounds here).' : esc(gpsLine)}</p>${osmHint(d, null)}</div>`;
-    if (!target) return head + `<p class="muted">GolfIQ doesn't know where this green is yet. It learns green positions from tracked rounds on a course, or from downloaded course outlines.</p>${osmHint(d, pos)}</div>`;
-    const dist = A.haversine(pos[0], pos[1], target[0], target[1]), br = A.bearing(pos[0], pos[1], target[0], target[1]), fb = F.greenFrontBack(pos[0], pos[1], target, feats);
-    // club: recommended for the distance unless one is chosen
-    const wrows = [...F.wedgeMatrix(J().wedge.entries).values()].map((w) => ({ club: c.DS.clubs.find((x) => x.club_id === w.club_id)?.name || w.club_id, length: w.length, carry_m: w.carry_m, n: w.sessions }));
-    const rec = F.recommendClubs(c.DS, dist, c.uncv(10), wrows).filter((r) => r.kind === 'gps');
-    const clubs = c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0 && c.DS.shots.some((s) => s.club_id === x.club_id));
-    const cid = (c.ui.pl_club && c.ui.pl_club_hole === `${d.id}|${hole}` && clubs.some((x) => x.club_id === c.ui.pl_club)) ? c.ui.pl_club : (rec[0]?.club_id || clubs[0]?.club_id || null);
-    const club = clubs.find((x) => x.club_id === cid), pat = cid ? F.clubPattern(c.DS, cid) : null, aim = Number(c.ui.pl_aim_hole === `${d.id}|${hole}` ? c.ui.pl_aim : 0) || 0;
-    const aimBr = br + (dist > 1 ? Math.atan2(c.uncv(aim), dist) * 180 / Math.PI : 0);
-    const tr = [], style = { fairway: ['rgba(120,210,120,.28)', 'rgba(150,225,150,.8)'], green: ['rgba(60,230,130,.5)', 'rgba(90,240,150,1)'], bunker: ['rgba(245,225,165,.75)', 'rgba(245,225,165,1)'], water: ['rgba(70,150,245,.5)', 'rgba(70,150,245,.9)'], tee: ['rgba(210,210,210,.3)', 'rgba(230,230,230,.8)'] };
-    const span = Math.max(dist, pat?.p90_m || 0) + 60, near = (p) => A.haversine(pos[0], pos[1], p[0], p[1]) < span * 1.3;
-    for (const kind of ['fairway', 'water', 'bunker', 'tee', 'green']) {
-      const lat = [], lon = [];
-      for (const f of feats) if (f.kind === kind && f.pts.some(near)) { f.pts.forEach(([a, b]) => { lat.push(a); lon.push(b); }); lat.push(f.pts[0][0], null); lon.push(f.pts[0][1], null); }
-      if (lat.length) tr.push({ type: 'scattermap', lat, lon, mode: 'lines', fill: 'toself', fillcolor: style[kind][0], line: { color: style[kind][1], width: 1 }, hoverinfo: 'skip', showlegend: false });
+  let live = null, dragging = false;                                   // what the hole map is showing right now
+  let patCache = { ds: null, m: new Map() };
+  const patternOf = (cid) => { if (patCache.ds !== c.DS) patCache = { ds: c.DS, m: new Map() }; if (!patCache.m.has(cid)) patCache.m.set(cid, F.clubPattern(c.DS, cid)); return patCache.m.get(cid); };
+  const playClubs = () => c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0 && c.DS.shots.some((s) => s.club_id === x.club_id));
+  const featsFor = (d) => (d.course_id && c.state.osm[d.course_id]?.features) || c.state.osm.__live?.features || [];
+  const osmEntry = (d) => (d.course_id ? c.state.osm[d.course_id] : null) || c.state.osm.__live || null;
+
+  // Longest club you'd normally hit from here (driver only from the tee) – sets where the aim starts on long holes.
+  function reach(onTee) {
+    const rec = F.recommendClubs(c.DS, 0, 1);
+    const ok = rec.filter((r) => r.kind === 'gps' && (onTee || !/driver/i.test(c.DS.clubs.find((x) => x.club_id === r.club_id)?.category || '')));
+    return ok.length ? Math.max(...ok.map((r) => r.median_m)) : null;
+  }
+  function defaultAim(pos, green, line, onTee) {
+    const dist = A.haversine(pos[0], pos[1], green[0], green[1]), r = reach(onTee);
+    if (!r || dist <= r + c.uncv(15)) return green;
+    return HM.pointAlongHole(pos, green, line, r);
+  }
+
+  // Everything that depends on the aim point: club odds, the chosen club's pattern and where it would finish.
+  function model(L) {
+    const aimDist = A.haversine(L.pos[0], L.pos[1], L.aim[0], L.aim[1]);
+    const rec = F.recommendClubs(c.DS, aimDist, c.uncv(10)).filter((r) => r.kind === 'gps' && L.clubs.some((x) => x.club_id === r.club_id));
+    const nearFeats = L.feats.length && L.feats.some((f) => f.kind !== 'hole' && A.haversine(L.aim[0], L.aim[1], f.pts[0][0], f.pts[0][1]) < 600) ? L.feats : null;
+    const top = rec.filter((r) => r.prob > 0).slice(0, 3);
+    for (const r of top) { const pt = patternOf(r.club_id); r.out = nearFeats && pt.stats.enough ? HM.outcomes(HM.placePattern(L.pos, L.aim, pt.pts), nearFeats) : null; }
+    const safer = top.length > 1 && top.every((r) => r.out) ? [...top].filter((r) => r.prob >= 0.25).sort((a, b) => a.out.trouble - b.out.trouble)[0] : null;
+    const cid = (L.club && L.clubs.some((x) => x.club_id === L.club)) ? L.club : (rec[0]?.club_id || null);
+    const club = L.clubs.find((x) => x.club_id === cid), pt = cid ? patternOf(cid) : null;
+    let pat = null, out = null;
+    if (pt?.stats.enough) {
+      pat = { ell50: HM.placeEllipse(L.pos, L.aim, pt.stats, 0.5), ell90: pt.stats.enough_90 ? HM.placeEllipse(L.pos, L.aim, pt.stats, 0.9) : null, dots: HM.placePattern(L.pos, L.aim, pt.pts.slice(-60)) };
+      out = nearFeats ? (top.find((r) => r.club_id === cid)?.out || HM.outcomes(HM.placePattern(L.pos, L.aim, pt.pts), nearFeats)) : null;
+    } else if (pt && A.isNum(pt.median_m)) {
+      const br = A.bearing(L.pos[0], L.pos[1], L.aim[0], L.aim[1]);
+      pat = { arc: Array.from({ length: 17 }, (_, i) => F.destination(L.pos[0], L.pos[1], br - 8 + i, pt.median_m)) };
     }
-    tr.push({ type: 'scattermap', lat: [pos[0], target[0]], lon: [pos[1], target[1]], mode: 'lines', line: { color: 'rgba(255,255,255,.75)', width: 1.5 }, hoverinfo: 'skip', showlegend: false });
-    let patNote = '';
-    if (pat && pat.stats.enough) {
-      for (const [q, fill] of [[0.9, 'rgba(255,214,64,.16)'], [0.5, 'rgba(255,214,64,.34)']]) {
-        if (q === 0.9 && !pat.stats.enough_90) continue;
-        const [ex, ey] = A.ellipse(pat.stats.centre, pat.stats.cov, q), pts = ex.map((x, i) => F.offsetPoint(pos[0], pos[1], aimBr, ey[i], x));
-        tr.push({ type: 'scattermap', lat: pts.map((p) => p[0]), lon: pts.map((p) => p[1]), mode: 'lines', fill: 'toself', fillcolor: fill, line: { color: 'rgba(255,214,64,.95)', width: q === 0.5 ? 2 : 1 }, name: `${q * 100}% of ${club.name}`, hoverinfo: 'name' });
-      }
-      const dots = pat.pts.slice(-60).map((p) => F.offsetPoint(pos[0], pos[1], aimBr, p.y, p.x));
-      tr.push({ type: 'scattermap', lat: dots.map((p) => p[0]), lon: dots.map((p) => p[1]), mode: 'markers', marker: { size: 5, color: 'rgba(255,255,255,.8)' }, name: 'Your past shots', hoverinfo: 'skip' });
-      const s = pat.stats;
-      patNote = `<b>${esc(club.name)}</b>: usually ${c.d0(s.mean_y_m)} ${U}, half of shots within ${c.d0(s.r50_m)} ${U} of that${Math.abs(s.mean_lateral_m) >= 3 ? `, tending ${c.d0(Math.abs(s.mean_lateral_m))} ${U} ${s.mean_lateral_m > 0 ? 'right' : 'left'}` : ''} · ${Math.round(s.pct_left)}% left / ${Math.round(s.pct_right)}% right (n=${s.n})`;
-    } else if (pat && A.isNum(pat.median_m)) {
-      const arc = Array.from({ length: 21 }, (_, i) => F.destination(pos[0], pos[1], aimBr - 12 + i * 1.2, pat.median_m));
-      tr.push({ type: 'scattermap', lat: arc.map((p) => p[0]), lon: arc.map((p) => p[1]), mode: 'lines', line: { color: 'rgba(255,214,64,.95)', width: 2.5 }, name: `${club.name} usual distance`, hoverinfo: 'name' });
-      patNote = `<b>${esc(club.name)}</b>: usually ${c.d0(pat.median_m)} ${U} (${c.d0(pat.p10_m)}–${c.d0(pat.p90_m)}). Not enough shots with direction data for a pattern yet (${pat.stats.n} of ${A.T.min_shots_dispersion} needed) – the line shows distance only.`;
-    } else if (club) patNote = `No tracked shots with ${esc(club.name)} yet.`;
-    tr.push({ type: 'scattermap', lat: [target[0]], lon: [target[1]], mode: 'markers', marker: { size: 13, color: '#ffd640' }, name: 'Green', hoverinfo: 'name' });
-    tr.push({ type: 'scattermap', lat: [pos[0]], lon: [pos[1]], mode: 'markers', marker: { size: 13, color: '#ffffff' }, name: usingTee ? 'Tee' : 'You', hoverinfo: 'name' });
-    const mid = F.destination(pos[0], pos[1], br, dist / 2), zoom = Math.min(19, Math.max(14, Math.log2(40075000 * Math.cos(mid[0] * Math.PI / 180) / (span * 2.2)) - 0.2));
-    const map = { center: { lat: mid[0], lon: mid[1] }, zoom, bearing: ((br % 360) + 360) % 360, style: 'white-bg', layers: [{ below: 'traces', sourcetype: 'raster', source: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], sourceattribution: 'Esri World Imagery' }] };
+    return { aimDist, rec, top, safer, cid, club, pt, pat, out };
+  }
+
+  const PCT = (v) => `${Math.round(v)}%`;
+  function outBar(o) {
+    const seg = [['green', '#5fbf4f', 'green'], ['fairway', '#a3d36c', 'fairway'], ['rough', '#6fa64a', 'rough'], ['trees', '#24552a', 'trees'], ['bunker', '#e6cf86', 'bunker'], ['water', '#3d8bd0', 'water']].filter(([k]) => o[k] >= 0.5);
+    return `<div class="obar">${seg.map(([k, col]) => `<i style="width:${o[k]}%;background:${col}"></i>`).join('')}</div><div class="olegend">${seg.map(([k, col, l]) => `<span><b style="background:${col}"></b>${l} ${PCT(o[k])}</span>`).join('')}</div>`;
+  }
+  function recHtml(L, m) {
+    const U = c.UNIT, tol = `±10 ${U}`;
+    const trouble = (o) => (o ? `<span class="pill ${o.trouble >= 25 ? 'bad' : o.trouble >= 10 ? 'mid' : 'good'}">trouble ${PCT(o.trouble)}</span>` : '');
+    const rows = m.top.map((r) => `<button type="button" class="recrow ${r.club_id === m.cid ? 'on' : ''}" data-club="${esc(r.club_id)}"><span class="rc">${r === m.top[0] ? '★ ' : ''}${esc(r.club)}${m.safer && m.safer !== m.top[0] && r === m.safer ? ' <em>safer</em>' : ''}</span>
+      <span class="rp">${PCT(r.prob * 100)} <small>within ${tol}</small></span><span class="rd small muted">usually ${c.d0(r.median_m)} ${U}</span>${trouble(r.out)}</button>`).join('');
+    const s = m.pt?.stats;
+    const patNote = !m.club ? '' : s?.enough ? `<b>${esc(m.club.name)}</b> from here: usually ${c.d0(s.mean_y_m)} ${U}, half within ${c.d0(s.r50_m)} ${U} of that${Math.abs(s.mean_lateral_m) >= 3 ? `, tending ${c.d0(Math.abs(s.mean_lateral_m))} ${U} ${s.mean_lateral_m > 0 ? 'right' : 'left'}` : ''} (${s.n} shots).`
+      : A.isNum(m.pt?.median_m) ? `<b>${esc(m.club.name)}</b>: usually ${c.d0(m.pt.median_m)} ${U}. Not enough shots with direction yet for a pattern (${s?.n || 0} of ${A.T.min_shots_dispersion}) – the arc shows distance only.` : `No tracked shots with ${esc(m.club.name)} yet.`;
+    const others = L.clubs.filter((x) => !m.top.some((r) => r.club_id === x.club_id));
+    return `<div class="aimline"><span>To aim <b>${c.d0(m.aimDist)}</b> ${U}</span>${L.green && A.haversine(L.aim[0], L.aim[1], L.green[0], L.green[1]) > 4 ? `<span>then <b>${c.d0(A.haversine(L.aim[0], L.aim[1], L.green[0], L.green[1]))}</b> ${U} to the green</span>` : '<span>at the green</span>'}</div>
+      ${rows ? `<div class="recs">${rows}</div>` : `<p class="small muted">None of your clubs reach ${c.d0(m.aimDist)} ${U} often enough to rate (needs ${A.T.min_shots_club_stats}+ stock shots per club).</p>`}
+      ${m.out ? `<p class="small" style="margin:10px 0 4px">If your ${m.out.n} recorded ${esc(m.club.name)} shots were hit at this aim, they'd finish:</p>${outBar(m.out)}` : ''}
+      ${patNote ? `<p class="small" style="margin:8px 0">${patNote}</p>` : ''}
+      ${others.length ? `<details class="small"><summary>Other clubs</summary><div class="chips">${others.map((x) => `<button type="button" class="chip ${x.club_id === m.cid ? 'on' : ''}" data-club="${esc(x.club_id)}">${esc(x.name)}</button>`).join('')}</div></details>` : ''}`;
+  }
+
+  function liveCard(d) {
+    const U = c.UNIT, hole = d.hole, known = d.course_id ? F.courseHoles(c.DS, d.course_id) : {}, feats = featsFor(d);
+    const mode = segVal('pl_pos', 'gps'), gpsPos = fix ? [fix.lat, fix.lon] : null;
+    const ht = HM.holeTargets(known[hole], feats, hole, gpsPos), par = d.holes[hole].par;
+    // more than ~1.5 km from the hole (e.g. planning at home): show it from the tee instead of a line across town
+    const farAway = gpsPos && (ht.green || ht.tee) && A.haversine(gpsPos[0], gpsPos[1], ...(ht.green || ht.tee)) > 1500;
+    const usingTee = mode === 'tee' || !fix || farAway;
+    const pos = !usingTee ? gpsPos : ht.tee;
+    let green = ht.green, targetLabel = 'Middle of green', alts = [];
+    if (!green && pos && feats.length) { alts = F.nearestGreens(pos[0], pos[1], feats); const i = Math.min(Number(c.ui.pl_green) || 0, alts.length - 1); if (alts.length) { green = alts[i].pin; targetLabel = `Green ${i + 1} of ${alts.length} nearest`; } }
+    const holeLen = ht.tee && green ? A.haversine(ht.tee[0], ht.tee[1], green[0], green[1]) : null;
+    const gpsLine = fix ? `GPS ±${fmt(c.cv(fix.acc), 0)} ${U}` : (gpsErr || 'Waiting for GPS…');
+    const head = `<div class="card playcard"><div class="rv-h"><h2 style="margin:0">Hole ${hole} <span class="small muted">· par ${par}${holeLen ? ` · ${c.d0(holeLen)} ${U}` : ''}</span></h2><span class="small muted">${esc(gpsLine)}</span></div>
+      ${seg('pl_pos', [['gps', 'My position'], ['tee', 'From the tee']], 'gps')}`;
+    live = null;
+    if (!pos) return head + `<p class="muted">${farAway ? 'You are a long way from this hole and GolfIQ doesn\'t know where its tee is yet.' : mode === 'tee' ? 'No tee position known for this hole yet. It comes from your earlier tracked rounds here, or from the course outline once it has been mapped.' : esc(gpsLine)}</p>${osmHint(d, gpsPos)}</div>`;
+    if (!green) return head + `<p class="muted">GolfIQ doesn't know where this green is yet. It learns green positions from your tracked rounds on a course, or from the downloaded course outline.</p>${osmHint(d, pos)}</div>`;
+    const dist = A.haversine(pos[0], pos[1], green[0], green[1]), fb = F.greenFrontBack(pos[0], pos[1], green, feats);
+    const onTee = usingTee || (ht.tee && A.haversine(pos[0], pos[1], ht.tee[0], ht.tee[1]) < 25);
+    const saved = d.aim?.[hole], aim = saved && A.haversine(saved.from[0], saved.from[1], pos[0], pos[1]) <= 25 ? saved.pt : defaultAim(pos, green, ht.line, onTee);
+    const clubKey = `${d.id}|${hole}`, clubs = playClubs();
+    live = { d, hole, pos, green, aim, feats, line: ht.line, clubs, club: c.ui.pl_club_hole === clubKey ? c.ui.pl_club : null, custom: !!saved && aim === saved.pt };
+    const m = model(live);
+    const ell = m.pat?.ell90 || m.pat?.ell50 || m.pat?.arc || [];
+    const fr = HM.makeFrame(pos, green, [aim, ...ell.filter((_, i) => i % 6 === 0)]);
+    const hasMap = feats.length && feats.some((f) => f.kind !== 'hole' && inFrame(fr, f.pts));
+    const style = segVal('pl_style', hasMap ? 'map' : 'sat') === 'map' && hasMap ? 'map' : 'sat';
+    live.fr = fr;
+    const stat = HM.staticSvg(fr, { feats, style, tileList: style === 'sat' ? HM.tiles(fr, pos[0]) : null, green, tee: usingTee ? null : ht.tee, line: ht.line, pos, posLabel: usingTee ? 'Tee' : '', unit: U, cv: c.cv, rings: dist + 40 });
+    const dyn = HM.dynamicSvg(fr, { pos, aim, green, pat: m.pat, cv: c.cv, unit: U, clubName: m.club?.name });
     lastDraw = Date.now();
+    const o = osmEntry(d), stale = o && o.features?.length && (o.v || 1) < F.OSM_VERSION;
     return head + `<div class="yard"><div><span>${fb ? 'Front' : ''}</span><b class="sm">${fb ? c.d0(Math.max(fb.front_m, 0)) : ''}</b></div><div><span>${esc(targetLabel)}</span><b>${c.d0(dist)}<i>${U}</i></b></div><div><span>${fb ? 'Back' : ''}</span><b class="sm">${fb ? c.d0(fb.back_m) : ''}</b></div></div>
       ${alts.length > 1 ? seg('pl_green', alts.map((a, i) => [i, `${c.d0(a.dist_m)} ${U}`]), 0) : ''}
-      ${usingTee && mode !== 'tee' ? '<p class="small muted">No GPS fix yet – showing the view from the tee.</p>' : ''}
-      ${plot(tr, { map, height: 430, margin: { l: 0, r: 0, t: 0, b: 0 }, showlegend: false }, 'map')}
-      <label class="f">Club</label><div class="chips" id="plClubs">${clubs.map((x) => `<button type="button" class="chip ${x.club_id === cid ? 'on' : ''}" data-club="${esc(x.club_id)}">${esc(x.name)}${rec[0]?.club_id === x.club_id ? ' ★' : ''}</button>`).join('')}</div>
-      ${patNote ? `<p class="small" style="margin:8px 0">${patNote}</p>` : ''}
-      <label class="f">Aim: ${aim === 0 ? 'at the green centre' : `${Math.abs(aim)} ${U} ${aim > 0 ? 'right' : 'left'} of centre`}</label><input type="range" id="plAim" min="-40" max="40" step="2" value="${aim}">
-      ${note(`Yellow shape = where your ${club ? esc(club.name) : 'club'} shots have finished (inner: half of them, outer: 90%), placed from ${usingTee ? 'the tee' : 'where you are standing'} along your aim line; white dots are your last ${Math.min(pat?.pts.length || 0, 60)} shots. Slide the aim to see what keeps the pattern out of trouble. ★ = best odds for this distance. Distances are straight-line to the ${esc(targetLabel)}${kh?.pin ? ' (where Garmin placed the pin marker in your earlier rounds)' : ''}; phone GPS is typically good to a few ${U === 'yd' ? 'yards' : 'metres'} – not for competition use where distance devices are restricted.`)}
-      ${osmHint(d, pos)}</div>`;
+      ${usingTee && mode !== 'tee' ? `<p class="small muted">${farAway ? `You're ${fmt(A.haversine(gpsPos[0], gpsPos[1], ...(ht.green || ht.tee)) / 1000, 1)} km from this hole` : 'No GPS fix yet'} – showing the view from the tee.</p>` : ''}
+      <div class="hmwrap">${HM.svg(fr, stat, dyn, style)}
+        <div class="hmtools">${hasMap ? `<div class="seg mini" data-seg="pl_style">${[['map', 'Course'], ['sat', 'Satellite']].map(([v, l]) => `<button data-v="${v}" class="${style === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+        <button type="button" class="hmbtn" id="plAimReset" ${live.custom ? '' : 'hidden'}>Reset aim</button></div>
+        ${style === 'sat' ? '<span class="hmcredit">Imagery © Esri</span>' : '<span class="hmcredit">© OpenStreetMap</span>'}</div>
+      <p class="small muted hmhint">Drag the white ring to where you want to hit it. Rings every ${U === 'yd' ? '50 yd' : '50 m'} from you.</p>
+      <div id="plRec">${recHtml(live, m)}</div>
+      ${note(`Yellow shape = where your shots with the club have finished (inner: half of them, dashed: 90%), hit from ${usingTee ? 'the tee' : 'where you are'} along the white line; dots are your last ${Math.min(m.pt?.pts.length || 0, 60)}. "Within ±10 ${U}" = share of your stock shots with that club finishing that close to the aim distance. Trouble = bunker, water or trees on the mapped outline. Garmin records total distance (carry + roll), so carrying a hazard can only be estimated. Phone GPS is good to a few ${U === 'yd' ? 'yards' : 'metres'} – check your competition's rules on distance devices.`)}
+      ${stale ? `<p class="small" style="margin-top:8px">${d.course_id ? `<button class="btn sec sm" type="button" data-osm="${esc(d.course_id)}">Refresh course outline</button>` : '<button class="btn sec sm" type="button" id="plOsmHere">Refresh course outline</button>'} <span data-osmmsg id="plOsmMsg"></span> adds trees and hole lines.</p>` : osmHint(d, pos)}</div>`;
   }
+  const inFrame = (fr, pts) => pts.some(([la, lo]) => { const [x, y] = fr.xy(la, lo); return x > 0 && x < fr.w && y > 0 && y < fr.h; });
   function osmHint(d, pos) {
-    const have = d.course_id ? c.state.osm[d.course_id] : c.state.osm.__live;
+    const have = osmEntry(d);
     if (have?.features?.length) return '';
-    if (d.course_id) return `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" data-osm="${esc(d.course_id)}">Download course outlines</button> <span data-osmmsg></span> to see fairways, greens and bunkers under your pattern and get front/back distances.</p>`;
-    return pos ? `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" id="plOsmHere">Download course outlines around me</button> <span id="plOsmMsg"></span></p>` : '';
+    if (d.course_id) return `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" data-osm="${esc(d.course_id)}">Download course outline</button> <span data-osmmsg></span> to draw the hole and get front/back and trouble percentages.</p>`;
+    return pos ? `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" id="plOsmHere">Download course outline around me</button> <span id="plOsmMsg"></span></p>` : '';
+  }
+  // redraw only what the aim point changes (no full page render, so dragging stays smooth)
+  function refreshAim() {
+    if (!live?.fr) return;
+    const m = model(live), U = c.UNIT;
+    $('#hmDyn').innerHTML = HM.dynamicSvg(live.fr, { pos: live.pos, aim: live.aim, green: live.green, pat: m.pat, cv: c.cv, unit: U, clubName: m.club?.name });
+    $('#plRec').innerHTML = recHtml(live, m);
+    const rb = $('#plAimReset'); if (rb) rb.hidden = !live.custom;
+  }
+  function wireMap() {
+    const el = $('#hm'); if (!el || !live) return;
+    const toVB = (ev) => { const r = el.getBoundingClientRect(); return [(ev.clientX - r.left) * HM.W / r.width, (ev.clientY - r.top) * HM.H / r.height]; };
+    let raf = 0, last = null;
+    const move = (ev) => { last = toVB(ev); if (raf) return; raf = requestAnimationFrame(() => { raf = 0; live.aim = live.fr.fromXY(...last); live.custom = true; live.club = null; refreshAim(); }); };
+    el.addEventListener('pointerdown', (ev) => { dragging = true; try { el.setPointerCapture(ev.pointerId); } catch { /* old Safari */ } move(ev); ev.preventDefault(); });
+    el.addEventListener('pointermove', (ev) => { if (dragging) move(ev); });
+    const end = async () => {
+      if (!dragging) return; dragging = false;
+      const d = live.d; d.aim = d.aim || {}; d.aim[live.hole] = { pt: live.aim, from: live.pos };
+      c.ui.pl_club = null; c.saveUi(); await saveDraft();
+    };
+    el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+    $('#plRec')?.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-club]'); if (!b) return;
+      live.club = b.dataset.club; c.ui.pl_club = b.dataset.club; c.ui.pl_club_hole = `${live.d.id}|${live.hole}`; c.saveUi(); refreshAim();
+    });
+    $('#plAimReset')?.addEventListener('click', async () => { if (live.d.aim) delete live.d.aim[live.hole]; c.ui.pl_club = null; c.saveUi(); await saveDraft(); c.rerender(); });
   }
 
   // ------------------------------------------------------------ score entry
@@ -156,13 +231,12 @@ export function registerPlay(c) {
     $('#plPrev')?.addEventListener('click', () => go(order[Math.max(0, order.indexOf(d.hole) - 1)]));
     $('#plNext')?.addEventListener('click', () => { const i = order.indexOf(d.hole); if (i < d.n - 1) go(order[i + 1]); else $('#plFinish').scrollIntoView({ behavior: 'smooth' }); });
     $$('[data-goto]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.goto))));
-    $$('#plClubs [data-club]').forEach((b) => b.addEventListener('click', () => { c.ui.pl_club = b.dataset.club; c.ui.pl_club_hole = `${d.id}|${d.hole}`; c.saveUi(); c.rerender(); }));
-    $('#plAim')?.addEventListener('change', (e) => { c.ui.pl_aim = Number(e.target.value); c.ui.pl_aim_hole = `${d.id}|${d.hole}`; c.saveUi(); c.rerender(); });
+    wireMap();
     $('#plOsmHere')?.addEventListener('click', async (e) => {
       const p = fix ? [fix.lat, fix.lon] : null; if (!p) return; e.target.disabled = true; $('#plOsmMsg').textContent = 'Downloading…';
       try { const m = 0.012, bb = [p[0] - m, p[1] - m / Math.cos(p[0] * Math.PI / 180), p[0] + m, p[1] + m / Math.cos(p[0] * Math.PI / 180)];
         const r = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(F.overpassQuery(bb))}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        c.state.osm.__live = { fetched_at: new Date().toISOString(), features: F.parseOverpass(await r.json()) }; await S.saveOsm(c.state);
+        c.state.osm.__live = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: F.parseOverpass(await r.json()) }; await S.saveOsm(c.state);
         toast(c.state.osm.__live.features.length ? 'Course outlines downloaded' : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
       } catch (err) { $('#plOsmMsg').textContent = `Map service unavailable (${err.message})`; e.target.disabled = false; }
     });

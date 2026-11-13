@@ -1,5 +1,6 @@
 // GolfIQ for iPhone — UI. All data lives in this browser's on-device storage (store.js).
 import * as A from './analytics.js';
+import * as F from './features.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -43,9 +44,9 @@ const d0 = (v) => fmt(cv(v), 0), d1 = (v) => fmt(cv(v), 1);
 const area = (m2) => (A.isNum(m2) ? (UNIT === 'yd' ? m2 / (YD * YD) : m2) : null);
 const inputVal = (m, d = 1) => (A.isNum(m) ? String(Math.round(cv(m) * 10 ** d) / 10 ** d) : '');
 const badge = (s) => `<span class="badge ${s}">${s}</span>`;
-function seg(key, options, dflt) {
+function seg(key, options, dflt, cls = '') {
   const cur = ui[key] ?? dflt;
-  return `<div class="seg" data-seg="${key}">${options.map(([v, l]) => `<button data-v="${esc(v)}" class="${String(v) === String(cur) ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
+  return `<div class="seg ${cls}" data-seg="${key}">${options.map(([v, l]) => `<button data-v="${esc(v)}" class="${String(v) === String(cur) ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
 }
 const segVal = (key, dflt) => ui[key] ?? dflt;
 function select(key, options, dflt, label) {
@@ -141,43 +142,64 @@ function trendChart(rounds, metric, label, ref = null) {
 
 // ------------------------------------------------------------------ pages
 const PAGES = {
-  overview: ['Overview', 'chart'], scoring: ['Scoring & Stableford', 'score'], striking: ['Ball striking', 'crosshair'], putting: ['Putting', 'putt'],
-  clubs: ['Clubs & gapping', 'club'], dispersion: ['Dispersion & maps', 'spread'], sg: ['Strokes gained', 'bars'], rounds: ['Rounds', 'list'],
-  data: ['Data & sync', 'cloud'], edit: ['Corrections', 'pencil'], settings: ['Settings', 'gear'], help: ['Help & setup', 'help'], more: ['More', 'grid'],
+  home: ['GolfIQ', 'home'], stats: ['Stats', 'chart'], rounds: ['Rounds', 'list'],
+  data: ['Data & sync', 'cloud'], corrections: ['Corrections log', 'pencil'], settings: ['Settings', 'gear'], help: ['Help & setup', 'help'],
 };
-const NAV = [['overview', 'Overview'], ['play', 'Play'], ['rounds', 'Rounds'], ['coaching', 'Coach'], ['more', 'More']];
-let EXTRA = null;                         // pages registered from pages2.js
-const FILTERED = new Set(['overview', 'scoring', 'striking', 'putting', 'clubs', 'dispersion', 'sg', 'rounds']);
+const NAV = [['home', 'Home'], ['play', 'Play'], ['rounds', 'Rounds'], ['stats', 'Stats'], ['practice', 'Practice']];
+let EXTRA = null;                         // pages registered from pages2.js / play.js
+let SUBWIRE = [];                         // sub-pages shown inside a hub that need their own event wiring
+let EMBED = null;                         // round shown inside the round page (review / edit tabs)
+const FILTERED = new Set(['stats', 'rounds']);
+// Pages that moved in the reorganisation: old address -> [new page, ui state to set, optional hook]
+const latestRound = () => DS.rounds[DS.rounds.length - 1]?.round_id || null;
+const MOVED = {
+  overview: ['home'], more: ['settings'], coaching: ['practice', { pr_tab: 'focus' }],
+  scoring: ['stats', { sx_tab: 'scoring' }], striking: ['stats', { sx_tab: 'approach' }], putting: ['stats', { sx_tab: 'putting' }], sg: ['stats', { sx_tab: 'sg' }],
+  handicap: ['stats', { sx_tab: 'handicap' }], clubs: ['stats', { sx_tab: 'bag', bag_tab: 'gapping' }], dispersion: ['stats', { sx_tab: 'bag', bag_tab: 'dispersion' }],
+  conditions: ['stats', { sx_tab: 'insights', in_tab: 'conditions' }], compare: ['stats', { sx_tab: 'insights', in_tab: 'compare' }], bests: ['stats', { sx_tab: 'insights', in_tab: 'bests' }],
+  caddie: ['play', { pl_tab: 'caddie' }], playbook: ['play', { pl_tab: 'plan' }],
+  review: ['rounds', { rd_tab: 'review' }, () => { ui.rd_open = ui.rv_round && DS.rounds.some((r) => r.round_id === ui.rv_round) ? ui.rv_round : latestRound(); }],
+  edit: ['rounds', { rd_tab: 'edit' }, () => { ui.rd_open = ui.ed_round && DS.rounds.some((r) => r.round_id === ui.ed_round) ? ui.ed_round : latestRound(); }],
+};
+const noMatch = '<div class="warn">No rounds match the filters.</div>';
 
-function pageOverview() {
-  const ds = filtered(), r = ds.rounds;
-  if (!r.length) return '<div class="warn">No rounds match the filters.</div>';
-  const N = Number(segVal('ov_n', 5)), k = Object.fromEntries(A.kpiTable(r, N).map((x) => [x.metric, x]));
-  const t = (m, d = 1, u = '') => kpi(k[m].label, k[m].recent, k[m].delta, A.METRICS[m][1], d, u);
-  const hi = [...ds.rounds].reverse().find((x) => x.hi !== null);
-  const metric = segVal('ov_metric', r.filter((x) => x.differential !== null).length >= 5 ? 'differential' : 'stableford_round');
-  const win = A.compareWindows(r.map((x) => x[metric]), A.METRICS[metric][1]);
+function pageHome() {
+  if (!DS.rounds.length) return (state.journal.draft ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(state.journal.draft.course_name)} · hole ${state.journal.draft.hole}</b><em>Continue ›</em></a>` : '') + emptyMsg();
+  const r18 = DS.rounds.filter((x) => x.format === '18'), last = DS.rounds[DS.rounds.length - 1], d = state.journal.draft;
+  const withD = DS.rounds.filter((x) => A.isNum(x.differential_for_index)), idx = withD.length ? withD[withD.length - 1].index_after : null;
+  const off = [...(state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop();
+  const k = r18.length ? Object.fromEntries(A.kpiTable(r18, 5).map((x) => [x.metric, x])) : {};
+  const SHORT = { stableford_round: 'Stableford', differential: 'Differential', gir_pct: 'GIR', fw_pct: 'Fairways', putts_round: 'Putts', penalties: 'Penalties' };
+  const t = (m, dd = 1, u = '') => (k[m] ? kpi(SHORT[m] || k[m].label, k[m].recent, k[m].delta, A.METRICS[m][1], dd, u) : '');
+  const needs = last ? EXTRA.reviewNeeds(DS, last.round_id).filter((x) => x.any).length : 0;
+  const fs = r18.length >= 8 ? A.findings(A.filterDataset(DS, { formats: ['18'], lastN: 20 }), UNIT).slice(0, 3) : [];
+  const th = (state.journal.thoughts || []).filter(Boolean), sc = state.sync || {};
+  const metric = r18.filter((x) => x.differential !== null).length >= 5 ? 'differential' : 'stableford_round';
+  return `${demoBanner()}
+  ${d ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(d.course_name)} · hole ${d.hole}</b><em>Continue ›</em></a>`
+    : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
+  <div class="kpis">${kpi('GolfIQ index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
+  ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
+    <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
+    <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
+  ${r18.length ? `<div class="card"><h2>Form <span class="small muted">last 5 rounds vs earlier</span></h2><div class="kpis">${t('stableford_round')}${t('differential')}${t('gir_pct', 0, '%')}${t('fw_pct', 0, '%')}${t('putts_round')}${t('penalties')}</div>
+    ${trendChart(r18.slice(-30), metric, A.METRICS[metric][0], metric === 'stableford_round' ? 36 : null)}<p style="margin:4px 0 0"><a href="#stats" data-stats="scoring">All stats ›</a></p></div>` : ''}
+  ${fs.length ? `<div class="card"><h2>Where the strokes are</h2>${fs.map((f, i) => `<div class="prio"><span>${i + 1}</span><div><b>${esc(f.title)}</b><div class="small muted">~${fmt(f.strokes_per_round)} strokes/round · ${esc(f.focus).slice(0, 110)}${f.focus.length > 110 ? '…' : ''}</div></div></div>`).join('')}
+    <p style="margin:8px 0 0"><a href="#practice" data-practice="focus">Your practice plan ›</a></p></div>` : ''}
+  ${th.length ? `<details class="card"><summary>Swing thoughts (${th.length})</summary><div class="thoughts" style="margin-top:10px">${th.map((x, i) => `<div class="thought"><span>${i + 1}</span><p>${esc(x)}</p></div>`).join('')}</div></details>` : ''}
+  ${sc.owner ? `<div class="card syncline"><span class="small">Garmin sync · last ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleDateString() : 'never')}</span><button class="btn sec sm" id="syncNow">Sync now</button><span id="syncMsg" class="small"></span></div>` : ''}`;
+}
+
+function bestWorst(r) {
   const basis = r.filter((x) => x.differential !== null).length >= 3 ? 'differential' : 'to_par';
   const sorted = [...r].filter((x) => A.isNum(x[basis])).sort((a, b) => a[basis] - b[basis]);
   const rcols = [['date', 'Date'], ['course_name', 'Course'], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['putts_round', 'Putts', n0]];
-  const latest = DS.rounds[DS.rounds.length - 1], needs = latest ? EXTRA.reviewNeeds(DS, latest.round_id).filter((x) => x.any).length : 0;
-  const nudge = needs ? `<a class="tile" href="#review" style="margin-bottom:12px">${icon('check')}<span>Review your last round – ${needs} hole${needs > 1 ? 's' : ''} need a quick check</span></a>` : '';
-  return `${demoBanner()}${nudge}${filterSummary(ds)}${seg('ov_n', [[5, 'Last 5'], [10, 'Last 10'], [20, 'Last 20']], 5)}
-  <div class="kpis">${t('stableford_round')}${t('gross')}${t('to_par')}${t('differential')}${t('gir_pct', 0, '%')}${t('fw_pct', 0, '%')}${t('putts_round')}${t('putts_per_gir', 2)}${t('one_putt_pct', 0, '%')}${t('three_putt_pct', 0, '%')}${t('penalties')}
-  <div class="kpi"><div class="l">Handicap index</div><div class="v">${hi ? fmt(hi.hi) : '–'}</div><div class="d muted">${hi ? esc(hi.hi_source) : 'add in Settings'}</div></div></div>
-  ${note(`Big numbers = mean of your last ${N} rounds; arrows compare with all earlier rounds in the selection. Stableford is reconstructed (WHS).`)}
-  <div class="card"><h2>Is it improving?</h2>${select('ov_metric', Object.entries(A.METRICS).map(([m, [l]]) => [m, l]), metric)}
-  ${trendChart(r, metric, A.METRICS[metric][0], metric === 'stableford_round' ? 36 : null)}
-  ${table(win, [['window', 'Last N vs previous N'], ['recent', 'Recent', n2], ['prior', 'Previous', n2], ['p', 'p', n2], ['verdict', 'Verdict']])}
-  ${note('Welch t-test, p < 0.10. "No clear change" = within normal round-to-round noise; needs 2×N rounds.')}</div>
-  <div class="card"><h2>Consistency</h2><div class="kpis">${['gross', 'stableford_round', 'differential'].map((m) => { const c = A.consistency(r, m); return `<div class="kpi"><div class="l">${A.METRICS[m][0]} – SD</div><div class="v">${fmt(c.sd)}</div><div class="d muted">IQR ${fmt(c.iqr)} · n=${c.n}</div></div>`; }).join('')}</div></div>
-  <div class="card"><h2>Best 5 (by ${basis.replace('_', ' ')})</h2>${table(sorted.slice(0, 5), rcols)}<h2 style="margin-top:14px">Worst 5</h2>${table(sorted.slice(-5).reverse(), rcols)}
+  return `<div class="card"><h2>Best 5 (by ${basis.replace('_', ' ')})</h2>${table(sorted.slice(0, 5), rcols)}<h2 style="margin-top:14px">Worst 5</h2>${table(sorted.slice(-5).reverse(), rcols)}
   ${note('Score differential normalises for course and tee difficulty – the fair way to compare rounds at different courses.')}</div>`;
 }
-
 function pageScoring() {
   const ds = filtered(), r = ds.rounds, h = ds.holes;
-  if (!r.length) return '<div class="warn">No rounds match the filters.</div>';
+  if (!r.length) return noMatch;
   const missing = r.filter((x) => x.stableford_round === null).length, m = segVal('sc_m', 'stableford_round');
   const dist = A.distribution(h), bl = A.blowupSummary(h, r), bp = A.byPar(h), fb = A.frontBack(h, r);
   const courses = [...new Map(r.map((x) => [x.course_id, x.course_name])).entries()].filter(([c]) => c);
@@ -185,9 +207,13 @@ function pageScoring() {
   const cols = ['#1B5E20', '#43A047', '#90CAF9', '#FFB74D', '#E57373', '#B71C1C'];
   return `${filterSummary(ds)}<div class="kpis">${kpi('Avg Stableford', A.mean(r.map((x) => x.stableford_round)))}${kpi('Avg gross', A.mean(r.map((x) => x.gross)))}${kpi('Avg to par', A.mean(r.map((x) => x.to_par)))}${kpi('Avg differential', A.mean(r.map((x) => x.differential)))}</div>
   ${note(`Garmin doesn't export a Stableford total – all points are <b>reconstructed</b> (WHS playing handicap = 95% of course handicap, strokes by stroke index). ${missing} round(s) can't be reconstructed (add handicap, rating/slope or stroke index in Settings).`)}
-  <div class="card"><h2>Trend</h2>${seg('sc_m', [['stableford_round', 'Stableford'], ['gross', 'Gross'], ['to_par', 'To par'], ['differential', 'Differential']], 'stableford_round')}
+  <div class="card"><h2>Is it improving?</h2>${seg('sc_m', [['stableford_round', 'Stableford'], ['gross', 'Gross'], ['to_par', 'To par'], ['differential', 'Differential']], 'stableford_round', 'scroll')}
   ${trendChart(r, m, A.METRICS[m][0], m === 'stableford_round' ? 36 : null)}
+  ${table(A.compareWindows(r.map((x) => x[m]), A.METRICS[m][1]), [['window', 'Last N vs previous N'], ['recent', 'Recent', n2], ['prior', 'Previous', n2], ['p', 'p', n2], ['verdict', 'Verdict']])}
+  ${note('Welch t-test, p < 0.10. "No clear change" = within normal round-to-round noise; needs 2×N rounds.')}
   ${plot([{ x: r.map((x) => x[m]).filter(A.isNum), type: 'histogram', marker: { color: '#1E88E5' }, nbinsx: 15 }], { title: 'Distribution of rounds', height: 220 })}</div>
+  <div class="card"><h2>Consistency</h2><div class="kpis">${['gross', 'stableford_round', 'differential'].map((mm) => { const cc = A.consistency(r, mm); return `<div class="kpi"><div class="l">${A.METRICS[mm][0]} – SD</div><div class="v">${fmt(cc.sd)}</div><div class="d muted">IQR ${fmt(cc.iqr)} · n=${cc.n}</div></div>`; }).join('')}</div></div>
+  ${bestWorst(r)}
   <div class="card"><h2>Score types per 18 holes</h2>${plot([{ x: dist.map((d) => d.bucket), y: dist.map((d) => d.per_18), type: 'bar', marker: { color: cols }, text: dist.map((d) => d.per_18.toFixed(1)), textposition: 'outside' }], { height: 260 })}
   <div class="kpis">${kpi('Triple+ holes / round', bl.per_round, null, false, 2)}${kpi('Strokes beyond double / rd', bl.beyond_double_per_round, null, false, 2)}${kpi('Blow-ups with a penalty', bl.with_penalty_pct, null, false, 0, '%')}</div></div>
   <div class="card"><h2>By hole par</h2>${table(bp, [['par', 'Par'], ['holes', 'Holes'], ['avg_score', 'Avg', n2], ['avg_to_par', 'To par', n2], ['stableford_avg', 'Pts', n2], ['gir_pct', 'GIR', p0], ['blowup_pct', 'Triple+', p0]])}
@@ -198,46 +224,59 @@ function pageScoring() {
   ${note('Compare courses on differential (accounts for rating/slope), not gross.')}</div>`;
 }
 
-function pageStriking() {
+function pageTee() {
   const ds = filtered(), r = ds.rounds, h = ds.holes, s = ds.shots;
-  if (!r.length) return '<div class="warn">No rounds match the filters.</div>';
-  const drv = A.driving(h, s), fw = A.contrast(h, 'fw_hit', (x) => x.par >= 4), gir = A.contrast(h, 'gir_eff');
-  const reach = s.filter((x) => x.category === 'approach' && x.start_to_pin !== null && x.start_to_pin <= 200);
-  const bands = A.approachByBand(s, UNIT), byClub = A.approachByClub(s), miss = A.greenMissDirections(s), m = segVal('bs_m', 'gir_pct');
-  const g1 = A.byPar(h);
-  const drivers = [
-    { f: 'Driving accuracy', d: `${sgn(fw.to_par_yes)} to par after hitting fairway vs ${sgn(fw.to_par_no)} after missing`, c: n2(fw.delta), n: `${fw.n_yes}/${fw.n_no}` },
-    { f: 'Approach (GIR)', d: `${sgn(gir.to_par_yes)} on GIR holes vs ${sgn(gir.to_par_no)} when missing`, c: n2(gir.delta), n: `${gir.n_yes}/${gir.n_no}` },
-    { f: 'Distance vs direction', d: `approach long/short SD ${D(A.std(reach.map((x) => x.long_short_m)))} vs left/right SD ${D(A.std(reach.map((x) => x.lateral_m)))}`, c: '–', n: String(reach.length) },
-    { f: 'Penalties', d: `${n2(A.mean(r.map((x) => x.penalties)))} strokes/round`, c: '1.00', n: String(A.count(r.map((x) => x.penalties))) },
-  ];
-  return `${filterSummary(ds)}<div class="kpis">${kpi('GIR', A.mean(h.map((x) => x.gir_eff)) * 100, null, true, 0, '%')}${kpi('Fairways', drv.fw_hit_pct, null, true, 0, '%')}${kpi('Penalties / round', A.mean(r.map((x) => x.penalties)), null, false, 2)}${kpi('Tee shots → penalty', drv.tee_penalty_pct, null, false, 1, '%')}</div>
-  ${note('GIR is derived (strokes − putts ≤ par − 2); holes with missing or default putts are excluded.')}
-  <div class="card"><h2>What's driving your scores?</h2>${drivers.map((x) => `<p style="margin:8px 0"><b>${esc(x.f)}</b> <span class="small muted">(n=${esc(x.n)})</span><br><span class="small">${esc(x.d)}${x.c !== '–' ? ` · <b>${esc(x.c)}</b> strokes per miss` : ''}</span></p>`).join('')}
-  ${note('Costs are personal contrasts from your own holes. They overlap – the Coaching page ranks them.')}</div>
-  <div class="card"><h2>Trend</h2>${seg('bs_m', [['gir_pct', 'GIR'], ['fw_pct', 'Fairways'], ['penalties', 'Penalties']], 'gir_pct')}${trendChart(r, m, A.METRICS[m][0])}
+  if (!r.length) return noMatch;
+  const drv = A.driving(h, s), fw = A.contrast(h, 'fw_hit', (x) => x.par >= 4), m = segVal('te_m', 'fw_pct');
+  return `${filterSummary(ds)}<div class="kpis">${kpi('Fairways', drv.fw_hit_pct, null, true, 0, '%')}${kpi('Penalties / round', A.mean(r.map((x) => x.penalties)), null, false, 2)}${kpi('Missed left', drv.miss_left_pct, null, false, 0, '%')}${kpi('Missed right', drv.miss_right_pct, null, false, 0, '%')}${kpi('Tee shots → penalty', drv.tee_penalty_pct, null, false, 1, '%')}</div>
+  <div class="card"><h2>What a missed fairway costs</h2><p>${sgn(fw.to_par_yes)} to par after hitting the fairway vs ${sgn(fw.to_par_no)} after missing it: <b>${n2(fw.delta)}</b> strokes per miss <span class="small muted">(${fw.n_yes} hit / ${fw.n_no} missed)</span>.</p>
+  ${note('A personal contrast from your own par 4s and 5s. It overlaps with approach play – Practice → Focus ranks the areas together.')}</div>
+  <div class="card"><h2>Trend</h2>${seg('te_m', [['fw_pct', 'Fairways'], ['penalties', 'Penalties']], 'fw_pct')}${trendChart(r, m, A.METRICS[m][0])}</div>
+  <div class="card"><h2>Fairway results</h2>${plot([{ x: ['Hit', 'Left', 'Right'], y: [drv.fw_hit_pct, drv.miss_left_pct, drv.miss_right_pct], type: 'bar', marker: { color: ['#43A047', '#FB8C00', '#E53935'] } }], { height: 220 })}
+  ${table(drv.by_club, [['club', 'Tee club'], ['shots', 'n'], ['median_m', `Median ${UNIT}`, d0], ['sd_m', 'SD', d1], ['lateral_sd_m', 'Lateral SD', d1]])}
+  ${note('Fairway results come from your scorecard. Tee-shot distances are GPS total; lateral spread is measured from the usual line of your drives on each hole.')}</div>`;
+}
+
+function pageApproach() {
+  const ds = filtered(), r = ds.rounds, h = ds.holes, s = ds.shots;
+  if (!r.length) return noMatch;
+  const gir = A.contrast(h, 'gir_eff'), reach = s.filter((x) => x.category === 'approach' && x.start_to_pin !== null && x.start_to_pin <= 200);
+  const bands = A.approachByBand(s, UNIT), byClub = A.approachByClub(s), miss = A.greenMissDirections(s), g1 = A.byPar(h);
+  return `${filterSummary(ds)}<div class="kpis">${kpi('GIR', A.mean(h.map((x) => x.gir_eff)) * 100, null, true, 0, '%')}${kpi('Strokes per missed green', gir.delta, null, false, 2)}${kpi(`Long/short SD (${UNIT})`, cv(A.std(reach.map((x) => x.long_short_m))), null, false, 0)}${kpi(`Left/right SD (${UNIT})`, cv(A.std(reach.map((x) => x.lateral_m))), null, false, 0)}</div>
+  ${note('GIR is derived (strokes − putts ≤ par − 2); holes with missing or default putts are excluded. If long/short spread is bigger than left/right, distance control is the bigger leak.')}
+  <div class="card"><h2>Trend</h2>${trendChart(r, 'gir_pct', A.METRICS.gir_pct[0])}
   ${plot([{ x: g1.map((x) => `Par ${x.par}`), y: g1.map((x) => x.gir_pct), type: 'bar', marker: { color: '#43A047' } }], { title: 'GIR % by par', height: 220 })}</div>
-  <div class="card"><h2>Approach by distance</h2>${bands.length ? plot([{ x: bands.map((b) => b.band), y: bands.map((b) => b.green_hit_pct), type: 'bar', name: 'Green hit %', marker: { color: '#43A047' }, text: bands.map((b) => `n=${b.shots}`), textposition: 'outside' }], { height: 250 }) : ''}
+  <div class="card"><h2>By distance</h2>${bands.length ? plot([{ x: bands.map((b) => b.band), y: bands.map((b) => b.green_hit_pct), type: 'bar', name: 'Green hit %', marker: { color: '#43A047' }, text: bands.map((b) => `n=${b.shots}`), textposition: 'outside' }], { height: 250 }) : ''}
   ${table(bands, [['band', 'From'], ['shots', 'n'], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['short_pct', 'Short', p0], ['long_pct', 'Long', p0], ['sd_lateral_m', 'L/R SD', d1]])}
-  ${note(`Pin = Garmin\'s pin marker (green centre unless moved on the watch). Green hit uses Garmin\'s end lie, else within ${D(12)} of the pin. Short/long = more than ${D(10)} from the pin\'s distance.`)}</div>
-  <div class="card"><h2>Approach by club</h2>${table(byClub, [['club', 'Club'], ['shots', 'n'], ['median_start_m', `From ${UNIT}`, d0], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['sd_lateral_m', 'L/R SD', d1]])}</div>
-  <div class="card"><h2>Driving & misses</h2><div class="grid2"><div>${plot([{ x: ['Hit', 'Left', 'Right'], y: [drv.fw_hit_pct, drv.miss_left_pct, drv.miss_right_pct], type: 'bar', marker: { color: ['#43A047', '#FB8C00', '#E53935'] } }], { title: 'Fairway results (scorecard)', height: 220 })}</div>
-  <div>${miss.length ? plot([{ x: miss.map((x) => x.direction), y: miss.map((x) => x.pct), type: 'bar', marker: { color: '#8E24AA' } }], { title: 'Missed greens: dominant direction', height: 220 }) : ''}</div></div>
-  ${table(drv.by_club, [['club', 'Tee club'], ['shots', 'n'], ['median_m', `Median ${UNIT}`, d0], ['sd_m', 'SD', d1], ['lateral_sd_m', 'Lateral SD', d1]])}</div>`;
+  ${note(`Pin = Garmin's pin marker (green centre unless moved on the watch). Green hit uses Garmin's end lie, else within ${D(12)} of the pin. Short/long = more than ${D(10)} from the pin's distance.`)}</div>
+  <div class="card"><h2>By club</h2>${table(byClub, [['club', 'Club'], ['shots', 'n'], ['median_start_m', `From ${UNIT}`, d0], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['sd_lateral_m', 'L/R SD', d1]])}</div>
+  ${miss.length ? `<div class="card"><h2>Missed greens</h2>${plot([{ x: miss.map((x) => x.direction), y: miss.map((x) => x.pct), type: 'bar', marker: { color: '#8E24AA' } }], { title: 'Dominant miss direction', height: 220 })}</div>` : ''}`;
+}
+
+function pageShort() {
+  const ds = filtered(), r = ds.rounds;
+  if (!r.length) return noMatch;
+  const g = F.shortGame(ds.holes, ds.shots, r), U = UNIT, bl = (b) => `${fmt(cv(b.lo_m), 0)}–${fmt(cv(b.hi_m), 0)} ${U}`;
+  const tr = g.byRound.filter((x) => x.missed >= 3);
+  return `${filterSummary(ds)}<div class="kpis">${kpi('Scrambling', g.scrambling_pct, null, true, 0, '%')}${kpi('Missed greens / round', g.missed_per_round, null, false, 1)}${kpi('Double+ after a miss', g.double_after_miss_pct, null, false, 0, '%')}${kpi('Up & down', g.up_down_pct, null, true, 0, '%')}${kpi('Chips onto the green', g.chip_on_green_pct, null, true, 0, '%')}${kpi('Sand saves', g.sand_save_pct, null, true, 0, '%')}</div>
+  ${note(`Scrambling = par or better after missing the green (${g.missed_greens} holes). Up & down = one shot from around the green then one putt (${g.up_down_n} holes with tracked chips). Sand saves: ${g.sand_n} holes with a tracked bunker shot near the green.`)}
+  ${tr.length >= 3 ? `<div class="card"><h2>Scrambling by round</h2>${plot([{ x: tr.map((x) => x.date), y: tr.map((x) => x.scrambling), mode: 'lines+markers', line: { color: '#1b7f4b', width: 2 }, marker: { size: 6 } }], { height: 230, yaxis: { title: { text: '% of missed greens' }, range: [0, 100] } })}</div>` : ''}
+  <div class="card"><h2>Chips and pitches by distance</h2>${table(g.bands.map((b) => ({ ...b, band: bl(b) })), [['band', 'From'], ['shots', 'Shots', n0], ['on_green_pct', 'On green', p0], ['median_left_m', `Left ${UNIT === 'yd' ? 'ft' : 'm'}`, (v) => fmt(pcv(v), 0)]], { empty: 'No tracked shots from around the green yet.' })}
+  ${note(`Shots that started within ${D(27.4)} of the pin, from Garmin GPS. "Left" = median distance from the pin after the shot. Chips AutoShot missed aren't counted – add them in Rounds → a round → Review.`)}</div>`;
 }
 
 function pagePutting() {
   const ds = filtered(), r = ds.rounds, h = ds.holes;
-  if (!r.length) return '<div class="warn">No rounds match the filters.</div>';
+  if (!r.length) return noMatch;
   const p = A.puttingSummary(h, r), m = segVal('pt_m', 'putts_round'), src = segVal('pt_src', 'user');
   const fp = A.byFirstPuttDistance(h, src, PUNIT()), dist = A.puttsPerHoleDistribution(h);
   return `${filterSummary(ds)}<div class="kpis">${kpi('Putts / round', p.putts_per_round)}${kpi('Putts / GIR', p.putts_per_gir, null, false, 2)}${kpi('1-putt', p.one_putt_pct, null, true, 0, '%')}${kpi('3-putt', p.three_putt_pct, null, false, 1, '%')}${kpi('Putts / hole', p.putts_per_hole, null, false, 2)}${kpi('2-putt', p.two_putt_pct, null, true, 0, '%')}${kpi('3-putts / 18', p.three_putts_per_round, null, false, 2)}${kpi('Holes without usable putts', p.holes_missing_putts, null, false, 0)}</div>
-  ${p.suspect_default_holes ? `<div class="warn">${p.suspect_default_holes} holes are excluded because their round shows 2 putts on every hole (looks like Garmin's default). If genuine, confirm them in Corrections → Holes.</div>` : ''}
+  ${p.suspect_default_holes ? `<div class="warn">${p.suspect_default_holes} holes are excluded because their round shows 2 putts on every hole (looks like Garmin's default). If genuine, confirm them in Rounds → a round → Edit → Holes.</div>` : ''}
   ${note('Putts come from your scorecard entries, not GPS. Putts/round only counts rounds with a putt count on every hole.')}
   <div class="card"><h2>Trend</h2>${seg('pt_m', [['putts_round', 'Putts'], ['putts_per_gir', 'Per GIR'], ['three_putt_pct', '3-putt %'], ['one_putt_pct', '1-putt %']], 'putts_round')}${trendChart(r, m, A.METRICS[m][0])}
   ${dist.length ? plot([{ x: dist.map((d) => d.putts), y: dist.map((d) => d.pct), type: 'bar', marker: { color: '#1E88E5' } }], { title: 'Share of holes by putts', height: 220 }) : ''}</div>
   <div class="card"><h2>By first-putt distance</h2>${seg('pt_src', [['user', 'Entered (reliable)'], ['estimated', 'GPS-estimated']], 'user')}
-  ${fp.length ? table(fp, [['band', 'Distance'], ['holes', 'Holes'], ['avg_putts', 'Avg putts', n2], ['make_pct', 'Holed', p0], ['three_putt_pct', '3-putt', p0]]) : `<p class="muted">No holes with ${src === 'user' ? 'entered' : 'estimated'} first-putt distances. Add them in Corrections → Holes to unlock short-putt conversion.</p>`}
+  ${fp.length ? table(fp, [['band', 'Distance'], ['holes', 'Holes'], ['avg_putts', 'Avg putts', n2], ['make_pct', 'Holed', p0], ['three_putt_pct', '3-putt', p0]]) : `<p class="muted">No holes with ${src === 'user' ? 'entered' : 'estimated'} first-putt distances. Add them in Rounds → a round → Edit → Holes to unlock short-putt conversion.</p>`}
   ${note(`GPS estimate = where your approach finished to the pin marker (green centre unless moved); typically ${DP(5)}–${DP(10)} error. The two sources are never mixed.`)}</div>
   <div class="card"><h2>By round</h2>${table([...r].reverse(), [['date', 'Date'], ['course_name', 'Course'], ['putts_round', 'Putts', n0], ['putts_per_gir', '/GIR', n2], ['one_putts', '1-putts', n0], ['three_putts', '3-putts', n0], ['putts_status', 'Status']])}</div>`;
 }
@@ -286,18 +325,11 @@ function pageDispersion() {
   const tr = [...new Set(pts.map((p) => p.club))].map((c, i) => ({ x: pts.filter((p) => p.club === c).map((p) => cv(p.x)), y: pts.filter((p) => p.club === c).map((p) => cv(p.y)), name: c, mode: 'markers', type: 'scatter', marker: { size: 7, color: COLORS[i % 12], opacity: 0.8 }, text: pts.filter((p) => p.club === c).map((p) => `${p.date} · ${D(p.dist_m)}`) }));
   if (st.enough) for (const [q, dash] of [[0.5, 'solid'], [0.9, 'dash']]) { if (q === 0.9 && !st.enough_90) continue; const [ex, ey] = A.ellipse(st.centre, st.cov, q); tr.push({ x: cvA(ex), y: cvA(ey), mode: 'lines', name: `${q * 100}%`, line: { color: css('--ink'), dash, width: 1.5 } }); }
   if (mode === 'approach') tr.push({ x: [0], y: [0], mode: 'markers', name: 'Pin', marker: { symbol: 'x', size: 12, color: '#E53935' } });
-  const rounds = [...ds.rounds].reverse(), rid = segVal('dp_round', rounds[0]?.round_id);
-  const rs = s.filter((x) => x.round_id === rid && x.category !== 'penalty'), hsel = ui.dp_holes || [];
-  const rsh = hsel.length ? rs.filter((x) => hsel.includes(String(x.hole))) : rs;
-  const pins = ds.holes.filter((x) => x.round_id === rid && x.pin_lat !== null && (!hsel.length || hsel.includes(String(x.hole))));
   return `${filterSummary(ds)}<div class="card"><h2>Dispersion by club</h2>${seg('dp_mode', [['approach', 'Approach (vs pin)'], ['tee', 'Tee (vs aim line)']], 'approach')}${chips('dp_clubs', opts, sel)}
   <div class="kpis" style="margin-top:10px">${kpi('Shots', st.n, null, true, 0)}${st.enough ? kpi(`Mean lateral (${UNIT}, + right)`, cv(st.mean_lateral_m)) + kpi(`Lateral SD (${UNIT})`, cv(st.sd_lateral_m)) + kpi('Left / right', null) .replace('–', `${fmt(st.pct_left, 0)}% / ${fmt(st.pct_right, 0)}%`) + kpi(mode === 'approach' ? `Mean long/short (${UNIT})` : `Mean distance (${UNIT})`, cv(st.mean_y_m)) + kpi(`50% radius (${UNIT})`, cv(st.r50_m)) + kpi(`90% radius (${UNIT})`, st.enough_90 ? cv(st.r90_m) : null) + kpi(`50% / 90% area ${UNIT}²`, null).replace('–', `${fmt(area(st.area50_m2), 0)} / ${fmt(area(st.area90_m2), 0)}`) : ''}</div>
   ${st.enough ? '' : `<div class="warn">Dispersion statistics need ≥${A.T.min_shots_dispersion} shots (≥${A.T.min_shots_dispersion_90} for 90%). Showing raw points only.</div>`}
   ${pts.length ? plot(tr, { height: 460, xaxis: { title: { text: `Left (−) / right (+) of target line, ${UNIT}` }, zeroline: true }, yaxis: { title: { text: mode === 'approach' ? `Long (+) / short (−) of pin, ${UNIT}` : `Distance along aim line, ${UNIT}` }, ...(mode === 'approach' ? { scaleanchor: 'x' } : {}) } }, 'tall') : ''}
-  ${note('Approach frame: relative to the start→pin line (pin = green centre unless moved). Tee frame: relative to the median direction of your drives on that hole (needs ≥3) – Garmin doesn\'t know your aim. Ellipses: 50%/90% bivariate normal.')}</div>
-  <div class="card"><h2>Round shot map</h2>${select('dp_round', rounds.map((x) => [x.round_id, x.label]), rid)}
-  ${chips('dp_holes', [...new Set(rs.map((x) => String(x.hole)))], hsel)}${seg('dp_sat', [['1', 'Satellite'], ['0', 'Map']], '1')}
-  ${mapPlot(rsh, pins, segVal('dp_sat', '1') === '1')}${note('Lines = tracked shots coloured by club. Shots AutoShot missed aren\'t shown.')}</div>${rounds.find((x) => x.round_id === rid)?.course_id ? EXTRA.osmCard(rounds.find((x) => x.round_id === rid).course_id) : ''}`;
+  ${note('Approach frame: relative to the start→pin line (pin = green centre unless moved). Tee frame: relative to the median direction of your drives on that hole (needs ≥3) – Garmin doesn\'t know your aim. Ellipses: 50%/90% bivariate normal. Shot maps for each round are on the round\'s page; on the course, Play draws this pattern on the hole.')}</div>`;
 }
 function mapPlot(shots, pins, sat) {
   const s = shots.filter((x) => x.start_lat !== null && x.end_lat !== null);
@@ -331,11 +363,11 @@ function mapPlot(shots, pins, sat) {
 
 function pageSG() {
   const ds = filtered();
-  if (!ds.rounds.length) return '<div class="warn">No rounds match the filters.</div>';
+  if (!ds.rounds.length) return noMatch;
   const base = segVal('sg_base', 'personal'), res = A.strokesGained(ds, TOUR, base, DS), cov = res.coverage;
   const head = `${filterSummary(ds)}${seg('sg_base', [['personal', 'Personal baseline'], ['tour', 'PGA Tour (reference)']], 'personal')}
   <div class="kpis">${kpi('Complete holes', cov.complete_holes, null, true, 0)}${kpi('Coverage', 100 * cov.coverage, null, true, 0, '%')}${kpi('Holes missing swings', ds.holes.filter((h) => h.swings_missing > 0).length, null, false, 0)}${kpi('Holes missing putts', ds.holes.filter((h) => h.putts_eff === null).length, null, false, 0)}</div>`;
-  if (cov.coverage < A.T.sg_min_coverage) return head + `<div class="err">Only ${Math.round(cov.coverage * 100)}% of holes have a complete shot chain (score = tracked swings + putts + penalties, putts recorded, pin known). Strokes gained needs ≥${A.T.sg_min_coverage * 100}% and is <b>not available</b> for this selection. Add the shots AutoShot missed (usually chips) in Corrections → Add shot.</div>`;
+  if (cov.coverage < A.T.sg_min_coverage) return head + `<div class="err">Only ${Math.round(cov.coverage * 100)}% of holes have a complete shot chain (score = tracked swings + putts + penalties, putts recorded, pin known). Strokes gained needs ≥${A.T.sg_min_coverage * 100}% and is <b>not available</b> for this selection. Add the shots AutoShot missed (usually chips) in Rounds → a round → Review.</div>`;
   const sm = A.sgSummary(res), est = A.mean(res.states.filter((x) => x.kind === 'green').map((x) => (x.putt_dist_estimated ? 1 : 0))) || 0;
   const cats = A.SG_CATS, br = res.byRound;
   const roll = cats.map((c, i) => { const v = br.map((r) => r[`${c}_per18`]); return { x: br.map((r) => r.date), y: v.map((_, j) => (j >= 4 ? A.mean(v.slice(Math.max(0, j - 9), j + 1)) : null)), name: c, mode: 'lines', line: { color: COLORS[i] } }; });
@@ -349,30 +381,43 @@ function pageSG() {
   <div class="card"><h2>By club</h2>${table(byClub, [['club', 'Club'], ['category', 'Category'], ['shots', 'n', n0], ['sg_per_shot', 'SG/shot', (v) => sgn(v, 3)], ['sg_total', 'Total', (v) => sgn(v)]], { empty: 'Needs ≥5 SG-eligible shots per club.' })}</div>`;
 }
 
-function pageRounds() {
-  const ds = filtered(), r = [...ds.rounds].reverse();
-  if (!r.length) return '<div class="warn">No rounds match the filters.</div>';
-  const rid = ui.rd_open, row = r.find((x) => x.round_id === rid) || DS.rounds.find((x) => x.round_id === rid);   // an opened round shows even if the filters hide it
-  let detail = '';
-  if (row) {
-    const hh = DS.holes.filter((h) => h.round_id === rid).sort((a, b) => a.hole - b.hole), rs = DS.shots.filter((s) => s.round_id === rid);
+function roundDetail(rid) {
+  const row = DS.rounds.find((x) => x.round_id === rid); if (!row) return null;
+  const tab = segVal('rd_tab', 'card'), hh = DS.holes.filter((h) => h.round_id === rid).sort((a, b) => a.hole - b.hole), rs = DS.shots.filter((s) => s.round_id === rid);
+  const needs = EXTRA.reviewNeeds(DS, rid).filter((x) => x.any).length;
+  let body = '';
+  if (tab === 'map') {
+    body = `<div class="card">${mapPlot(rs.filter((x) => x.category !== 'penalty'), hh.filter((h) => h.pin_lat !== null), segVal('dp_sat', '1') === '1')}${seg('dp_sat', [['1', 'Satellite'], ['0', 'Map']], '1')}${note('Lines = tracked shots coloured by club. Shots AutoShot missed aren\'t shown.')}</div>${row.course_id ? EXTRA.osmCard(row.course_id) : ''}`;
+  } else if (tab === 'review') {
+    EMBED = rid; ui.rv_round = rid; body = EXTRA.render.review(); SUBWIRE.push('review');
+  } else if (tab === 'edit') {
+    EMBED = rid; ui.ed_round = rid; body = pageEdit(true);
+  } else {
     const use = [...A.groupBy(rs.filter((s) => s.club_id), (s) => s.club)].map(([c, g]) => ({ club: c, shots: g.length })).sort((a, b) => b.shots - a.shots);
-    detail = `<div class="card" id="rdetail"><h2>${esc(row.label)}</h2><div class="kpis">${kpi('Gross', row.gross, null, false, 0)}${kpi('Stableford', row.stableford_round, null, true, 0)}${kpi('GIR', row.gir_pct, null, true, 0, '%')}${kpi('Fairways', row.fw_pct, null, true, 0, '%')}${kpi('Putts', row.putts_round, null, false, 0)}${kpi('Penalties', row.penalties, null, false, 0)}${kpi('Differential', row.differential)}${kpi('Playing hcp', row.ph, null, true, 0)}</div>
+    body = `<div class="card"><div class="kpis">${kpi('Gross', row.gross, null, false, 0)}${kpi('Stableford', row.stableford_round, null, true, 0)}${kpi('GIR', row.gir_pct, null, true, 0, '%')}${kpi('Fairways', row.fw_pct, null, true, 0, '%')}${kpi('Putts', row.putts_round, null, false, 0)}${kpi('Penalties', row.penalties, null, false, 0)}${kpi('Differential', row.differential)}${kpi('Playing hcp', row.ph, null, true, 0)}</div>
     <p class="small muted">${esc(row.tee || '?')} tee · CR ${fmt(row.course_rating)} / slope ${fmt(row.slope, 0)} · HI ${fmt(row.hi)} (${esc(row.hi_source || 'none')}) · ${esc(row.stableford_source || 'Stableford not reconstructable')}${state.weather?.[rid] ? ` · ${fmt(state.weather[rid].temp_c, 0)}°C, wind ${fmt(state.weather[rid].wind_kmh, 0)} km/h` : ''}</p>
     <h3>Scorecard</h3>${table(hh, [['hole', 'H'], ['par', 'Par'], ['stroke_index', 'SI', n0], ['strokes', 'Score', n0], ['putts_eff', 'Putts', n0], ['penalties_eff', 'Pen', n0], ['fairway', 'FW'], ['gir_eff', 'GIR', (v) => (v === 1 ? '✓' : v === 0 ? '·' : '–')], ['stableford', 'Pts', n0], ['swings_missing', 'Missing', n0]])}
-    <h3>Shot map</h3>${mapPlot(rs.filter((x) => x.category !== 'penalty'), hh.filter((h) => h.pin_lat !== null), true)}
     <h3>Club usage</h3>${table(use, [['club', 'Club'], ['shots', 'Shots', n0]])}
     <details><summary>All shots</summary>${table(rs, [['hole', 'H'], ['shot_order', '#', n0], ['club', 'Club'], ['category', 'Type'], ['start_lie', 'Lie'], ['dist_m', `Dist ${UNIT}`, d0], ['start_to_pin', 'To pin', d0], ['lateral_m', 'Lat', d1], ['excluded_reason', 'Excluded']])}</details>
-    ${note('Missing = score − putts − penalties − tracked swings (shots AutoShot didn\'t detect). Add them in Corrections.')}
-    <p><button class="btn" data-share="${esc(rid)}">${icon('share', 18)} Share round card</button><a class="btn sec" href="#review" data-goreview="${esc(rid)}">Review this round</a><a class="btn sec" href="#edit" data-goedit="${esc(rid)}">Corrections</a><button class="btn sec" id="rdClose">Close</button></p>
+    ${note('Missing = score − putts − penalties − tracked swings (shots AutoShot didn\'t detect). Add them on the Review tab.')}
+    <p><button class="btn" data-share="${esc(rid)}">${icon('share', 18)} Share round card</button></p>
     ${row.origin === 'manual' ? `<p class="small muted">Entered by hand on this phone. <button class="btn sec sm" data-delround="${esc(row.source_id)}">Delete this round</button></p>` : ''}</div>`;
   }
+  return `<div id="rdetail"><button class="back" id="rdClose">‹ All rounds</button><h2 class="rtitle">${esc(row.course_name || 'Round')}</h2><p class="small muted" style="margin:0 0 10px">${esc(row.date)}${row.format !== '18' ? ` · ${esc(row.format)} holes` : ''}${row.origin === 'manual' ? ' · entered on phone' : ''}</p>
+    ${seg('rd_tab', [['card', 'Scorecard'], ['map', 'Shot map'], ['review', needs ? `Review (${needs})` : 'Review'], ['edit', 'Edit']], 'card', 'scroll')}${body}</div>`;
+}
+function pageRounds() {
+  const open = ui.rd_open && roundDetail(ui.rd_open);
+  if (open) return open;
+  const ds = filtered(), r = [...ds.rounds].reverse();
+  if (!r.length) return noMatch;
   const a = segVal('cmp_a', r[0].round_id), b = segVal('cmp_b', r[1]?.round_id || r[0].round_id), ra = r.find((x) => x.round_id === a), rb = r.find((x) => x.round_id === b);
   const ms = ['gross', 'to_par', 'stableford_round', 'differential', 'gir_pct', 'fw_pct', 'putts_round', 'putts_per_gir', 'three_putts', 'penalties', 'blowups'];
   const cmp = ra && rb ? ms.map((m) => ({ m: A.METRICS[m]?.[0] || m, a: ra[m], b: rb[m], d: A.isNum(ra[m]) && A.isNum(rb[m]) ? rb[m] - ra[m] : null })) : [];
   const ha = ds.holes.filter((h) => h.round_id === a), hb = ds.holes.filter((h) => h.round_id === b);
-  return `${filterSummary(ds)}${detail}<div class="card"><h2>Round history <span class="small muted">(tap a round)</span></h2>${table(r, [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['fw_pct', 'FW', p0], ['putts_round', 'Putts', n0], ['penalties', 'Pen', n0], ['chain_coverage', 'Shot chain', (v) => fmt(v * 100, 0, '%')]], { click: true, id: 'roundsTbl' })}</div>
-  <div class="card"><h2>Compare two rounds</h2><div class="row"><div>${select('cmp_a', r.map((x) => [x.round_id, x.label]), a, 'Round A')}</div><div>${select('cmp_b', r.map((x) => [x.round_id, x.label]), b, 'Round B')}</div></div>
+  const short = (x) => `${x.date} · ${x.course_name || ''} (${x.gross ?? '–'})`;
+  return `${filterSummary(ds)}<div class="card"><h2>Round history <span class="small muted">(tap a round)</span></h2>${table(r, [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['fw_pct', 'FW', p0], ['putts_round', 'Putts', n0], ['penalties', 'Pen', n0], ['chain_coverage', 'Shot chain', (v) => fmt(v * 100, 0, '%')]], { click: true, id: 'roundsTbl' })}</div>
+  <div class="card"><h2>Compare two rounds</h2>${select('cmp_a', r.map((x) => [x.round_id, short(x)]), a, 'Round A')}${select('cmp_b', r.map((x) => [x.round_id, short(x)]), b, 'Round B')}
   ${table(cmp, [['m', 'Metric'], ['a', 'A', n1], ['b', 'B', n1], ['d', 'B − A', (v) => sgn(v, 1)]])}
   ${plot([{ x: ha.map((h) => h.hole), y: ha.map((h) => h.to_par), type: 'bar', name: 'A' }, { x: hb.map((h) => h.hole), y: hb.map((h) => h.to_par), type: 'bar', name: 'B' }], { barmode: 'group', height: 240, title: 'To par by hole', xaxis: { dtick: 1 } })}
   ${ra && rb && ra.course_id !== rb.course_id ? note('Different courses – compare the differential rather than gross.') : ''}</div>`;
@@ -403,9 +448,9 @@ function pageData() {
   const cov = (a) => (a.length ? `${Math.round(100 * a.filter(Boolean).length / a.length)}%` : '–');
   const comp = r.length ? [
     ['Course rating & slope', cov(r.map((x) => x.course_rating !== null && x.slope !== null)), 'Settings → Courses'], ['Stroke index', cov(h.map((x) => x.stroke_index !== null)), 'Settings → Courses'],
-    ['Handicap index at round date', cov(r.map((x) => x.hi !== null)), 'Settings → Handicap'], ['Putts (trusted)', cov(h.map((x) => x.putts_eff !== null)), 'Corrections → Holes'],
-    ['Fairway result (par 4/5)', cov(h.filter((x) => x.par >= 4).map((x) => x.fw_hit !== null)), 'Corrections → Holes'], ['Shots with a club', cov(s.map((x) => !!x.club_id)), 'Corrections → Shots'],
-    ['Holes with complete shot chain', cov(h.map((x) => x.chain_complete)), 'Corrections → Add shot']].map(([f, c, fix]) => ({ f, c, fix })) : [];
+    ['Handicap index at round date', cov(r.map((x) => x.hi !== null)), 'Settings → Handicap'], ['Putts (trusted)', cov(h.map((x) => x.putts_eff !== null)), 'Rounds → a round → Edit → Holes'],
+    ['Fairway result (par 4/5)', cov(h.filter((x) => x.par >= 4).map((x) => x.fw_hit !== null)), 'Rounds → a round → Edit → Holes'], ['Shots with a club', cov(s.map((x) => !!x.club_id)), 'Rounds → a round → Edit → Shots'],
+    ['Holes with complete shot chain', cov(h.map((x) => x.chain_complete)), 'Rounds → a round → Review']].map(([f, c, fix]) => ({ f, c, fix })) : [];
   const dups = r.filter((x) => x.duplicate_of);
   const issues = (all.issues || []).filter((i) => i.severity !== 'info');
   return `${demoBanner()}<div class="card"><h2>Cloud sync</h2>${sc.owner ? `<p class="small">Repo <b>${esc(sc.owner)}/${esc(sc.repo)}</b> · last sync ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleString() : 'never')}</p>` : '<p class="small">Not set up – see Settings → Cloud sync and Help.</p>'}
@@ -424,11 +469,11 @@ function pageData() {
   <p class="small muted" id="persist"></p><details><summary class="small">Danger zone</summary><button class="btn danger" id="wipe">Delete all data on this phone</button><p class="small muted">Keeps the cloud-sync connection, so Sync now brings your Garmin rounds straight back.</p></details></div>`;
 }
 
-function pageEdit() {
+function pageEdit(embed = false) {
   if (!DS.rounds.length) return emptyMsg();
   const all = DSDUP || (DSDUP = A.buildDataset(state, { ...BUILD, includeDuplicates: true, includeExcluded: true }));
-  const rs = [...all.rounds].reverse(), rid = segVal('ed_round', rs[0].round_id), row = rs.find((x) => x.round_id === rid) || rs[0];
-  const tab = segVal('ed_tab', 'holes'), clubs = all.clubs;
+  const rs = [...all.rounds].reverse(), rid = (embed && EMBED) || segVal('ed_round', rs[0].round_id), row = rs.find((x) => x.round_id === rid) || rs[0];
+  const tab = embed && segVal('ed_tab', 'holes') === 'audit' ? 'holes' : segVal('ed_tab', 'holes'), clubs = all.clubs;
   const clubOpts = (cur) => `<option value="">(none)</option>${clubs.map((c) => `<option value="${esc(c.club_id)}" ${c.club_id === cur ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}`;
   const lieOpts = (cur) => ['', 'Tee', 'Fairway', 'Rough', 'Sand', 'Recovery', 'Fringe', 'Green', 'Water', 'OB'].map((l) => `<option ${l === (cur || '') ? 'selected' : ''}>${l}</option>`).join('');
   let body = '';
@@ -453,7 +498,7 @@ function pageEdit() {
     const hs = [...new Set(all.shots.filter((s) => s.round_id === row.round_id).map((s) => s.hole))].sort((a, b) => a - b);
     const hole = Number(segVal('ed_hole', hs[0] || 1)), ss = all.shots.filter((s) => s.round_id === row.round_id && s.hole === hole);
     body = `${select('ed_hole', hs.map((x) => [x, `Hole ${x}`]), hole, 'Hole')}<form id="shotForm">${ss.map((s) => `<div class="card" data-k="${esc(s.shot_key)}" style="padding:10px"><b>#${fmt(s.shot_order, 0)}</b> <span class="small muted">${esc(s.category)} · ${D(s.dist_m)} · ${esc(s.source)}${s.excluded_reason && s.excluded_reason !== 'user' ? ` · auto-excluded: ${esc(s.excluded_reason)}` : ''}</span>
-      <div class="row"><div><label class="f">Club</label><select name="club_id">${clubOpts(s.club_id)}</select></div><div><label class="f">Type</label><select name="shot_category">${['', 'tee', 'approach', 'recovery', 'around_green', 'putt', 'penalty'].map((c) => `<option ${c === (s.shot_category || '') ? 'selected' : ''} value="${c}">${c || `auto (${s.category})`}</option>`).join('')}</select></div></div>
+      <div class="row"><div><label class="f">Club</label><select name="club_id">${clubOpts(s.club_id)}</select></div><div><label class="f">Type</label><select name="shot_category">${['', 'tee', 'approach', 'recovery', 'around_green', 'putt', 'penalty'].map((c) => `<option ${c === (s.shot_category || '') ? 'selected' : ''} value="${c}">${c || `auto: ${s.category.replace('_', ' ')}`}</option>`).join('')}</select></div></div>
       <div class="row"><div><label class="f">Start lie</label><select name="start_lie">${lieOpts(s.start_lie)}</select></div><div><label class="f">End lie</label><select name="end_lie">${lieOpts(s.end_lie)}</select></div></div>
       <p><label><input type="checkbox" name="excluded" ${s.excluded_reason === 'user' ? 'checked' : ''}> Exclude from analysis</label>${s.source === 'manual' ? ` <button type="button" class="btn sec" data-delshot="${esc(s.shot_key)}">Remove manual shot</button>` : ''}</p></div>`).join('') || '<p class="muted">No shots on this hole.</p>'}
       <label class="f">Reason</label><input name="_reason" style="width:100%"><p><button class="btn">Save shot changes</button></p></form>`;
@@ -468,9 +513,10 @@ function pageEdit() {
     body = `<h3>Active corrections (${act.length})</h3>${table(act, [['id', '#'], ['created_at', 'When', (v) => esc(String(v).slice(0, 16))], ['entity', 'On'], ['key', 'Key', (v) => esc(String(v).slice(-22))], ['field', 'Field'], ['old_value', 'Was', (v) => esc(JSON.stringify(v))], ['value', 'Now', (v) => esc(JSON.stringify(v))], ['reason', 'Reason'], ['id', '', (v) => `<button class="btn sec" data-revert="${v}">Revert</button>`]], { empty: 'None.' })}
     <details><summary>Full audit log (${state.audit.length})</summary>${table([...state.audit].reverse().slice(0, 300), [['ts', 'When', (v) => esc(String(v).slice(0, 16))], ['action', 'Action'], ['entity', 'On'], ['entity_key', 'Key', (v) => esc(String(v ?? '').slice(-22))], ['detail', 'Detail', (v) => `<span class="small">${esc(JSON.stringify(v)).slice(0, 120)}</span>`]])}</details>`;
   }
-  return `<p class="small muted">Every change is an overlay on the original Garmin record, logged and reversible. Garmin data is never overwritten.</p>
-  ${tab !== 'audit' ? select('ed_round', rs.map((x) => [x.round_id, x.label + (x.duplicate_of ? ' [duplicate]' : '') + (x.excluded ? ' [excluded]' : '')]), row.round_id, 'Round') : ''}
-  ${seg('ed_tab', [['holes', 'Holes'], ['shots', 'Shots'], ['add', 'Add shot'], ['round', 'Round'], ['audit', 'Audit']], 'holes')}<div class="card">${body}</div>`;
+  const tabs = [['holes', 'Holes'], ['shots', 'Shots'], ['add', 'Add shot'], ['round', 'Round'], ...(embed ? [] : [['audit', 'Audit log']])];
+  return `<p class="small muted">Every change is an overlay on the original Garmin record, logged and reversible. Garmin data is never overwritten.${embed ? ' <a href="#corrections">All corrections ›</a>' : ''}</p>
+  ${embed ? `<input type="hidden" data-sel="ed_round" value="${esc(row.round_id)}">` : tab !== 'audit' ? select('ed_round', rs.map((x) => [x.round_id, x.label + (x.duplicate_of ? ' [duplicate]' : '') + (x.excluded ? ' [excluded]' : '')]), row.round_id, 'Round') : ''}
+  ${seg('ed_tab', tabs, 'holes', 'scroll')}<div class="card">${body}</div>`;
 }
 
 function pageSettings() {
@@ -483,7 +529,7 @@ function pageSettings() {
       <div class="row"><div><label class="f">Target carry ${UNIT}</label><input name="target_carry_m" type="number" value="${inputVal(c.target_carry_m, 0)}"></div><div><label class="f">Target total ${UNIT}</label><input name="target_total_m" type="number" value="${inputVal(c.target_total_m, 0)}"></div><div><label class="f">Order</label><input name="sort_order" type="number" value="${c.sort_order ?? ''}"></div></div>
       <label><input type="checkbox" name="active" ${c.active === 0 ? '' : 'checked'}> In bag</label></div>`).join('')}<p><button class="btn">Save clubs</button></p></form>
       <h3>Add a club</h3><form id="addClub" class="row"><div><input name="name" placeholder="Name"></div><div><select name="category">${['driver', 'wood', 'hybrid', 'iron', 'wedge', 'putter', 'other'].map((x) => `<option>${x}</option>`).join('')}</select></div><div><button class="btn">Add</button></div></form>
-      ${note('Garmin exports a club type, not your label – rename to match your bag. Targets are your own numbers; GolfIQ never measures carry. To fix one shot\'s club use Corrections → Shots.')}`;
+      ${note('Garmin exports a club type, not your label – rename to match your bag. Targets are your own numbers; GolfIQ never measures carry. To fix one shot\'s club use Rounds → a round → Edit → Shots.')}`;
   } else if (tab === 'courses') {
     const courses = Object.entries(DS.base.courses), cid = segVal('st_course', courses[0]?.[0]);
     const tees = Object.values(DS.base.tees).filter((t) => t.course_id === cid);
@@ -508,7 +554,8 @@ function pageSettings() {
       ${note('The token is stored only on this phone and is used only to read your private repo. It\'s never included in backups.')}`;
   }
   const unitsCard = `<div class="card"><h2>Distance units</h2><div class="seg" id="unitSeg">${[['yd', 'Yards (putts in feet)'], ['m', 'Metres']].map(([v, l]) => `<button data-u="${v}" class="${UNIT === v ? 'on' : ''}">${l}</button>`).join('')}</div><p class="note">Display only – data is stored unchanged, so you can switch any time.</p></div>`;
-  return `${demoBanner()}${unitsCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Cloud sync']], 'clubs')}<div class="card">${body}</div>`;
+  const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
+  return `${demoBanner()}${links}${unitsCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Cloud sync']], 'clubs')}<div class="card">${body}</div>`;
 }
 
 function pageHelp() {
@@ -518,38 +565,52 @@ function pageHelp() {
   <div class="card"><h2>2 · Get your Garmin data in</h2><h3>Option A – automatic cloud sync (recommended)</h3><p class="small">A scheduled GitHub job logs in to Garmin with your credentials (stored as encrypted GitHub secrets, not in this app), downloads new rounds to your private repo, and this app pulls them with <b>Sync now</b>. Full steps: <code>iphone/SETUP_IPHONE.md</code>.</p>
   <h3>Option B – export bookmarklet (no setup)</h3><ol class="small"><li>Tap <b>Copy bookmarklet</b> below.</li><li>In Safari, bookmark any page (Share → Add Bookmark), name it <b>GolfIQ export</b>.</li><li>Open Bookmarks → Edit → tap <b>GolfIQ export</b> → replace the address with the copied text → Done.</li><li>Sign in at <b>connect.garmin.com</b> in Safari (use “Request Desktop Website” if it pushes you to the app), then open Bookmarks → <b>GolfIQ export</b>.</li><li>Choose how many recent rounds (blank = all), wait, tap <b>Save file</b> → Save to Files.</li><li>Come back here → Data → <b>Import a file</b>.</li></ol>
   <button class="btn" id="copyBm">Copy bookmarklet</button><details><summary class="small">What the bookmarklet does (readable source)</summary><p class="small">Runs only on connect.garmin.com in your signed-in session; reads your scorecards, shots and club list from Garmin's own golf endpoints; builds one JSON file and offers it to save. It sends nothing anywhere else and never sees your password.</p><textarea rows="12" readonly>${esc(BOOKMARKLET_SRC)}</textarea></details></div>
-  <div class="card"><h2>Coaching with Claude</h2><p class="small">Coach → Coach notes → <b>Copy briefing for Claude</b> puts your stats, club distances, wedge matrix, practice scores and recent notes on the clipboard. Paste it into a chat with Claude along with your question. Claude's reply ends with a note in GolfIQ's format – copy the reply, then tap <b>Paste note from Claude</b> and the dated feedback, feels and drills are saved in the app.</p>
-  <p class="small">Practice → Games, Wedge matrix and Practice log are for the range; Coach → Swing thoughts holds up to five cues.</p></div>
+  <div class="card"><h2>Coaching with Claude</h2><p class="small">Practice → Coach notes → <b>Copy briefing for Claude</b> puts your stats, club distances, wedge matrix, practice scores and recent notes on the clipboard. Paste it into a chat with Claude along with your question. Claude's reply ends with a note in GolfIQ's format – copy the reply, then tap <b>Paste note from Claude</b> and the dated feedback, feels and drills are saved in the app.</p>
+  <p class="small">Practice → Games, Wedges and Log are for the range; Practice → Swing thoughts holds up to five cues. Your bag (distances, dispersion, wedge matrix) is under Stats → Bag.</p></div>
   <div class="card"><h2>3 · First-time tidy-up</h2><ol class="small"><li>Settings → Clubs: rename to your bag, set categories and optional targets.</li><li>Settings → Handicap: add your index (and past values for accurate historic Stableford).</li><li>Settings → Courses: fill missing rating/slope/stroke index (see Data → completeness).</li></ol></div>
   <div class="card"><h2>How numbers are calculated</h2><ul class="small"><li><b>Distances</b> are GPS total (start → finish), never carry.</li><li><b>Stableford</b> is reconstructed: WHS course handicap = HI × Slope/113 + (CR − Par); playing handicap 95%; strokes by stroke index.</li><li><b>Differential</b> = 113/Slope × (adjusted gross − CR), net double bogey cap.</li><li><b>GIR</b> = strokes − putts ≤ par − 2. Rounds showing 2 putts on every hole are treated as unrecorded until confirmed.</li><li><b>Strokes gained</b> only on holes with a complete shot chain; default baseline is your own average; PGA Tour is reference only.</li><li><b>Coaching</b> targets are the level you already reach in your best 25% of rounds.</li><li>Small samples are flagged: clubs need 8 stock shots (20 = reliable), dispersion 10 (20 for 90%).</li></ul><p class="small muted">Full methodology: docs/METHODOLOGY.md in the project.</p></div>`;
 }
 
-const MORE = [
-  ['On the course', ['play', 'caddie', 'playbook', 'review']],
-  ['Analysis', ['scoring', 'striking', 'putting', 'clubs', 'dispersion', 'sg', 'handicap', 'conditions', 'compare', 'bests']],
-  ['Practice & coaching', ['practice', 'coaching']],
-  ['Data', ['data', 'edit', 'settings', 'help']],
-];
-function pageMore() {
-  return MORE.map(([title, keys]) => `<div class="sect">${title}</div><div class="tiles">${keys.map((p) => `<a class="tile" href="#${p}">${icon(PAGES[p][1])}<span>${PAGES[p][0]}</span></a>`).join('')}</div>`).join('');
+// ------------------------------------------------------------------ hubs (tabs inside the five main sections)
+const STATS_TABS = [['scoring', 'Scoring'], ['tee', 'Tee'], ['approach', 'Approach'], ['short', 'Short game'], ['putting', 'Putting'], ['sg', 'Strokes gained'], ['handicap', 'Handicap'], ['bag', 'Bag'], ['insights', 'Insights']];
+function pageStats() {
+  const t = segVal('sx_tab', 'scoring');
+  const sub = (key, tabs, dflt, map) => { const v = segVal(key, dflt), k = map[v] ? v : dflt; return seg(key, tabs, dflt) + map[k](); };
+  const body = {
+    scoring: pageScoring, tee: pageTee, approach: pageApproach, short: pageShort, putting: pagePutting, sg: pageSG,
+    handicap: () => EXTRA.render.handicap(),
+    bag: () => sub('bag_tab', [['gapping', 'Distances'], ['dispersion', 'Dispersion'], ['wedges', 'Wedge matrix']], 'gapping', { gapping: pageClubs, dispersion: pageDispersion, wedges: () => { SUBWIRE.push('practice'); return EXTRA.practiceWedges(); } }),
+    insights: () => sub('in_tab', [['conditions', 'Weather'], ['compare', 'Before & after'], ['bests', 'Personal bests']], 'conditions',
+      { conditions: () => { SUBWIRE.push('conditions'); return EXTRA.render.conditions(); }, compare: () => { SUBWIRE.push('compare'); return EXTRA.render.compare(); }, bests: () => EXTRA.render.bests() }),
+  }[t] || pageScoring;
+  return seg('sx_tab', STATS_TABS, 'scoring', 'scroll tabs') + body();
 }
-const RENDER = { overview: pageOverview, scoring: pageScoring, striking: pageStriking, putting: pagePutting, clubs: pageClubs, dispersion: pageDispersion,
-  sg: pageSG, rounds: pageRounds, data: pageData, edit: pageEdit, settings: pageSettings, help: pageHelp, more: pageMore };
+function pagePlayHub() {
+  const t = segVal('pl_tab', 'round'), d = state.journal.draft;
+  const head = seg('pl_tab', [['round', d ? 'Round' : 'Play'], ['caddie', 'Caddie'], ['plan', 'Course plan']], 'round', 'tabs');
+  if (t === 'caddie') { SUBWIRE.push('caddie'); return head + (DS.rounds.length ? EXTRA.render.caddie() : emptyMsg()); }
+  if (t === 'plan') return head + (DS.rounds.length ? EXTRA.render.playbook() : emptyMsg());
+  SUBWIRE.push('play'); return head + EXTRA.play.render.play();
+}
+const RENDER = { home: pageHome, stats: pageStats, rounds: pageRounds, data: pageData, corrections: () => pageEdit(false), settings: pageSettings, help: pageHelp };
 
 // ------------------------------------------------------------------ render + events
 function render() {
-  const page = (location.hash.slice(1) || 'overview').split('?')[0], key = RENDER[page] ? page : 'overview';
-  $('#title').textContent = PAGES[key][0];
-  const navKeys = NAV.map((n) => n[0]);
-  $('#nav').innerHTML = NAV.map(([p, label]) => `<a href="#${p}" class="${p === key || (p === 'more' && !navKeys.includes(key)) ? 'on' : ''}">${icon(PAGES[p][1], 24)}${label}</a>`).join('');
-  $('#filterBtn').hidden = !FILTERED.has(key) || !DS.rounds.length;
-  plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = [];
+  let page = (location.hash.slice(1) || 'home').split('?')[0];
+  if (MOVED[page]) { const [to, set, hook] = MOVED[page]; Object.assign(ui, set || {}); hook?.(); saveUi(); history.replaceState(null, '', `#${to}`); page = to; }
+  const key = RENDER[page] ? page : 'home';
+  $('#title').textContent = key === 'rounds' && ui.rd_open ? 'Round' : PAGES[key][0];
+  $('#nav').innerHTML = NAV.map(([p, label]) => `<a href="#${p}" class="${p === key ? 'on' : ''}">${icon(PAGES[p][1], 24)}${label}</a>`).join('');
+  $('#filterBtn').hidden = !FILTERED.has(key) || !DS.rounds.length || (key === 'rounds' && !!ui.rd_open) || (key === 'stats' && ['handicap', 'insights'].includes(segVal('sx_tab', 'scoring')));
+  $('#gearBtn').classList.toggle('on', ['settings', 'data', 'help', 'corrections'].includes(key));
+  plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = []; SUBWIRE = []; EMBED = null;
   let html;
-  try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'more', 'edit', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
+  try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'corrections', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
   catch (e) { console.error(e); html = `<div class="err">Something went wrong on this page: ${esc(e.message)}</div>`; }
   $('#main').innerHTML = html;
-  drawPlots(); wire(key); EXTRA.wire[key]?.(); EXTRA.wireOsm();
+  drawPlots(); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm();
   $$('[data-share]').forEach((b) => b.addEventListener('click', () => EXTRA.shareRound(b.dataset.share)));
+  $$('.seg.scroll, .seg.tabs').forEach((g) => { const b = $('button.on', g); if (b) g.scrollLeft = b.offsetLeft - (g.clientWidth - b.offsetWidth) / 2; });
 }
 function rerender() { const y = scrollY; render(); scrollTo(0, y); }
 
@@ -569,19 +630,21 @@ function wire(page) {
   const on = (id, ev, fn) => { const e = $(id); if (e) e.addEventListener(ev, fn); };
   if (page === 'rounds') {
     $$('#roundsTbl tr.click').forEach((tr) => tr.addEventListener('click', () => {
-      const rows = [...filtered().rounds].reverse(); ui.rd_open = rows[Number(tr.dataset.i)].round_id; saveUi(); render(); $('#rdetail')?.scrollIntoView();
+      const rows = [...filtered().rounds].reverse(); ui.rd_open = rows[Number(tr.dataset.i)].round_id; ui.rd_tab = 'card'; saveUi(); render(); scrollTo(0, 0);
     }));
     on('#rdClose', 'click', () => { ui.rd_open = null; saveUi(); render(); });
-    $$('[data-goedit]').forEach((a) => a.addEventListener('click', () => { ui.ed_round = a.dataset.goedit; saveUi(); }));
     $$('[data-delround]').forEach((b) => b.addEventListener('click', async () => { if (!confirm('Delete this hand-entered round?')) return; await S.deleteBundle(state, b.dataset.delround); ui.rd_open = null; saveUi(); rebuild(); toast('Round deleted'); render(); }));
-    $$('[data-goreview]').forEach((a) => a.addEventListener('click', () => { ui.rv_round = a.dataset.goreview; saveUi(); }));
   }
+  // links that open a round, a stats tab or a practice tab
+  $$('[data-openround]').forEach((a) => a.addEventListener('click', () => { ui.rd_open = a.dataset.openround; ui.rd_tab = a.dataset.tab || 'card'; saveUi(); }));
+  $$('[data-stats]').forEach((a) => a.addEventListener('click', () => { ui.sx_tab = a.dataset.stats; saveUi(); }));
+  $$('[data-practice]').forEach((a) => a.addEventListener('click', () => { ui.pr_tab = a.dataset.practice; saveUi(); }));
+  on('#syncNow', 'click', async () => {
+    const m = $('#syncMsg'); m.textContent = ' Syncing…';
+    try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }
+    catch (e) { m.textContent = ' ' + e.message; }
+  });
   if (page === 'data') {
-    on('#syncNow', 'click', async () => {
-      const m = $('#syncMsg'); m.textContent = ' Syncing…';
-      try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }
-      catch (e) { m.textContent = ' ' + e.message; }
-    });
     on('#impFile', 'change', async (e) => {
       const m = $('#impMsg'); let tot = { new: 0, updated: 0, unchanged: 0, failed: 0 };
       for (const f of e.target.files) {
@@ -608,7 +671,7 @@ function wire(page) {
     });
     navigator.storage?.persisted?.().then((p) => { const e = $('#persist'); if (e) e.textContent = p ? 'Storage is marked persistent.' : 'Tip: open GolfIQ from the home-screen icon so iOS keeps the data.'; });
   }
-  if (page === 'edit') wireEdit();
+  if (page === 'corrections' || (page === 'rounds' && ui.rd_open && segVal('rd_tab', 'card') === 'edit')) wireEdit();
   if (page === 'settings') wireSettings();
   if (page === 'help') on('#shareApp', 'click', async () => {
     const url = location.href.split('#')[0], data = { title: 'GolfIQ', text: 'GolfIQ – golf stats, live distances and score keeping. Open in Safari, then Share → Add to Home Screen.', url };
@@ -731,16 +794,20 @@ async function loadSample() {
 
 // ------------------------------------------------------------------ boot
 $('#filterBtn').addEventListener('click', filterSheet);
+$('#gearBtn').innerHTML = icon('gear', 22);
+// bottom bar: Play opens the live round, Rounds goes back to the list (like tapping a tab bar twice on iOS)
+$('#nav').addEventListener('click', (e) => { const h = e.target.closest('a')?.getAttribute('href'); if (h === '#play') ui.pl_tab = 'round'; if (h === '#rounds') ui.rd_open = null; saveUi(); if (h === location.hash) render(); });
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#sheet').classList.remove('open'); });
 addEventListener('hashchange', () => { scrollTo(0, 0); render(); });
 (async () => {
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
-    get state() { return state; }, get DS() { return DS; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
+    get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
   EXTRA = registerPages(ctx);
   const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
-  Object.assign(PAGES, EXTRA.pages); Object.assign(RENDER, EXTRA.render);
+  for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
+  PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
   if (window.Plotly || document.readyState === 'complete') render(); else addEventListener('load', render, { once: true });
   window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; } };
 })();
