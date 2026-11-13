@@ -7,6 +7,10 @@ import * as CO from './coach.js';
 const { isNum, mean, median } = A;
 const M_PER_YD = 0.9144, M_PER_FT = 0.3048;
 
+// Driving distance has no published strokes value, so it is modelled from the approach tables in bench.js: a longer drive leaves a shorter
+// approach, valued as the putts saved on that approach (the same way the approach bands are). Every number here can be tuned.
+export const DRIVING = { distance_weight: 0.4, approach_yd: 150, approach_lo: 75, approach_hi: 230, min_approach_n: 8 };
+
 // ------------------------------------------------------------------ the model (plan section 4.1)
 // Chip proximity and Tee penalties have no published standard: their benchmarks are ASSUMED (see bench.js ASSUMED) and flagged in the UI.
 export const SKILLS = [
@@ -23,21 +27,20 @@ export const SKILLS = [
     { key: 'mid', title: 'Mid irons (100–150 yd)', games: ['range-greens', 'combine'], weight: 0.2 },
     { key: 'long', title: 'Long irons (150–200 yd)', games: ['range-greens', 'combine'], weight: 0.2 }] },
   { key: 'driving', title: 'Driving', subs: [
-    { key: 'distance', title: 'Distance', games: [], weight: 0.4 },
-    { key: 'penalties', title: 'Tee penalties', games: ['range-fairways', 'range-course'], weight: 0.4 },
-    { key: 'accuracy', title: 'Accuracy', games: ['range-fairways'], weight: 0.2 }] },
+    { key: 'distance', title: 'Distance', games: ['range-driver', 'range-speed'], weight: DRIVING.distance_weight },
+    { key: 'penalties', title: 'Tee penalties', games: ['range-fairways', 'range-course', 'range-driver'], weight: 0.4 },
+    { key: 'accuracy', title: 'Accuracy', games: ['range-fairways', 'range-driver'], weight: 0.2 }] },
 ];
 // every tunable number in one place
 export const RATING = { window: 20, min_rounds: 5, min_pct_n: 20, min_prox_n: 8, practice_scores: 5, practice_offset: 3, step: 3, max_hcp: 36 };
-// Driver distance (yd) at scratch / 10 / 20: Golf Monthly / Shot Scope, the same source as CO.STANDARD_SOURCE
-export const DRIVER_YD = [285, 259, 225];
+// Driver distance (yd) at scratch / 10 / 20 lives in bench.js (Golf Monthly / Shot Scope, the same source as CO.STANDARD_SOURCE)
+export const DRIVER_YD = B.DRIVER_YD;
 const BAND_YD = { wedge: [50, 100], mid: [100, 150], long: [150, 200] };
 export const ASSUMED_SUBS = ['chip', 'penalties'];            // benchmark is an assumption built from the published tables, not a published figure
 
 // ------------------------------------------------------------------ benchmarks as functions of handicap
 // Published tables stop at 25: carry the 20→25 slope on beyond it, never below zero.
 const ext = (f) => (h) => (h <= 25 ? f(h) : Math.max(0, f(25) + (f(25) - f(20)) / 5 * (h - 25)));
-const driverYd = (h) => (h <= 0 ? DRIVER_YD[0] : h <= 10 ? DRIVER_YD[0] + (DRIVER_YD[1] - DRIVER_YD[0]) * h / 10 : DRIVER_YD[1] + (DRIVER_YD[2] - DRIVER_YD[1]) * (h - 10) / 10);
 const std0 = (key) => (h) => Math.max(0, CO.standard(key, h));
 export const BENCH = {
   'putting.short': ext((h) => 100 * B.makeProb(4.5, h)),
@@ -48,7 +51,7 @@ export const BENCH = {
   'approach.wedge': ext((h) => B.proximityFt(75, h)),
   'approach.mid': ext((h) => B.proximityFt(125, h)),
   'approach.long': ext((h) => B.proximityFt(175, h)),
-  'driving.distance': driverYd,
+  'driving.distance': B.driverYd,
   'driving.accuracy': std0('fw'),
   'short.chip': ext((h) => 100 * B.chipOnGreen(h)),
   'driving.penalties': (h) => B.teePenalties(h),            // per 14 tee shots
@@ -104,7 +107,9 @@ function measures({ rounds, holes, shots }) {
   // driving
   const tee = shots.filter((s) => s.category === 'tee' && !s.excluded);
   const dr = tee.filter((s) => s.club_category === 'driver' && !s.ends_in_penalty && isNum(s.dist_m));
-  out['driving.distance'] = { n: dr.length, you: dr.length ? median(dr.map((s) => s.dist_m)) / M_PER_YD : null };
+  const apYd = ap.map((s) => s.start_to_pin / M_PER_YD).filter((x) => x >= DRIVING.approach_lo && x <= DRIVING.approach_hi);          // how far out your approaches start: what a longer drive shortens
+  out['driving.distance'] = { n: dr.length, you: dr.length ? median(dr.map((s) => s.dist_m)) / M_PER_YD : null, per_round: dr.length / Math.max(1, nR),
+    approach_yd: apYd.length >= DRIVING.min_approach_n ? median(apYd) : null };
   const fw = hs.filter((x) => x.par >= 4 && isNum(x.fw_hit)), cFw = A.contrast(hs, 'fw_hit', (x) => x.par >= 4);
   out['driving.accuracy'] = { n: fw.length, you: fw.length ? 100 * mean(fw.map((x) => x.fw_hit)) : null,
     cost: isNum(cFw.delta) && cFw.n_yes >= 15 && cFw.n_no >= 15 ? Math.max(0.1, Math.min(0.6, cFw.delta)) : 0.3, per_round: fw.length / Math.max(1, nR) };
@@ -114,6 +119,13 @@ function measures({ rounds, holes, shots }) {
 }
 const MIN = (key) => (/^approach\.(wedge|mid|long)$/.test(key) ? RATING.min_prox_n : RATING.min_pct_n);
 
+// Modelled strokes a round from driving `tgt` instead of `m.you` yd: every drive that goes further leaves an approach that much shorter, valued as the
+// putts saved (approach proximity at that distance, from the bench.js table, turned into expected putts). Not a published figure: the UI says so.
+export function distanceStrokes(m, tgt, hcp) {
+  if (!isNum(m.you) || !isNum(tgt)) return 0;
+  const h = isNum(hcp) ? hcp : 10, gain = Math.max(0, tgt - m.you), from = m.approach_yd ?? DRIVING.approach_yd, putts = (yd) => expPutts(Math.max(3, B.proximityFt(yd, h)), h);
+  return (m.per_round || 0) * Math.max(0, putts(from) - putts(Math.max(DRIVING.approach_lo, from - gain)));
+}
 // strokes per round gained by moving from `you` to `tgt` (plan 4.2). Re-uses the levelUp() logic for GIR, up-and-down, three-putts, fairways.
 function strokesFor(key, m, tgt, hcp) {
   if (!isNum(m.you) || !isNum(tgt)) return 0;
@@ -127,7 +139,8 @@ function strokesFor(key, m, tgt, hcp) {
       return m.per_round * Math.max(0, expPutts(Math.max(3, m.you), h) - expPutts(Math.max(3, tgt), h)); }
     case 'driving.accuracy': return Math.max(0, tgt - m.you) / 100 * m.per_round * m.cost;
     case 'driving.penalties': return Math.max(0, m.you - tgt);
-    default: return 0;                                                  // distance is shown for context only
+    case 'driving.distance': return distanceStrokes(m, tgt, hcp);
+    default: return 0;
   }
 }
 
@@ -175,7 +188,7 @@ export function skillRatings({ rounds = [], holes = [], shots = [], results = []
       const cv = (v) => (prox ? dispFt(v) : dist ? dispYd(v) : v);
       const u = prox ? unit.ft : dist ? unit.dist : s.key === 'driving.penalties' ? '/rd' : '%';
       return { key: s.sub, full_key: s.key, title: s.title, you: s.enoughData ? cv(m.you) : null, std: cv(tv), assumed: s.assumed, unit: u, higher: s.higher, hcp: s.hcp, practice_hcp: s.practice_hcp,
-        source: s.source, target_value: cv(tv), strokes, n: m.n || 0, weight: s.weight, games: gm, context_only: dist,
+        source: s.source, target_value: cv(tv), strokes, n: m.n || 0, weight: s.weight, games: gm,
         how: HOW[s.key], enough: s.enoughData };
     });
     return { key: sk.key, title: sk.title, hcp, practice_hcp, target, strokes: out.reduce((t, s) => t + s.strokes, 0), focus: false, rated: hcp !== null, subs: out };
@@ -198,7 +211,7 @@ const HOW = {
   'approach.wedge': 'Median finish from 50–100 yd. Strokes are putts saved, and overlap a little with greens hit.',
   'approach.mid': 'Median finish from 100–150 yd. Strokes are putts saved, and overlap a little with greens hit.',
   'approach.long': 'Median finish from 150–200 yd. Strokes are putts saved, and overlap a little with greens hit.',
-  'driving.distance': 'Median driver distance, shown for context. No game trains it and it carries no strokes value.',
+  'driving.distance': 'Median driver distance, trained by the Driver test and Max out. The shots a round are a model, not a published figure: a longer drive leaves a shorter approach, and the putts saved are worked out from the approach tables.',
   'driving.penalties': 'Tee shots that end in a penalty, per 14 tee shots. Assumed standard: no published figure by handicap.',
   'driving.accuracy': 'Fairways hit. This barely changes with handicap in the published data, so treat it as a small lever.',
 };

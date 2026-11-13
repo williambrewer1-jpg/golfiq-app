@@ -45,6 +45,12 @@ export const ASSUMED = { chip_leave_ft: 6, zone_power: 3, penalties_per14: [0.25
 export const chipOnGreen = (h) => Math.min(0.98, upDown(h) / makeProb(ASSUMED.chip_leave_ft, h));
 export const teePenalties = (h) => { const [a, b, c] = ASSUMED.penalties_per14; return Math.max(0, h <= 10 ? a + (b - a) * Math.max(0, h) / 10 : b + (c - b) * (h - 10) / 10); };
 export const fairwaysPct = (h) => { const [a, b, c] = ASSUMED.fairways_pct, x = Math.max(0, Math.min(36, h)); return x <= 10 ? a + (b - a) * x / 10 : b + (c - b) * (x - 10) / 10; };
+// ---- Driving. Driver distance (yd) at scratch / 10 / 20 handicap: Golf Monthly / Shot Scope, the same source as coach.js STANDARD_SOURCE.
+export const DRIVER_YD = [285, 259, 225];
+export const driverYd = (h) => (h <= 0 ? DRIVER_YD[0] : h <= 10 ? DRIVER_YD[0] + (DRIVER_YD[1] - DRIVER_YD[0]) * h / 10 : DRIVER_YD[1] + (DRIVER_YD[2] - DRIVER_YD[1]) * (h - 10) / 10);
+// The Driver test (range-driver): ten drivers between two markers. Each ball scores its "effective distance": the full distance in the fairway,
+// 20 yd less for a playable miss (rule of thumb quoted by Golf Digest), half for a wide ball. Every number is a named constant so it can be tuned.
+export const DRIVER_TEST = { balls: 10, speed_balls: 5, corridor_yd: 40, miss_yd: 20, wide_factor: 0.5, step: 10, adj_max: 15 };
 // share of balls finishing within R ft when the average miss is mu ft (assumes a typical round spread around the target)
 export const within = (rFt, muFt) => 1 - Math.exp(-Math.PI * rFt * rFt / (4 * muFt * muFt));
 
@@ -77,9 +83,12 @@ const EXPECTED = {
   combine: (h, unitM) => combineExpected(h, unitM),
   'chip-zone': (h) => 10 * Math.pow(chipOnGreen(Math.min(h, 25)), ASSUMED.zone_power),
   'range-fairways': (h) => 14 * fairwaysPct(h) / 100,
+  // average effective distance in the golfer's unit: distance by handicap less the 20 yd lost on the share of fairways missed (no wide balls assumed)
+  'range-driver': (h, unitM = 0.9144) => (driverYd(h) - DRIVER_TEST.miss_yd * (1 - fairwaysPct(h) / 100)) * 0.9144 / unitM,
 };
 export const NO_LEVEL = {
   'range-round': 'Use Range round instead – it scores a full course and gives a handicap-style level.',
+  'range-speed': 'Max out is measured against your own history only: there is no published longest-ball standard by handicap.',
 };
 export const NOTES = {
   'putt-par18': 'Model: make % by distance per handicap, and the second putt from the average leave (4.6 ft scratch to 7.8 ft at 25 from 30 ft).',
@@ -91,6 +100,7 @@ export const NOTES = {
   'range-wedge': 'Inside 5 yd; uses on-course proximity by handicap from 50–100 yd.',
   combine: 'Expected points for each target from on-course proximity by handicap.',
   'chip-zone': 'Assumed level (no published data): the share of chips finishing on the green is worked out from up-and-down % and make %, then cubed because the towel is a much smaller target.',
+  'range-driver': 'Assumed level (no published data for wide balls): driver distance by handicap (285 yd scratch, 259 at 10, 225 at 20, Shot Scope / Golf Monthly) less 20 yd for each fairway missed (a rule of thumb from Golf Digest), using fairways hit of 50 / 48 / 45%. It assumes no wide balls, so a wide ball costs you more than the level allows for. Range balls fly shorter than course balls: set the range ball adjustment in Settings.',
   'range-fairways': 'Fairways hit barely changes with handicap in Shot Scope data (50% scratch, 48% at 10, 45% at 20), so one fairway is worth a lot of handicap and this level is a rough guide.',
 };
 export const hasLevel = (id) => !!EXPECTED[id];

@@ -303,12 +303,16 @@ export const DEFAULT_GAMES = [
   { id: 'chip-par18', cat: 'Chipping', name: 'Par 18 chipping', better: 'lower', unit: 'strokes', how: 'Nine chip-and-putt holes, par 2 each. Total strokes.' },
   { id: 'chip-zone', cat: 'Chipping', name: 'Landing zone', better: 'higher', max: 10, unit: 'hits / 10', how: 'Towel as landing spot. Ten chips with one club; count balls landing on the towel.' },
   { id: 'range-fairways', cat: 'Range', name: 'Imaginary fairways', better: 'higher', max: 14, unit: 'fairways / 14', how: 'Pick two targets ~30 yd apart as a fairway. 14 tee shots (your normal tee clubs), full routine. Count fairways hit.' },
+  { id: 'range-driver', cat: 'Range', name: 'Driver test', better: 'higher', unit: 'yd', distance: true, how: 'Ten drivers with a full routine, aimed between two markers or flags about 40 yd apart. For each ball, record how far it went and whether it finished in the fairway, missed it (rough or first cut) or went wide. A fairway ball counts its full distance, a miss 20 yd less, a wide ball half. Your score is the average.' },
+  { id: 'range-speed', cat: 'Range', name: 'Max out', better: 'higher', unit: 'yd', distance: true, how: 'Five drivers swung for maximum distance; accuracy does not matter. Your score is the longest ball. Measured against your own history only.' },
   { id: 'range-greens', cat: 'Range', name: '9-shot greens', better: 'higher', max: 9, unit: 'greens / 9', how: 'Nine approaches, new target and club every ball. A hit = inside ~10% of the distance.' },
   { id: 'range-wedge', cat: 'Range', name: 'Wedge distance ladder', better: 'higher', max: 10, unit: 'inside 5 yd / 10', how: 'Ten wedge shots to called distances (e.g. 40–100). Count balls finishing within 5 yd.' },
   { id: 'range-round', cat: 'Range', name: 'Play the course (simple)', better: 'higher', max: 18, unit: 'good shots / 18', how: 'Play your home course on the range: tee shot then approach for 9 holes. Count shots that would have worked. (Practice → Range round does this properly.)' },
   { id: 'combine', cat: 'Range', name: 'Monthly combine', better: 'higher', max: 100, unit: 'points / 100', how: 'Practice → Combine: 18 shots to six targets, scored by how close they finish.', auto: true },
   { id: 'range-course', cat: 'Range', name: 'Range round', better: 'lower', unit: 'strokes', how: 'Practice → Range round: play a real course shot by shot on the range.', auto: true },
 ];
+// Distance games (Driver test, Max out) are scored in the golfer's own unit, so their unit label follows the Settings choice.
+export const unitOf = (g, unit) => (g?.distance ? unit : g?.unit);
 export function gameStats(games, results) {
   return games.map((g) => {
     const r = results.filter((x) => x.game === g.id && isNum(x.score)).sort((a, b) => a.date.localeCompare(b.date));

@@ -40,8 +40,10 @@ export function registerProgress(c) {
     const short = CO.roadmap(CO.SHORT_GAMES, res, g, unitM(), hcp), long = CO.roadmap(CO.LONG_GAMES, res, g, unitM(), hcp);
     const st = CO.streaks(CO.practiceDates(J()));
     const goals = CO.weeklyGoal({ findings: fs, roadmaps: [...short, ...long], results: res, games: g, assigned: CO.assignments(J().notes) });
-    const bd = [...CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] }), ...GM.tierBadges(g, res, unitM()).filter((b) => b.earned)];
-    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd } };
+    // Tier badges are listed only once earned (there are four per game), but the "X of Y" count has to include the ones still to win.
+    const base = CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] }), tiers = GM.tierBadges(g, res, unitM());
+    const bd = [...base, ...tiers.filter((b) => b.earned)], bd_total = base.length + tiers.length;
+    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total } };
     return memo.v;
   }
 
@@ -83,10 +85,10 @@ export function registerProgress(c) {
     return `<button class="btn sec gbtn" ${tab ? `data-prtab="${tab}"` : `data-record="${esc(g.id)}"`}>${label}</button>`;
   };
   function subRow(s, skill) {
-    const has = A.isNum(s.you), tv = s.target_value, ahead = has && s.strokes < 0.05 && !s.context_only;
+    const has = A.isNum(s.you), tv = s.target_value, ahead = has && s.strokes < 0.05;
     const w = has && A.isNum(tv) && tv > 0 ? Math.max(4, Math.min(100, (s.higher ? s.you / tv : tv / Math.max(s.you, 1e-9)) * 100)) : has ? 100 : 0;
     const head = s.hcp !== null ? `${hc(s.hcp)} handicap${s.source === 'practice' ? ' <small class="muted">from practice</small>' : ''}` : '<small class="muted">not enough data yet</small>';
-    const gain = s.context_only ? '<span class="muted">for context</span>' : !has ? '' : ahead ? '<span class="good">already there ✓</span>' : `<b class="good">≈ ${n1(s.strokes)}</b> shots a round`;
+    const gain = !has ? '' : ahead ? '<span class="good">already there ✓</span>' : `<b class="good">≈ ${n1(s.strokes)}</b> shots a round`;
     return `<div class="lvl ${ahead ? 'ahead' : ''}"><div class="lvl-h"><b>${esc(s.title)}</b><span>${head}</span></div>
       ${has ? `<div class="bar"><i style="width:${Math.round(w)}%"></i></div>
       <p class="small">You <b>${val(s.you, s.unit)}</b>${A.isNum(tv) ? ` · a ${skill.target} handicapper${s.assumed ? ' <small class="muted">(assumed)</small>' : ''} <b>${val(tv, s.unit)}</b>` : ''} · ${gain}</p>`
@@ -159,7 +161,7 @@ export function registerProgress(c) {
   }
   function badgesCard(v) {
     const got = v.bd.filter((b) => b.earned).length;
-    return `<div class="card"><h2>Badges <span class="small muted">${got} of ${v.bd.length}</span></h2><div class="badges">${v.bd.map((b) => `<div class="bdg ${b.earned ? 'on' : ''}"><i>${b.earned ? '★' : '☆'}</i><b>${esc(b.name)}</b><span>${esc(b.desc)}</span><small>${b.earned ? (b.earned === 'yes' ? 'earned' : esc(b.earned)) : esc(b.progress || '')}</small></div>`).join('')}</div></div>`;
+    return `<div class="card"><h2>Badges <span class="small muted">${got} of ${v.bd_total}</span></h2><p class="small muted" style="margin:0 0 8px">Game tier badges (up to four a game) appear here once you earn them.</p><div class="badges">${v.bd.map((b) => `<div class="bdg ${b.earned ? 'on' : ''}"><i>${b.earned ? '★' : '☆'}</i><b>${esc(b.name)}</b><span>${esc(b.desc)}</span><small>${b.earned ? (b.earned === 'yes' ? 'earned' : esc(b.earned)) : esc(b.progress || '')}</small></div>`).join('')}</div></div>`;
   }
 
   function page() {
