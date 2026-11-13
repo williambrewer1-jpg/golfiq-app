@@ -23,7 +23,11 @@ export function theilSen(xs, ys) {
 // level drifting with your recent trend (halved, and capped – trends rarely continue at full speed), with your
 // round-to-round spread. The WHS index (best 8 of the last 20) is worked out at the end of each simulated season.
 // "If you fix your top priorities" lowers the average differential by half the strokes those priorities cost, phased in.
-export function forecast(rounds, { months = 6, savings = 0, now = Date.now(), sims = 500 } = {}) {
+// "Potential" is the headline: what following your plan can do. It assumes you win back the strokes your top three
+// priorities cost (at least 1.5 a round – a typical gain from structured practice – and at most 6), phased in over
+// four months, keeps an improving trend at full strength and stops a worsening one.
+export const POTENTIAL_MIN = 1.5, POTENTIAL_MAX = 6;
+export function forecast(rounds, { months = 6, savings = 0, potential = 0, now = Date.now(), sims = 500 } = {}) {
   const d = rounds.filter((r) => isNum(r.differential_for_index) && r.date).map((r) => ({ t: dt(r.date), v: r.differential_for_index })).sort((a, b) => a.t - b.t);
   if (d.length < 8) return { ok: false, need: 8 - d.length };
   const win = d.filter((x) => x.t >= now - 365 * DAY).slice(-40), use = win.length >= 8 ? win : d.slice(-20);
@@ -33,11 +37,11 @@ export function forecast(rounds, { months = 6, savings = 0, now = Date.now(), si
   const sd = Math.max(2, std(ys.map((y, i) => y - (ts.icpt + ts.slope * xs[i]))) || 2);
   const recent = d.filter((x) => x.t >= now - 182 * DAY).length, perMonth = Math.max(1, recent / 6), n = Math.max(1, Math.round(perMonth * months));
   const horizon = months * 30.4, hist = d.map((x) => x.v), current = A.whsIndex(hist.slice(-20));
-  const run = (save) => {
+  const run = (save, trend = slope, rampDays = horizon) => {
     const r = rng(1234 + Math.round(save * 100)), out = [], path = Array.from({ length: months + 1 }, () => []);
     for (let s = 0; s < sims; s++) {
       const fut = [];
-      for (let k = 1; k <= n; k++) { const t = horizon * k / n, mu = level + slope * t - save * Math.min(1, t / horizon); fut.push({ t, v: Math.round((mu + sd * gauss(r)) * 10) / 10 }); }
+      for (let k = 1; k <= n; k++) { const t = horizon * k / n, mu = level + trend * t - save * Math.min(1, t / rampDays); fut.push({ t, v: Math.round((mu + sd * gauss(r)) * 10) / 10 }); }
       for (let m = 0; m <= months; m++) path[m].push(A.whsIndex([...hist, ...fut.filter((x) => x.t <= m * 30.4 + 1e-6).map((x) => x.v)].slice(-20)));
       out.push(A.whsIndex([...hist, ...fut.map((x) => x.v)].slice(-20)));
     }
@@ -45,7 +49,10 @@ export function forecast(rounds, { months = 6, savings = 0, now = Date.now(), si
     return { likely: q(out, 0.5), low: q(out, 0.1), high: q(out, 0.9), path: path.map((p, i) => ({ month: i, likely: q(p, 0.5), low: q(p, 0.1), high: q(p, 0.9) })) };
   };
   const base = run(0), fix = savings > 0.2 ? run(savings * 0.5) : null;
-  return { ok: true, current, ...base, optimistic: fix?.likely ?? null, optimistic_path: fix?.path || null, rounds_ahead: n, per_month: perMonth, trend_per_month: slope * 30.4, sd, level, months };
+  const potSave = Math.max(POTENTIAL_MIN, Math.min(POTENTIAL_MAX, potential || 0)), potTrend = Math.max(-1 / 30, Math.min(0, ts.slope));
+  const pot = run(potSave, potTrend, horizon * 2 / 3);
+  return { ok: true, current, ...base, optimistic: fix?.likely ?? null, optimistic_path: fix?.path || null,
+    potential: pot.likely, potential_best: pot.low, potential_path: pot.path, potential_save: potSave, rounds_ahead: n, per_month: perMonth, trend_per_month: slope * 30.4, sd, level, months };
 }
 
 // ------------------------------------------------------------------ 2. milestones

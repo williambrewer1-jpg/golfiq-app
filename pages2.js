@@ -5,6 +5,7 @@ import * as B from './bench.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
 import * as AI from './aicoach.js';
+import * as WP from './wallpaper.js';
 
 export function registerPages(c) {
   const { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, n0, n1, n2, p0, COLORS } = c;
@@ -47,9 +48,36 @@ export function registerPages(c) {
     return `<div class="card" id="cdDistances"><h2>Your club distances</h2>
       <p class="small">Every club uses its GPS median by default. Type your own total distance (${U}, carry + roll) and choose <b>Use mine</b> to override it – for a new club, a fitting, or when GPS is off. A club with too few GPS shots uses your number automatically.</p>
       <form id="cdDistForm">${rows}<p><button class="btn">Save distances</button></p></form>
-      <p class="small muted">Part-swing wedges come from <a href="#practice" data-practice="wedges">Practice → Wedges</a> and are offered automatically on the Play map and here.</p></div>`;
+      <p class="small muted">Part-swing wedges come from <a href="#practice" data-practice="wedges">Practice → Wedges</a> and are offered automatically on the Play map and here.</p></div>
+      ${wallpaperCard()}`;
+  }
+  // Lock-screen yardages: an image of your current distances to set as your iPhone lock screen
+  function wallpaperData() {
+    const clubs = F.recommendClubs(c.DS, 0, 1).filter((r) => r.kind === 'gps').sort((a, b) => b.median_m - a.median_m).slice(0, 14)
+      .map((r) => ({ name: r.club, dist: c.cv(r.median_m), mine: r.source === 'mine' }));
+    const W = J().wedge, cells = F.wedgeMatrix(W.entries || []);
+    const ids = [...new Set([...cells.values()].map((x) => x.club_id))];
+    const rows = ids.map((id) => ({ name: clubName(id), vals: Object.fromEntries(W.lengths.map((l) => [l, cells.get(`${id}|${l}`) ? c.cv(cells.get(`${id}|${l}`).carry_m) : null])) }))
+      .sort((a, b) => (Math.max(...Object.values(b.vals).filter(Boolean), 0)) - (Math.max(...Object.values(a.vals).filter(Boolean), 0))).slice(0, 4);
+    return { clubs, wedges: segVal('wp_wedges', 'on') === 'on' && rows.length ? { lengths: W.lengths, rows } : null };
+  }
+  function wallpaperCard() {
+    return `<div class="card" id="wpCard"><h2>Lock-screen yardages</h2>
+      <p class="small">Your current distances as an iPhone lock screen, so a glance at your phone gives you the number. Uses the distances above (GPS or yours) and your wedge matrix.</p>
+      ${seg('wp_theme', [['green', 'Augusta green'], ['night', 'Night'], ['cream', 'Cream']], 'green')}
+      ${seg('wp_wedges', [['on', 'With wedge matrix'], ['off', 'Clubs only']], 'on')}
+      <div class="wpprev"><canvas id="wpCanvas" aria-label="Lock screen preview"></canvas><div class="wpclock"><span>Saturday 14 November</span><b>9:41</b></div></div>
+      <p><button class="btn" id="wpSave">Save to Photos</button> <span id="wpMsg" class="small"></span></p>
+      ${note('Tap Save to Photos → Save Image. Then open the photo, tap Share → Use as Wallpaper (or long-press the lock screen → + → Photos). The top of the image is left clear for the clock. Make a new one whenever your numbers change.')}</div>`;
+  }
+  function drawWallpaper() {
+    const cv = $('#wpCanvas'); if (!cv) return null;
+    const { w, h } = WP.phoneSize(), d = wallpaperData();
+    return WP.draw(cv, { w, h, ...d, unit: c.UNIT, date: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }), theme: segVal('wp_theme', 'green') });
   }
   function wireCaddie() {
+    if ($('#wpCanvas')) { try { drawWallpaper(); } catch (e) { $('#wpMsg').textContent = e.message; } }
+    $('#wpSave')?.addEventListener('click', async () => { const cv = drawWallpaper(); try { const r = await WP.save(cv, `yardages-${today()}.png`); $('#wpMsg').textContent = r === 'shared' ? '' : ' Saved to Downloads'; } catch (e) { if (e.name !== 'AbortError') $('#wpMsg').textContent = ` ${e.message}`; } });
     const set = (v) => { c.ui.cd_dist = Math.max(1, Number(v) || 150); c.saveUi(); c.rerender(); };
     $('#cdDist')?.addEventListener('change', (e) => set(e.target.value));
     $('#cdRange')?.addEventListener('change', (e) => set(e.target.value));
