@@ -460,7 +460,7 @@ function coachingPriorities() {
   const ca = A.clubAttention(ds, 3, UNIT), all18 = DS.rounds.filter((r) => r.format === '18');
   const sust = ['differential', 'stableford_round', 'gir_pct', 'putts_round', 'penalties'].map((m) => { const c = A.compareWindows(all18.map((r) => r[m]), A.METRICS[m][1]); return { m: A.METRICS[m][0], ...Object.fromEntries(c.map((x) => [`w${x.window}`, x.verdict])) }; });
   const vcol = (v) => `<span class="${v === 'improving' ? 'good' : v === 'worse' ? 'bad' : 'muted'}">${esc(v)}</span>`;
-  return head + `<div class="card"><h2>Where you're losing the most strokes</h2>${table(fs.map((f, i) => ({ i: i + 1, t: f.title, s: f.strokes_per_round, now: f.current, tgt: f.target, u: f.unit, pat: f.consistency.split(' - ')[0], c: f.confidence })),
+  return head + `${PROG ? PROG.levelUpCard(undefined, { link: true }) : ''}<div class="card"><h2>Quick wins: play your best golf more often</h2>${table(fs.map((f, i) => ({ i: i + 1, t: f.title, s: f.strokes_per_round, now: f.current, tgt: f.target, u: f.unit, pat: f.consistency.split(' - ')[0], c: f.confidence })),
     [['i', '#'], ['t', 'Area'], ['s', 'Strokes/rd', n2], ['now', 'Now', (v, r) => fmt(v, 1, r.u === '%' ? '%' : '')], ['tgt', 'Your best ¼', (v, r) => fmt(v, 1, r.u === '%' ? '%' : '')], ['pat', 'Pattern'], ['c', 'Confidence']])}
   ${note('"Strokes/rd" = what you\'d save by playing at the level you already reach in your best 25% of rounds – your data, not a generic amateur norm. Areas overlap, so use the order rather than the sum.')}</div>
   ${fs.map((f, i) => `<div class="card finding"><h3>${i + 1}. ${esc(f.title)} — ~${fmt(f.strokes_per_round)} strokes/round</h3><b class="small">Evidence</b><ul>${f.evidence.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
