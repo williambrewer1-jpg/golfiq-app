@@ -68,7 +68,7 @@ export function registerProgress(c) {
   // ---------------------------------------------------------------- sections
   function forecastCard(v) {
     const fc = v.fc;
-    if (!fc.ok) return `<div class="card prog-hero"><h2>Your potential in 6 months</h2><p class="muted">Play ${fc.need} more round${fc.need === 1 ? '' : 's'} with a score differential (18 holes, or 9 holes once you have an index) and GolfIQ will show where your handicap can get to.</p></div>`;
+    if (!fc.ok) return `<div class="card prog-hero"><h2>Your potential in 6 months</h2><p class="muted">Play ${fc.need} more round${fc.need === 1 ? '' : 's'} with a score differential (18 holes, or 9 holes once you have an index) and BreakingPar will show where your handicap can get to.</p></div>`;
     const hist = c.DS.rounds.filter((r) => A.isNum(r.index_after) && r.date && Date.parse(r.date) > Date.now() - 365 * 864e5);
     const d0 = new Date(), dAt = (m) => new Date(d0.getTime() + m * 30.4 * 864e5).toISOString().slice(0, 10);
     const tr = [

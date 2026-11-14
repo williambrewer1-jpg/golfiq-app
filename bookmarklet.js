@@ -1,17 +1,17 @@
-// GolfIQ Garmin export bookmarklet — readable source.
+// BreakingPar Garmin export bookmarklet — readable source.
 // WHAT IT DOES: runs only on connect.garmin.com while you are signed in. It reads your golf
 // scorecards, shot data and club list from the same endpoints the Garmin Connect website uses
 // (same-origin requests with your existing session + the page's CSRF token), packs them into
 // one JSON file and offers it to save. It sends nothing anywhere else, stores nothing, and never
-// sees your password. You import the saved file into the GolfIQ app.
+// sees your password. You import the saved file into the BreakingPar app.
 export const BOOKMARKLET_SRC = String.raw`(async function(){
 var H=location.hostname;
-if(H.indexOf('connect.garmin.com')<0){alert('GolfIQ: open connect.garmin.com (signed in), then tap this bookmark again.');return;}
+if(H.indexOf('connect.garmin.com')<0){alert('BreakingPar: open connect.garmin.com (signed in), then tap this bookmark again.');return;}
 var box=document.createElement('div');
 box.style.cssText='position:fixed;z-index:2147483647;left:8px;right:8px;top:8px;padding:14px;background:#1b5e20;color:#fff;font:15px -apple-system,system-ui,sans-serif;border-radius:12px;box-shadow:0 6px 24px rgba(0,0,0,.45);white-space:pre-wrap;max-height:70vh;overflow:auto';
 document.body.appendChild(box);
-function say(t){box.textContent='GolfIQ export\n'+t;}
-var lim=prompt('GolfIQ: export how many of your most recent rounds? Leave blank for ALL rounds.','');
+function say(t){box.textContent='BreakingPar export\n'+t;}
+var lim=prompt('BreakingPar: export how many of your most recent rounds? Leave blank for ALL rounds.','');
 if(lim===null){box.remove();return;}
 lim=parseInt(lim,10)||0;
 var csrf=(document.querySelector('meta[name="csrf-token"]')||{}).content||null;
@@ -50,9 +50,9 @@ try{
  }
  var out={golfiq_export:1,source:'garmin_connect_bookmarklet',endpoint:base,exported_at:new Date().toISOString(),
   clubs:{golfiq_bundle_version:1,kind:'clubs',clubs:clubs,club_types:types},rounds:rounds,failures:fails};
- var name='golfiq-garmin-'+new Date().toISOString().slice(0,10)+'.json';
+ var name='breakingpar-garmin-'+new Date().toISOString().slice(0,10)+'.json';
  var file=new File([JSON.stringify(out)],name,{type:'application/json'});
- say(rounds.length+' rounds ready'+(fails.length?' ('+fails.length+' problems: '+fails.slice(0,3).join('; ')+')':'')+'.\nTap Save, choose "Save to Files", then import the file in GolfIQ.\n');
+ say(rounds.length+' rounds ready'+(fails.length?' ('+fails.length+' problems: '+fails.slice(0,3).join('; ')+')':'')+'.\nTap Save, choose "Save to Files", then import the file in BreakingPar.\n');
  var btn=document.createElement('button');btn.textContent='Save file';
  btn.style.cssText='margin-top:10px;padding:10px 18px;font:600 16px -apple-system,sans-serif;border:0;border-radius:10px;background:#fff;color:#1b5e20';
  btn.onclick=async function(){

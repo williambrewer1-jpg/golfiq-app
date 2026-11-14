@@ -1,4 +1,4 @@
-// GolfIQ pages: caddie, post-round review, handicap, conditions, before/after, playbook, personal bests,
+// BreakingPar pages: caddie, post-round review, handicap, conditions, before/after, playbook, personal bests,
 // practice (games, log, wedge matrix), coach hub (priorities, notes from Claude, swing thoughts), share card, course maps.
 import * as F from './features.js';
 import * as B from './bench.js';
@@ -168,17 +168,17 @@ export function registerPages(c) {
     const cur = withD[withD.length - 1].index_after, official = [...(c.state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date));
     const off = official.length ? official[official.length - 1] : null, last20 = withD.slice(-20), counting = A.whsCounting(last20.map((x) => x.differential_for_index));
     const pts = withD.filter((x) => A.isNum(x.index_after));
-    const tr = [{ x: pts.map((x) => x.date), y: pts.map((x) => x.index_after), mode: 'lines+markers', name: 'GolfIQ index', line: { color: c.P.accent, width: 2.5 }, marker: { size: 5 } },
+    const tr = [{ x: pts.map((x) => x.date), y: pts.map((x) => x.index_after), mode: 'lines+markers', name: 'BreakingPar index', line: { color: c.P.accent, width: 2.5 }, marker: { size: 5 } },
       { x: withD.map((x) => x.date), y: withD.map((x) => x.differential_for_index), mode: 'markers', name: 'Round differential', marker: { color: c.P.muted, size: 6 } }];
     if (official.length) tr.push({ x: official.map((h) => h.date), y: official.map((h) => h.handicap_index), mode: 'lines+markers', name: 'Official (entered)', line: { color: c.P.gold, dash: 'dot', shape: 'hv' } });
-    const est = r.filter((x) => String(x.hi_source || '').startsWith('GolfIQ')).length, prov = r.filter((x) => String(x.differential_source || '').startsWith('provisional')).length;
-    return `<div class="kpis">${kpi('GolfIQ index', cur)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : 'add in Settings'}</div></div>
-      ${kpi('Differentials used', withD.length, null, true, 0)}${A.isNum(cur) && off ? kpi('GolfIQ − official', cur - off.handicap_index, null, false, 1) : ''}</div>
+    const est = r.filter((x) => String(x.hi_source || '').startsWith('BreakingPar')).length, prov = r.filter((x) => String(x.differential_source || '').startsWith('provisional')).length;
+    return `<div class="kpis">${kpi('BreakingPar index', cur)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : 'add in Settings'}</div></div>
+      ${kpi('Differentials used', withD.length, null, true, 0)}${A.isNum(cur) && off ? kpi('BreakingPar − official', cur - off.handicap_index, null, false, 1) : ''}</div>
       ${withD.length < 3 ? '<div class="warn">An index needs at least 3 scored rounds.</div>' : ''}
       <div class="card"><h2>Index over time</h2>${plot(tr, { height: 300, yaxis: { title: { text: 'Index / differential' } } })}
       ${note('WHS method: average of your lowest 8 of the last 20 score differentials (fewer rounds use the WHS small-sample table). 9-hole rounds count the WHS way: the nine you played plus your expected score for the other nine, based on your index at the time (0.52 × index + 1.2, the published approximation of the WHS table). Not applied: playing-conditions adjustment, soft/hard caps and exceptional-score reductions – so expect small differences from your official index.')}</div>
       <div class="card"><h2>Last ${last20.length} differentials</h2>${table([...last20].map((x, i) => ({ ...x, counts: counting.has(i) })).reverse(), [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['differential_for_index', 'Diff', n1], ['counts', 'Counts', (v) => (v ? '●' : '')], ['index_after', 'Index after', n1], ['hi_source', 'Handicap used', (v) => `<span class="small">${esc(v || 'none')}</span>`]])}
-      ${note(`● = one of the lowest that make up the index. ${est} round(s) had no official index entered, so GolfIQ used its own estimate from your earlier rounds to reconstruct Stableford.${prov ? ` ${prov} early round(s) use a provisional differential (par+5 cap) because no handicap or stroke index was available yet.` : ''}`)}</div>`;
+      ${note(`● = one of the lowest that make up the index. ${est} round(s) had no official index entered, so BreakingPar used its own estimate from your earlier rounds to reconstruct Stableford.${prov ? ` ${prov} early round(s) use a provisional differential (par+5 cap) because no handicap or stroke index was available yet.` : ''}`)}</div>`;
   }
 
   // ================================================================ 4. Conditions (weather)
@@ -352,8 +352,8 @@ export function registerPages(c) {
     const n = hh.length, per = Math.ceil(n / 2) || 1, bw = Math.min(100, 936 / per - 8);
     hh.forEach((h, i) => { const x = 72 + (i % per) * (bw + 8), y = 1030 + Math.floor(i / per) * 128; g.fillStyle = A.isNum(h.to_par) ? col(h.to_par) : '#555'; g.beginPath(); g.roundRect(x, y, bw, 92, 14); g.fill();
       g.fillStyle = 'rgba(255,255,255,.75)'; font(20, 600); g.fillText(String(h.hole), x + 10, y + 26); g.fillStyle = '#fff'; font(42, 700); const t = String(h.strokes); g.fillText(t, x + (bw - g.measureText(t).width) / 2, y + 72); });
-    g.fillStyle = 'rgba(255,255,255,.5)'; font(26, 600); g.fillText('GolfIQ', 72, 1310); font(24, 500); let lx = 1008; for (const [lab, tp] of [['worse', 3], ['double', 2], ['bogey', 1], ['par', 0], ['birdie', -1]]) { g.fillStyle = 'rgba(255,255,255,.6)'; const wd = g.measureText(lab).width; lx -= wd; g.fillText(lab, lx, 1310); lx -= 30; g.fillStyle = col(tp); g.beginPath(); g.roundRect(lx, 1291, 20, 20, 5); g.fill(); lx -= 22; }
-    const blob = await new Promise((res) => cv.toBlob(res, 'image/png')), file = new File([blob], `golfiq-${r.date}.png`, { type: 'image/png' });
+    g.fillStyle = 'rgba(255,255,255,.5)'; font(26, 600); g.fillText('BreakingPar', 72, 1310); font(24, 500); let lx = 1008; for (const [lab, tp] of [['worse', 3], ['double', 2], ['bogey', 1], ['par', 0], ['birdie', -1]]) { g.fillStyle = 'rgba(255,255,255,.6)'; const wd = g.measureText(lab).width; lx -= wd; g.fillText(lab, lx, 1310); lx -= 30; g.fillStyle = col(tp); g.beginPath(); g.roundRect(lx, 1291, 20, 20, 5); g.fill(); lx -= 22; }
+    const blob = await new Promise((res) => cv.toBlob(res, 'image/png')), file = new File([blob], `breakingpar-${r.date}.png`, { type: 'image/png' });
     if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: r.label }); return; } catch (e) { if (e.name === 'AbortError') return; } }
     const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
   }
@@ -461,7 +461,7 @@ export function registerPages(c) {
     const ds = c.DS, U = c.UNIT, r18 = ds.rounds.filter((r) => r.format === '18'), last = r18.slice(-10), k = Object.fromEntries(A.kpiTable(r18, 5).map((x) => [x.metric, x]));
     const f1 = (v, d = 1) => (A.isNum(v) ? v.toFixed(d) : '–'), L = [];
     const idx = r18.length ? r18[r18.length - 1] : null;
-    L.push(`# My golf data (from GolfIQ, ${today()})`, '', `Rounds stored: ${ds.rounds.length} (${r18.length} full 18-hole). Handicap index used: ${f1(idx?.hi)} (${idx?.hi_source || 'none'}); GolfIQ-calculated index: ${f1(idx?.index_after)}.`, '');
+    L.push(`# My golf data (from BreakingPar, ${today()})`, '', `Rounds stored: ${ds.rounds.length} (${r18.length} full 18-hole). Handicap index used: ${f1(idx?.hi)} (${idx?.hi_source || 'none'}); BreakingPar-calculated index: ${f1(idx?.index_after)}.`, '');
     L.push('## Last 5 rounds vs earlier rounds', ...['gross', 'stableford_round', 'differential', 'gir_pct', 'fw_pct', 'putts_round', 'three_putt_pct', 'penalties'].map((m) => `- ${k[m].label}: ${f1(k[m].recent)} (earlier ${f1(k[m].baseline)})`), '');
     L.push('## Recent rounds', ...last.reverse().map((r) => `- ${r.date} ${r.course_name}: ${r.gross} (${r.to_par > 0 ? '+' : ''}${r.to_par}), ${f1(r.stableford_round, 0)} pts, GIR ${f1(r.gir_pct, 0)}%, FW ${f1(r.fw_pct, 0)}%, ${f1(r.putts_round, 0)} putts, ${f1(r.penalties, 0)} pen`), '');
     const fs = r18.length ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), U) : [];
@@ -475,7 +475,7 @@ export function registerPages(c) {
     if (J().thoughts.filter(Boolean).length) L.push('## My current swing thoughts', ...J().thoughts.filter(Boolean).map((x) => `- ${x}`), '');
     const notes = [...J().notes].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
     if (notes.length) L.push('## Your last coaching notes to me', ...notes.map((n) => `- ${n.date} ${n.title}: ${n.feedback}${n.feels?.length ? ` Feels: ${n.feels.join('; ')}.` : ''}${n.drills?.length ? ` Drills: ${n.drills.map((d) => d.name).join(', ')}.` : ''}`), '');
-    L.push('## How to reply', 'You are my golf coach. After your advice, finish with a note I can paste into GolfIQ, as one JSON object in a code block, in exactly this shape (2–4 feels, 1–4 drills, today\'s date unless I say otherwise):', '', '```json', F.COACH_FORMAT, '```');
+    L.push('## How to reply', 'You are my golf coach. After your advice, finish with a note I can paste into BreakingPar, as one JSON object in a code block, in exactly this shape (2–4 feels, 1–4 drills, today\'s date unless I say otherwise):', '', '```json', F.COACH_FORMAT, '```');
     return L.join('\n');
   }
   const gameName = (id) => allGames().find((g) => g.id === id)?.name || id;

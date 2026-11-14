@@ -1,1 +1,3 @@
-# golfiq-app
+# BreakingPar
+
+Play to scratch. (Repo: golfiq-app.)

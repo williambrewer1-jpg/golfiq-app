@@ -1,4 +1,4 @@
-// GolfIQ analytics engine (JavaScript port of the Python package golfiq/).
+// BreakingPar analytics engine (JavaScript port of the Python package golfiq/).
 // Pure functions, no DOM. Verified against the Python implementation by tests/golden.test.mjs.
 // Conventions: missing values are null; distances in metres; provenance in *_source fields.
 
@@ -378,7 +378,7 @@ function estimateIndexes(rounds, holes) {
     const hs = byR.get(r.round_id) || [];
     r.index_before = whsIndex(diffs);
     if (r.hi === null && r.index_before !== null) {
-      r.hi = r.index_before; r.hi_source = 'GolfIQ estimate (from your earlier rounds)';
+      r.hi = r.index_before; r.hi_source = 'BreakingPar estimate (from your earlier rounds)';
       hs.forEach((h) => { h.hi = r.hi; applyHandicap(h); });
     }
     let d = null;

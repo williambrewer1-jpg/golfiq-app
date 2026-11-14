@@ -22,7 +22,7 @@ const SERIF = 'Didot, "Bodoni 72", Baskerville, Georgia, serif', SANS = '-apple-
 function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
 
 // clubs: [{ name, dist, mine }], wedges: { lengths: [...], rows: [{ name, vals: { length: dist } }] }
-export function draw(canvas, { w, h, clubs, wedges, unit, date, brand = 'GolfIQ', theme = 'green' }) {
+export function draw(canvas, { w, h, clubs, wedges, unit, date, brand = 'BreakingPar', theme = 'green' }) {
   const T = THEMES[theme] || THEMES.green, s = w / 1179;
   canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d');
   const g = ctx.createLinearGradient(0, 0, 0, h); g.addColorStop(0, T.top); g.addColorStop(1, T.bottom); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);

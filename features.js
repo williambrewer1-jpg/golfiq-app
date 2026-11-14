@@ -1,4 +1,4 @@
-// GolfIQ feature analytics (pure functions, no DOM): club recommendation, personal bests,
+// BreakingPar feature analytics (pure functions, no DOM): club recommendation, personal bests,
 // before/after comparisons, course playbook, weather effects, course-map geometry, practice stats.
 import * as A from './analytics.js';
 
@@ -375,7 +375,7 @@ export function offsetPoint(lat, lon, bearingDeg, along, right) {
   const [a, b] = destination(lat, lon, bearingDeg, along);
   return destination(a, b, bearingDeg + 90, right);
 }
-// What GolfIQ knows about each hole of a course from your earlier tracked rounds: green centre (pin marker) and tee.
+// What BreakingPar knows about each hole of a course from your earlier tracked rounds: green centre (pin marker) and tee.
 export function courseHoles(ds, courseId) {
   const out = {};
   for (const [hole, g] of groupBy(ds.holes.filter((h) => h.course_id === courseId), (h) => h.hole)) {
