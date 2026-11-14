@@ -63,7 +63,7 @@ with sync_playwright() as p:
     urls = pg.evaluate("() => window.__fb.log.map(l => l[1])"); check('only the Firebase hosts are called', all('googleapis.com' in u for u in urls))
     # pressure doc extras
     pg.click('[data-gpdone]'); pg.wait_for_selector('[data-gpstart]')
-    check('no ghost button for a game no friend has played this week', (lambda: (pg.select_option('select[data-sel=pg_game]', 'putt-par18'), pg.wait_for_timeout(500), pg.query_selector('[data-gpghost]') is None)[-1])())
+    check('no ghost button for a game no friend has played this week', (lambda: (pg.click('[data-pickgame="putt-par18"]'), pg.wait_for_timeout(500), pg.query_selector('[data-gpghost]') is None)[-1])())
     # league on the Board tab, with my score added to the seed
     pg.evaluate("(m) => { const s = JSON.parse(sessionStorage.getItem('fbseed')); s.push(['groups/grp1/scores/mine', m]); sessionStorage.setItem('fbseed', JSON.stringify(s)); }", mine)
     pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'board'}))"); pg.goto(URL + '#practice'); pg.reload(); pg.wait_for_selector('#lbLeague .lb', timeout=5000)

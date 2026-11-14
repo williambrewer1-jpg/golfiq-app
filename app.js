@@ -688,7 +688,7 @@ function wire(page) {
   $$('[data-openround]').forEach((a) => a.addEventListener('click', () => { ui.rd_open = a.dataset.openround; ui.rd_tab = a.dataset.tab || 'card'; saveUi(); }));
   $$('[data-stats]').forEach((a) => a.addEventListener('click', () => { ui.sx_tab = a.dataset.stats; saveUi(); }));
   $$('[data-practice]').forEach((a) => a.addEventListener('click', () => { ui.pr_tab = a.dataset.practice; saveUi(); }));
-  GUIDED?.wire();
+  GUIDED?.wire(); PROG?.tiles();
   on('#syncNow', 'click', async () => {
     const m = $('#syncMsg'); m.textContent = ' Syncing…';
     try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }
