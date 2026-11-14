@@ -6,6 +6,11 @@ import * as F from './features.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
 import * as LG from './league.js';
+import * as KU from './kudos.js';
+import * as DU from './duels.js';
+import * as G from './games.js';
+import * as FEEL from './feel.js';
+import { icon } from './icons.js';
 
 export function registerCompete(c) {
   const { A, S, $, $$, esc, fmt, note, table, kpi, select, toast } = c;
@@ -52,13 +57,260 @@ export function registerCompete(c) {
   }
   const rankTag = (uid) => (ranks.has(uid) ? `<i class="rk">${esc(ranks.get(uid))}</i>` : '');
 
+
+  // ------------------------------------------------------------ kudos (kudos.js): Clap, Fire and Flag on a friend's score
+  // Reactions are read for this week and last week only, in the same visit as the scores. If the group's Firestore rules are the old ones, the paths are refused (403):
+  // kudos are then hidden and one line tells the group to republish the rules. Any other error (offline) just leaves them out for now.
+  let kudos = [], kudosState = 'unknown', kudosAt = 0, homeNote = null;
+  const scoreIndex = new Map();                                              // score id -> score document, from whatever the page last fetched
+  const remember = (rows) => rows.forEach((r) => { if (r.id) scoreIndex.set(r.id, r); });
+  async function loadKudos(force = false) {
+    if (!groupOn() || kudosState === 'unavailable' || (!force && Date.now() - kudosAt < 30000)) return;
+    kudosAt = Date.now(); const week = B.isoWeek();
+    try { const [a, b] = await Promise.all([CL.kudosWhere(cloud(), cloud().group, week), CL.kudosWhere(cloud(), cloud().group, LG.prevWeek(week))]); kudos = [...a, ...b]; kudosState = 'ok'; }
+    catch (e) { if (e.status === 403) kudosState = 'unavailable'; }
+  }
+  const kuBtn = (id, kind, k, mine, nick) => `<button type="button" class="ku-b${mine === kind ? ' on' : ''}" data-ku="${esc(id)}|${kind}" aria-pressed="${mine === kind}" aria-label="${esc(mine === kind ? FEEL.COPY.kudos.take(FEEL.COPY.kudos.kinds[kind]) : FEEL.COPY.kudos.give(FEEL.COPY.kudos.kinds[kind], nick))}">${icon(KU.ICON[kind], 18)}<span>${k[kind] || ''}</span></button>`;
+  // the reaction row under a score: three buttons for a friend's score; plain counts (no buttons) for your own
+  function kuInner(id, owner, nick) {
+    if (kudosState !== 'ok' || !id) return '';
+    const wk = scoreIndex.get(id)?.week, cur = B.isoWeek(); if (wk !== cur && wk !== LG.prevWeek(cur)) return '';        // only this week's and last week's reactions are read
+    const me = cloud().auth?.uid, k = KU.counts(kudos, id, me);
+    if (owner === me) return k.total ? KU.KINDS.filter((x) => k[x]).map((x) => `<span class="ku-c">${icon(KU.ICON[x], 16)} ${k[x]}</span>`).join('') : '';
+    return KU.KINDS.map((x) => kuBtn(id, x, k, k.mine, nick)).join('');
+  }
+  const kuBox = (id, owner, nick) => (id ? `<div class="ku" data-kuscore="${esc(id)}" data-kuowner="${esc(owner || '')}" data-kunick="${esc(nick || '')}">${kuInner(id, owner, nick)}</div>` : '');
+  function paintKudos() {
+    $$('.ku[data-kuscore]').forEach((el) => { el.innerHTML = kuInner(el.dataset.kuscore, el.dataset.kuowner, el.dataset.kunick); });
+    const msg = $('#kuMsg'); if (msg) msg.textContent = kudosState === 'unavailable' ? FEEL.COPY.kudos.unavailable : '';
+    paintHome();
+  }
+  async function tapKudos(id, kind) {
+    const score = scoreIndex.get(id); if (!score || kudosState !== 'ok') return;
+    const a = await CL.signIn(cloud()), action = KU.tap(kudos, id, a.uid, kind), before = kudos;
+    const doc = KU.give({ score, uid: a.uid, nick: cloud().nick, kind }); if (!doc) return;           // your own score: no buttons are drawn, this is only a guard
+    try {
+      if (action === 'take') { kudos = KU.apply(kudos, doc, 'take'); paintKudos(); await CL.takeKudos(cloud(), cloud().group, id, a.uid); }
+      else { kudos = KU.apply(kudos, doc, 'give'); paintKudos(); if (action === 'switch') await CL.takeKudos(cloud(), cloud().group, id, a.uid); await CL.giveKudos(cloud(), cloud().group, doc); FEEL.play('good'); }
+    } catch (e) { kudos = before; if (e.status === 403) kudosState = 'unavailable'; paintKudos(); toast(FEEL.COPY.kudos.failed(e.message)); }
+  }
+  document.addEventListener('click', (e) => { const b = e.target.closest?.('[data-ku]'); if (b) { const [id, kind] = b.dataset.ku.split('|'); tapKudos(id, kind); } });
+
+  // Home: "Sam and 2 others reacted to your Up & down 9", once (J().kudos_seen = the newest reaction already shown). The first time, what is already there is not announced.
+  const kuHomeHtml = () => (homeNote?.length ? `<div class="card ku-note" role="status">${homeNote.slice(0, 2).map((it) => `<p style="margin:0 0 4px">${icon('clap', 18)} <b>${esc(FEEL.COPY.kudos.notice(KU.who(it), it.game_name, it.score))}</b></p>`).join('')}<button type="button" class="btn sec" data-kudismiss>${esc(FEEL.COPY.kudos.dismiss)}</button></div>` : '');
+  function paintHome() { const el = $('#kuHome'); if (!el) return; el.innerHTML = kuHomeHtml(); el.querySelector('[data-kudismiss]')?.addEventListener('click', () => { homeNote = null; paintHome(); }); }
+  async function loadHomeKudos() {
+    if (!groupOn() || !$('#kuHome')) return;
+    paintHome();
+    try {
+      const week = B.isoWeek(); await loadKudos(); if (kudosState !== 'ok') return;
+      const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]), me = (await CL.signIn(cloud())).uid, seen = J().kudos_seen;
+      remember([...cur, ...prev]);
+      if (seen === undefined || seen === null) { J().kudos_seen = KU.newest(kudos) || new Date().toISOString(); await S.saveJournal(c.state); return; }
+      const inc = KU.incoming(kudos, me, [...cur, ...prev], seen); if (!inc.items.length) return;
+      homeNote = inc.items; J().kudos_seen = inc.latest; await S.saveJournal(c.state); FEEL.play('good'); paintHome();
+    } catch { /* offline or old rules: nothing to show */ }
+  }
+  // friends' recent scores (this week and last), newest first, each with its reactions
+  function recentHtml(rows) {
+    if (!rows.length) return `<p class="small muted">${esc(FEEL.COPY.kudos.recentNone)}</p>`;
+    const uid = cloud().auth?.uid;
+    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${icon('flag', 16)}</span><b>${esc(r.nick || 'Golfer')}<i class="rk">${esc(r.game_name || r.game)}</i></b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? lvlText({ h: r.level_h }) : ''}</small>${kuBox(r.id, r.uid, r.nick)}${duBox(r.uid, r.nick)}</div>`).join('')}</div>`;
+  }
+
+
+  // ------------------------------------------------------------ duels (duels.js): a one-off head-to-head between two members of the group (retention plan 8.2)
+  // All the group's duels are read in one go (a handful of friends), in the same visit as the scores. If the group's Firestore rules are the old ones the read is refused (403):
+  // duels are then hidden and one line says how to republish the rules. The final status of a duel is worked out and written by whichever of the two phones opens it next.
+  const duOpen = new Set();                                                // finished duels left open on the card, so a repaint does not fold them
+  let duels = [], duelState = 'unknown', duelsAt = 0, duelMembers = [], duForm = null, finishing = null;
+  const duelMe = () => cloud().auth?.uid || null;
+  const duelGames = () => F.DEFAULT_GAMES.filter((g) => c.guided?.canGuide(g.id) && B.hasLevel(g.id) && !G.isDistance(g) && !G.isOpen(g.id));       // guided, with a benchmark, and the same shots for both players
+  const sc1 = (v) => (Number.isInteger(v) ? String(v) : fmt(v, 1));
+  const signed = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + sc1(Math.abs(v));
+  const dateText = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  async function loadDuels(force = false) {
+    if (!groupOn() || duelState === 'unavailable' || (!force && duelsAt && Date.now() - duelsAt < 30000)) return;
+    duelsAt = Date.now();
+    try { const [list, mem] = await Promise.all([CL.listDuels(cloud(), cloud().group), CL.members(cloud(), cloud().group)]); duels = list; duelMembers = mem; duelState = 'ok'; await settleDuels(); }
+    catch (e) { if (e.status === 403) duelState = 'unavailable'; }
+  }
+  // Write what is now decided: an attempt that was finished while offline, then the final status (both played, a forfeit, or expiry). Then stamp the outcome on my own result, for the points.
+  async function settleDuels() {
+    const me = duelMe(); if (!me) return;
+    for (const d of duels) {
+      const s = DU.side(d, me); if (!s) continue;
+      if (d[s] && !Number.isFinite(d[s].score) && d.status !== 'declined') {                         // I played but the score never reached the group
+        const r = J().results.find((x) => x.duel === d.id), p = r ? DU.finish(d, me, { score: r.score, target: c.guided.duelTarget(d.game, d.unitM) }) : null;
+        if (p) { try { await CL.patchDuel(cloud(), cloud().group, d.id, p); Object.assign(d, p); } catch { /* next time */ } }
+      }
+      const f = DU.decide(d); if (f) { try { await CL.patchDuel(cloud(), cloud().group, d.id, f); Object.assign(d, f); } catch { /* the other phone, or the next visit, will */ } }
+    }
+    await stampDuels(me);
+  }
+  // points come from the saved results (level.js), so the outcome is kept on the result once the duel is decided
+  async function stampDuels(me) {
+    let changed = false;
+    for (const d of duels) {
+      const s = DU.side(d, me); if (!s || d.status !== 'done') continue;
+      const r = J().results.find((x) => x.duel === d.id); if (r && r.duel_won === undefined) { r.duel_won = d.winner === s; changed = true; }
+    }
+    if (changed) await S.saveJournal(c.state);
+  }
+  const duelNick = (d, me) => DU.opponent(d, me)?.nick || 'Golfer';
+  const duelGame = (d) => gameById(d.game).name;
+  const modeText = (d) => FEEL.COPY.duels.modes[d.mode] || FEEL.COPY.duels.modes.handicap;
+  const duelSub = (d) => `${esc(duelGame(d))} · ${esc(modeText(d))}${d.pressure ? ' · pressure finish' : ''} · ${esc(FEEL.COPY.duels.left(DU.daysLeft(d)))}${d.stake ? ` · “${esc(d.stake)}”` : ''}`;
+  // the two attempts side by side (both are visible only once I have played, or the duel is over)
+  function h2hHtml(d, me) {
+    const K = FEEL.COPY.duels, v = DU.visible(d, me); if (!v.mine || !v.theirs || !Number.isFinite(v.mine.score) || !Number.isFinite(v.theirs.score)) return '';
+    const hc = d.mode !== 'straight' && Number.isFinite(v.mine.margin) && Number.isFinite(v.theirs.margin), row = (label, f) => `<tr><td>${esc(label)}</td><td>${f(v.mine)}</td><td>${f(v.theirs)}</td></tr>`;
+    return `<table class="du-h2h"><thead><tr><th></th><th>${esc(K.you)}</th><th>${esc(duelNick(d, me))}</th></tr></thead><tbody>${row(K.scoreRow, (x) => `<b>${sc1(x.score)}</b>`)}${hc ? row(K.targetRow, (x) => sc1(x.target)) + row(K.marginRow, (x) => `<b>${signed(x.margin)}</b>`) : ''}</tbody></table>`;
+  }
+  function headline(d, me) {
+    const K = FEEL.COPY.duels, nick = duelNick(d, me), s = DU.side(d, me), forfeit = DU.isForfeit(d);
+    if (d.winner === 'draw') return { cls: 'draw', text: K.draw(nick) };
+    if (d.winner === s) return { cls: 'win', text: forfeit ? K.forfeitWin(nick) : K.win(nick) };
+    return { cls: 'lose', text: forfeit ? K.forfeitLose(nick) : K.lose(nick) };
+  }
+  const resultHtml = (d, me) => { const K = FEEL.COPY.duels, h = headline(d, me); return `<div class="du-win ${h.cls}">${esc(h.text)}</div>${h2hHtml(d, me)}${d.stake ? `<p class="du-stake">${esc(K.stakeLine(d.stake))}</p>` : ''}`; };
+  function duelRow(d, kind, me) {
+    const K = FEEL.COPY.duels, nick = esc(duelNick(d, me)), act = [];
+    if (kind === 'incoming') act.push(`<button type="button" class="btn" data-duaccept="${esc(d.id)}">${K.accept}</button><button type="button" class="btn sec" data-dudecline="${esc(d.id)}">${K.decline}</button>`);
+    if (kind === 'play') act.push(`<button type="button" class="btn" data-duplay="${esc(d.id)}">${K.play}</button>`);
+    const head = kind === 'incoming' ? `<b>${esc(K.challenges(duelNick(d, me)))}</b>` : kind === 'play' ? `<b>${nick}</b>` : kind === 'wait' ? `<b>${nick}</b> · ${esc(DU.side(d, me) === 'a' && d.status === 'open' ? K.waitOpen(duelNick(d, me)) : K.waitPlay(duelNick(d, me)))}` : '';
+    if (kind === 'done') {
+      const h = headline(d, me); return `<details class="du-row du-done" data-duid="${esc(d.id)}"${duOpen.has(d.id) ? ' open' : ''}><summary><b>${nick}</b> · ${esc(duelGame(d))}<span class="du-badge ${h.cls}">${esc(h.cls === 'win' ? 'Won' : h.cls === 'draw' ? 'Draw' : 'Lost')}</span></summary>${resultHtml(d, me)}<p><button type="button" class="btn sec" data-durematch="${esc(d.id)}">${K.rematch}</button></p></details>`;
+    }
+    return `<div class="du-row" data-duel="${esc(d.id)}"><div>${head}<div class="small muted">${duelSub(d)}</div></div>${act.length ? `<div class="du-act">${act.join('')}</div>` : ''}${kind === 'wait' && DU.side(d, me) === 'a' ? `<div class="du-act"><button type="button" class="btn sec sm" data-dushare="${esc(d.id)}">${K.share}</button></div>` : ''}</div>`;
+  }
+  function formHtml() {
+    const K = FEEL.COPY.duels, me = duelMe(), others = duelMembers.filter((m) => m.id !== me), f = duForm || {};
+    if (!others.length) return `<p class="small muted">${esc(K.noFriends)}</p><p><button type="button" class="btn sec" data-duclose>${K.cancel}</button></p>`;
+    const opt = (v, t, cur) => `<option value="${esc(v)}"${String(cur) === String(v) ? ' selected' : ''}>${esc(t)}</option>`;
+    return `<form id="duForm" class="du-form"><label class="f" for="duFriend">${K.friend}</label><select id="duFriend" name="friend">${others.map((m) => opt(m.id, m.nick || 'Golfer', f.friend)).join('')}</select>
+      <label class="f" for="duGame">${K.game}</label><select id="duGame" name="game">${duelGames().map((g) => opt(g.id, `${g.cat} · ${g.name}`, f.game)).join('')}</select>
+      <label class="f" for="duMode">${K.scoring}</label><select id="duMode" name="mode">${DU.MODES.map((m) => opt(m, K.modes[m], f.mode || DU.DEFAULT_MODE)).join('')}</select><p class="small muted" id="duModeNote" style="margin:4px 0 0">${esc(K.modeNote[f.mode || DU.DEFAULT_MODE])}</p>
+      <label class="f" for="duDays">${K.time}</label><select id="duDays" name="days">${DU.DEADLINES.map((n) => opt(n, K.days(n), f.days || DU.DEFAULT_DEADLINE)).join('')}</select>
+      <label class="f" for="duStake">${K.stake}</label><input id="duStake" name="stake" maxlength="${DU.STAKE_MAX}" placeholder="${esc(K.stakeHint)}" value="${esc(f.stake || '')}" autocomplete="off"><p class="small muted" style="margin:4px 0 0">${esc(K.stakeNote)}</p>
+      <label class="checkrow"><input type="checkbox" name="pressure"${f.pressure ? ' checked' : ''}> ${esc(K.pressure)}</label>
+      <p><button class="btn">${K.send}</button> <button type="button" class="btn sec" data-duclose>${K.cancel}</button></p></form>`;
+  }
+  function duCardInner() {
+    const K = FEEL.COPY.duels, me = duelMe();
+    if (duelState === 'unavailable') return `<h2>${K.title}</h2><p class="small muted" style="margin:0">${esc(K.unavailable)}</p>`;
+    if (duelState !== 'ok') return `<h2>${K.title}</h2><p class="small muted">${K.loading}</p>`;
+    const g = DU.groups(duels, me), rec = new Map();
+    for (const d of duels) { const o = DU.opponent(d, me); if (o && d.status === 'done' && !rec.has(o.uid)) rec.set(o.uid, o.nick); }
+    const sect = (title, rows) => (rows.length ? `<h3>${esc(title)}</h3>${rows.join('')}` : '');
+    const records = [...rec].map(([uid, nick]) => `<span class="du-rec">${esc(K.recordLine(nick, DU.recordText(DU.record(duels, me, uid))))}</span>`);
+    return `<div class="rv-h"><h2 style="margin:0">${K.title}</h2><button type="button" class="btn sec sm" data-duopen>${K.challengeFriend}</button></div><p class="small muted" style="margin:6px 0 0">${esc(K.intro)}</p>
+      ${duForm ? formHtml() : ''}
+      ${sect(K.incomingTitle, g.incoming.map((d) => duelRow(d, 'incoming', me)))}${sect(K.turnTitle, g.toPlay.map((d) => duelRow(d, 'play', me)))}${sect(K.waitTitle, g.waiting.map((d) => duelRow(d, 'wait', me)))}
+      ${sect(K.doneTitle, g.finished.slice(0, 5).map((d) => duelRow(d, 'done', me)))}${records.length ? `<p class="small" style="margin:10px 0 0"><b>${esc(K.recordsTitle)}</b></p><p class="small" style="margin:2px 0 0">${records.join(' · ')}</p>` : ''}
+      ${!duels.some((d) => DU.side(d, me)) && !duForm ? `<p class="small muted">${esc(K.none)}</p>` : ''}`;
+  }
+  const paintDuels = () => { const el = $('#duCard'); if (el) el.innerHTML = duCardInner(); paintDuHome(); };
+  // Home: only what needs you – a challenge to answer, or your attempt to play
+  function duHomeHtml() {
+    if (duelState !== 'ok') return ''; const me = duelMe(), g = DU.groups(duels, me), rows = [...g.incoming.map((d) => duelRow(d, 'incoming', me)), ...g.toPlay.map((d) => duelRow(d, 'play', me))];
+    return rows.length ? `<div class="card du-home" role="status"><h2>${FEEL.COPY.duels.title}</h2>${rows.join('')}</div>` : '';
+  }
+  const paintDuHome = () => { const el = $('#duHome'); if (el) el.innerHTML = duHomeHtml(); };
+  async function loadHomeDuels() { if (!groupOn() || !$('#duHome')) return; paintDuHome(); await loadDuels(); paintDuHome(); }
+  // the Challenge button and the running record on a friend's row
+  const duBox = (uid, nick) => {
+    if (duelState !== 'ok' || !uid || uid === duelMe()) return ''; const r = DU.record(duels, duelMe(), uid), K = FEEL.COPY.duels;
+    return `<div class="du">${DU.recordTotal(r) ? `<span class="small muted">${esc(K.record(DU.recordText(r)))}</span>` : ''}<button type="button" class="du-b" data-duchal="${esc(uid)}" aria-label="${esc(`${K.challenge} ${nick || 'Golfer'}`)}">${icon('flag', 16)}<span>${K.challenge}</span></button></div>`;
+  };
+  const randomSeed = DU.newSeed;
+  async function shareDuel(id, nick) {
+    const K = FEEL.COPY.duels, d = duels.find((x) => x.id === id), link = `${location.href.split('#')[0]}#duel=${id}`;
+    try { if (navigator.share) await navigator.share({ title: K.shareTitle, text: K.shareText(d ? duelGame(d) : 'practice'), url: link }); else { await navigator.clipboard.writeText(link); toast(K.copied); } } catch { /* the share sheet was closed */ }
+  }
+  async function patchMine(id, patch) {
+    try { await CL.patchDuel(cloud(), cloud().group, id, patch); const d = duels.find((x) => x.id === id); if (d) Object.assign(d, patch); return true; }
+    catch (e) { if (e.status === 403) { await loadDuels(true); } toast(FEEL.COPY.duels.failed(e.message)); return false; }
+  }
+  async function sendDuel({ them, game, mode, pressure, stake, days, rematchOf }) {
+    const K = FEEL.COPY.duels; await loadDuels(true); const me = duelMe(); if (duelState !== 'ok' || !me) return false;
+    const ok = DU.canChallenge(duels, me, them.id); if (!ok.ok) { toast(ok.reason === 'pair' ? K.pair(them.nick) : K.limit); return false; }
+    if (!DU.canReceive(duels, them.id)) { toast(K.theirLimit(them.nick)); return false; }
+    const mk = { me: { uid: me, nick: cloud().nick }, them: { uid: them.id, nick: them.nick }, game, seed: randomSeed(), mode, pressure, stake, days, unitM: unitM() };
+    const doc = rematchOf ? DU.rematch(rematchOf, me, { seed: mk.seed, unitM: mk.unitM }) : DU.newDuel(mk); if (!doc) return false;
+    try { const id = await CL.createDuel(cloud(), cloud().group, doc); duels.push({ id, ...doc }); duForm = null; toast(rematchOf ? K.rematchSent(them.nick) : K.sent(them.nick)); paintDuels(); shareDuel(id, them.nick); return true; }
+    catch (e) { if (e.status === 403) duelState = 'unavailable'; toast(K.failed(e.message)); paintDuels(); return false; }
+  }
+  async function startDuel(id) {
+    const K = FEEL.COPY.duels; await loadDuels(true); const d = duels.find((x) => x.id === id), me = duelMe();
+    if (!d || !DU.canPlay(d, me)) { toast(K.cannotPlay); paintDuels(); return; }
+    if (!confirm(K.start)) return;
+    // the attempt is locked in on the group's side first, so quitting (or reloading and starting again) cannot give a second go
+    try { const p = DU.begin(d, me); await CL.patchDuel(cloud(), cloud().group, id, p); Object.assign(d, p); } catch (e) { toast(K.needOnline(e.message)); return; }
+    c.guided.start(d.game, { duel: d.id, seed: d.seed, pressure: d.pressure, unitM: d.unitM, target: c.guided.duelTarget(d.game, d.unitM) });
+  }
+  document.addEventListener('click', async (e) => {
+    const t = e.target.closest?.('[data-duaccept],[data-dudecline],[data-duplay],[data-durematch],[data-dushare],[data-duchal],[data-duopen],[data-duclose]'); if (!t) return;
+    const me = duelMe(), K = FEEL.COPY.duels, id = t.dataset.duaccept || t.dataset.dudecline || t.dataset.duplay || t.dataset.durematch || t.dataset.dushare, d = duels.find((x) => x.id === id);
+    if (t.dataset.duaccept && d && DU.canAnswer(d, me)) { if (await patchMine(id, { status: 'accepted' })) { toast(K.accepted); paintDuels(); } }
+    else if (t.dataset.dudecline && d && DU.canAnswer(d, me)) { if (await patchMine(id, { status: 'declined' })) { toast(K.declined); paintDuels(); } }
+    else if (t.dataset.duplay) startDuel(id);
+    else if (t.dataset.dushare && d) shareDuel(id, duelNick(d, me));
+    else if (t.dataset.durematch && d) { const o = DU.opponent(d, me); if (o) await sendDuel({ them: { id: o.uid, nick: o.nick }, rematchOf: d }); }
+    else if (t.dataset.duopen !== undefined) { duForm = duForm ? null : { game: duelGames()[0]?.id }; paintDuels(); }
+    else if (t.dataset.duclose !== undefined) { duForm = null; paintDuels(); }
+    else if (t.dataset.duchal) {                                                            // from a friend's row: open the form with that friend chosen
+      duForm = { ...(duForm || { game: duelGames()[0]?.id }), friend: t.dataset.duchal }; paintDuels(); $('#duCard')?.scrollIntoView({ block: 'start' });
+    }
+  });
+  document.addEventListener('toggle', (e) => { const id = e.target.dataset?.duid; if (id) { if (e.target.open) duOpen.add(id); else duOpen.delete(id); } }, true);
+  document.addEventListener('change', (e) => { if (e.target.id === 'duMode') { const n = $('#duModeNote'); if (n) n.textContent = FEEL.COPY.duels.modeNote[e.target.value] || ''; } });
+  document.addEventListener('submit', (e) => {
+    if (e.target.id !== 'duForm') return; e.preventDefault(); const f = new FormData(e.target), them = duelMembers.find((m) => m.id === f.get('friend')), game = gameById(String(f.get('game')));
+    duForm = { friend: String(f.get('friend')), game: game.id, mode: String(f.get('mode')), days: Number(f.get('days')), stake: String(f.get('stake') || ''), pressure: !!f.get('pressure') };
+    if (them) sendDuel({ them, game, mode: duForm.mode, pressure: duForm.pressure, stake: duForm.stake, days: duForm.days });
+  });
+
+  // The head-to-head on the result screen of a duel game (guided.js asks for the placeholder; the screen fills it in once the group has the score).
+  // Sound: a win is `win` with confetti; a loss, a draw, or still waiting is the plain `finish` sound. A lost duel is never a failure, so the wording stays friendly.
+  const duelPanel = (rid) => { const r = J().results.find((x) => x.id === rid); return r?.duel ? `<div class="card du-pan" id="duPanel" data-duel="${esc(r.duel)}" data-rid="${esc(rid)}"><p class="small muted">${FEEL.COPY.duels.loading}</p></div>` : ''; };
+  const duelFinished = (res, target) => {
+    finishing = (async () => {
+      try {
+        await loadDuels(true); const me = duelMe(), d = duels.find((x) => x.id === res.duel); if (!d) return;
+        const p = DU.finish(d, me, { score: res.score, target }); if (p) { await CL.patchDuel(cloud(), cloud().group, d.id, p); Object.assign(d, p); }
+        const f = DU.decide(d); if (f) { await CL.patchDuel(cloud(), cloud().group, d.id, f); Object.assign(d, f); }
+        await stampDuels(me);
+      } catch { /* the score is saved here; settleDuels sends it the next time Duels opens */ }
+    })(); return finishing;
+  };
+  async function paintDuelPanel() {
+    const el = $('#duPanel'); if (!el) return; const K = FEEL.COPY.duels, id = el.dataset.duel, rid = el.dataset.rid; await finishing; if (!$('#duPanel') || $('#duPanel').dataset.rid !== rid) return;
+    await loadDuels(); const d = duels.find((x) => x.id === id), me = duelMe(), box = $('#duPanel'); if (!box) return;
+    const info0 = c.ui.game_result, play = (name) => { if (info0 && !info0.duel_snd) { info0.duel_snd = true; c.saveUi(); FEEL.play(name); } };
+    if (!d) { box.innerHTML = `<p class="small">${esc(K.unsent)}</p>`; play('finish'); return; }
+    if (d.status === 'done') {
+      const h = headline(d, me); box.innerHTML = `${resultHtml(d, me)}<p><button type="button" class="btn" data-durematch="${esc(d.id)}">${K.rematch}</button></p>`; box.dataset.state = h.cls;
+      if (h.cls === 'win' && info0 && !info0.duel_snd) FEEL.confetti($('#gpConf')); play(h.cls === 'win' ? 'win' : 'finish');
+    } else {
+      const nick = duelNick(d, me); box.dataset.state = 'waiting';
+      box.innerHTML = `<p style="margin:0"><b>${esc(K.mineSaved)}</b></p><p class="small" style="margin:4px 0 8px">${esc(K.waitingNote(nick, dateText(d.deadline)))}</p><button type="button" class="btn sec sm" data-dushare="${esc(d.id)}">${K.share}</button>`; play('finish');
+    }
+  }
+  // an invite-style link to a duel (#duel=<id>): open the Duels card on the Leaderboard tab
+  function handleDuelLink() {
+    const m = /duel=([A-Za-z0-9]+)/.exec(location.hash || ''); if (!m) return false;
+    c.ui.pr_tab = 'board'; c.ui.du_focus = m[1]; c.saveUi(); history.replaceState(null, '', '#practice'); return true;
+  }
+  const duHome = () => (groupOn() ? `<div id="duHome">${duHomeHtml()}</div>` : '');
+
   // ------------------------------------------------------------ leaderboard tab
   const cache = new Map();
   function boardHtml(key, rows, better) {
     if (!rows) return '<p class="small muted">Loading…</p>';
     if (!rows.length) return '<p class="small muted">No scores yet – be the first.</p>';
     const uid = cloud().auth?.uid;
-    return `<div class="lb">${rows.map((r, i) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${i + 1}</span><b>${esc(r.nick || 'Golfer')}${rankTag(r.uid)}</b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? (r.level_h <= 0 ? 'scratch+' : r.level_h >= 25 ? '25+' : `≈${Math.round(r.level_h)} hcp`) : ''}</small></div>`).join('')}</div>`;
+    return `<div class="lb">${rows.map((r, i) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${i + 1}</span><b>${esc(r.nick || 'Golfer')}${rankTag(r.uid)}</b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? (r.level_h <= 0 ? 'scratch+' : r.level_h >= 25 ? '25+' : `≈${Math.round(r.level_h)} hcp`) : ''}</small>${kuBox(r.id, r.uid, r.nick)}${duBox(r.uid, r.nick)}</div>`).join('')}</div>`;
   }
   function pageBoard() {
     const week = B.isoWeek(), gid = B.weeklyChallenge(week), g = gameById(gid), mine = J().results.filter((r) => r.game === gid && inWeek(r.date, week));
@@ -68,6 +320,8 @@ export function registerCompete(c) {
     const bg = c.ui.lb_game || gid;
     return `${groupOn() ? `<div class="card" id="lbLeagueCard"><div class="rv-h"><h2 style="margin:0">Weekly league</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div><div id="lbLeague"><p class="small muted">Loading…</p></div>
       <p class="small muted" style="margin:8px 0 0">${LG.LEAGUE.hit} points for beating your own target, ${LG.LEAGUE.play} for playing, +${LG.LEAGUE.pressure} for a pressure finish. Your first ${LG.LEAGUE.cap} scores of the week count. It starts again each Monday.</p></div>` : ''}
+    ${groupOn() ? `<div class="card"><h2>${esc(FEEL.COPY.kudos.recentTitle)}</h2><div id="lbRecent"><p class="small muted">Loading…</p></div><p class="small muted" id="kuMsg" style="margin:6px 0 0"></p></div>` : ''}
+    ${groupOn() ? `<div class="card du-card" id="duCard">${duCardInner()}</div>` : ''}
     <div class="card challenge"><div class="rv-h"><h2 style="margin:0">This week's challenge</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div>
       <h3 style="margin-top:6px">${esc(g.name)}</h3><p class="small">${esc(g.how || '')}</p>
       ${B.hasLevel(gid) ? `<p class="small muted">Benchmarks: scratch ${t(0)} · 10 hcp ${t(10)} · 20 hcp ${t(20)} ${esc(F.unitOf(g, c.UNIT) || '')}</p>` : ''}
@@ -87,23 +341,23 @@ export function registerCompete(c) {
     const uid = cloud().auth?.uid;
     if (!rows.length) return '<p class="small muted">No scores yet this week. Play any game to get on the board.</p>';
     const last = prev.length ? `<p class="small" style="margin:8px 0 0">Last week's winner: <b>${LG.winners(prev).map((r) => esc(r.nick)).join(' and ')}</b> · ${LG.winners(prev)[0].points} points</p>` : '';
-    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}${rankTag(r.uid)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small></div>`).join('')}</div>${last}`;
+    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}${rankTag(r.uid)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small>${kuBox(r.score_id, r.uid, r.nick)}${duBox(r.uid, r.nick)}</div>`).join('')}</div>${last}`;
   }
   async function loadBoards() {
     if (!groupOn()) return;
-    await loadRanks();
+    await Promise.all([loadRanks(), loadKudos(true), loadDuels(true)]);
     const cl = cloud(), week = B.isoWeek(), gid = B.weeklyChallenge(week), month = B.monthKey(), bg = c.ui.lb_game || gid;
     const fill = async (sel, key, fetcher, better) => {
-      try { const rows = CL.board(await fetcher(), better); cache.set(key, rows); const el = $(sel); if (el) el.innerHTML = boardHtml(key, rows, better); }
+      try { const got = await fetcher(); remember(got); const rows = CL.board(got, better); cache.set(key, rows); const el = $(sel); if (el) el.innerHTML = boardHtml(key, rows, better); }
       catch (e) { const el = $(sel); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; }
     };
     await Promise.all([
-      (async () => { try { const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]); const el = $('#lbLeague'); if (el) el.innerHTML = leagueHtml(LG.league(cur), prev.length ? LG.league(prev) : []); } catch (e) { const el = $('#lbLeague'); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; } })(),
+      (async () => { try { const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]); remember(cur); remember(prev); const rc = $('#lbRecent'); if (rc) rc.innerHTML = recentHtml([...cur, ...prev].filter((x) => x.id && x.date).sort((x, y) => String(y.date).localeCompare(String(x.date))).slice(0, 8)); const el = $('#lbLeague'); if (el) el.innerHTML = leagueHtml(LG.league(cur), prev.length ? LG.league(prev) : []); } catch (e) { const el = $('#lbLeague'); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; } })(),
       fill('#lbWeek', `w|${week}|${gid}`, async () => (await CL.scoresWhere(cl, cl.group, 'week', week)).filter((s) => s.game === gid), gameById(gid).better),
       fill('#lbMonth', `m|${month}`, async () => (await CL.scoresWhere(cl, cl.group, 'month', month)).filter((s) => s.game === 'combine'), 'higher'),
       $('#lbAll') ? fill('#lbAll', `a|${bg}`, () => CL.scoresWhere(cl, cl.group, 'game', bg), gameById(bg).better) : null,
     ]);
-    await S.saveCloud(c.state);
+    paintKudos(); paintDuels(); if (c.ui.du_focus) { c.ui.du_focus = null; c.saveUi(); $('#duCard')?.scrollIntoView({ block: 'start' }); } await S.saveCloud(c.state);
   }
 
   // ------------------------------------------------------------ the combine
@@ -187,7 +441,7 @@ export function registerCompete(c) {
         <h3>Or set up your own group</h3>
         <form id="frSetup"><label class="f">Paste your Firebase web config (the <code>firebaseConfig = {…}</code> block)</label><textarea name="cfg" rows="6" placeholder="apiKey: &quot;…&quot;, projectId: &quot;…&quot;"></textarea>
         <label class="f">Your nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn">Save</button></p></form>
-        <details><summary>Firestore security rules to paste</summary><textarea readonly rows="14">${esc(CL.RULES)}</textarea></details>`}
+        <details><summary>Firestore security rules to paste</summary><p class="small muted" style="margin:0 0 6px">${esc(FEEL.COPY.kudos.rulesNote(CL.RULES_VERSION))}</p><textarea readonly rows="14">${esc(CL.RULES)}</textarea></details>`}
         ${note('Only game scores, your nickname, the group name and live side-game scorecards are stored there. Your rounds, shots and everything else stay on this phone.')}</div>`;
     }
     return `<div class="card"><h2>Friends &amp; leaderboards</h2><p class="small">Firebase project <b>${esc(cl.projectId)}</b> · you are <b>${esc(cl.nick || '?')}</b></p>
@@ -196,7 +450,7 @@ export function registerCompete(c) {
     : `<form id="frCreate"><label class="f">New group name</label><input name="name" required maxlength="40" placeholder="e.g. Saturday crew"><p><button class="btn">Create group</button></p></form>
         <form id="frJoin"><label class="f">…or join with a code</label><input name="code" required><p><button class="btn sec">Join</button></p></form>`}
       <details><summary>Firebase settings</summary><form id="frNick"><label class="f">Nickname</label><input name="nick" maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn sec sm">Save nickname</button></p></form>
-      <p><button class="btn sec sm" id="frForget">Forget Firebase on this phone</button></p><textarea readonly rows="10">${esc(CL.RULES)}</textarea></details></div>`;
+      <p><button class="btn sec sm" id="frForget">Forget Firebase on this phone</button></p><p class="small muted" style="margin:8px 0 6px">${esc(FEEL.COPY.kudos.rulesNote(CL.RULES_VERSION))}</p><textarea readonly rows="10">${esc(CL.RULES)}</textarea></details></div>`;
   }
   function parseCfg(t) {
     const g = (k) => (new RegExp(`${k}["']?\\s*[:=]\\s*["']([^"']+)["']`).exec(t) || [])[1];
@@ -278,8 +532,9 @@ export function registerCompete(c) {
   }
   // invite links (#join=…) – remember the invite and send the person to Settings → Friends
   function handleInvite() {
+    if (handleDuelLink()) return true;
     const inv = CL.parseInvite(location.hash); if (!inv) return false;
     cloud().pending = inv; S.saveCloud(c.state); c.ui.st_tab = 'friends'; c.saveUi(); history.replaceState(null, '', '#settings'); return true;
   }
-  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, shareRank, handleInvite, lvl, lvlText, groupOn, weekScores, myUid: () => cloud().auth?.uid || null };
+  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, shareRank, handleInvite, lvl, lvlText, groupOn, weekScores, afterRender: () => { loadHomeKudos(); loadHomeDuels(); paintDuelPanel(); }, duHome, duelPanel, duelFinished, kuHome: () => (groupOn() ? `<div id="kuHome">${kuHomeHtml()}</div>` : ''), myUid: () => cloud().auth?.uid || null };
 }

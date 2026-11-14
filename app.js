@@ -205,6 +205,8 @@ function pageHome() {
     : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
   <div class="kpis">${kpi('BreakingPar index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
   ${PROG.levelRow()}
+  ${COMP ? COMP.kuHome() : ''}
+  ${COMP ? COMP.duHome() : ''}
   ${PROG.homeCard()}
   ${PROG.journeyHome()}
   ${PROG.homePayoff()}
@@ -673,7 +675,7 @@ function render() {
   try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'corrections', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
   catch (e) { console.error(e); html = `<div class="err">Something went wrong on this page: ${esc(e.message)}</div>`; }
   $('#main').innerHTML = html;
-  drawPlots(); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm(); PROG?.afterRender();
+  drawPlots(); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm(); PROG?.afterRender(); COMP?.afterRender?.();
   $$('[data-share]').forEach((b) => b.addEventListener('click', () => EXTRA.shareRound(b.dataset.share)));
   $$('.seg.scroll, .seg.tabs').forEach((g) => { const b = $('button.on', g); if (b) g.scrollLeft = b.offsetLeft - (g.clientWidth - b.offsetWidth) / 2; });
 }

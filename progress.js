@@ -9,6 +9,7 @@ import * as SK from './skills.js';
 import * as GM from './games.js';
 import * as LV from './level.js';
 import * as PO from './payoff.js';
+import * as DU from './duels.js';
 import * as LCK from './locker.js';
 import * as WP from './wallpaper.js';
 import * as FEEL from './feel.js';
@@ -26,7 +27,7 @@ export function registerProgress(c) {
 
   let memo = { ds: null, j: null, v: null };
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, J().level_seen, Math.floor(Date.now() / 36e5)]);
+    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, (J().results || []).filter((r) => r.duel_won !== undefined).length, J().level_seen, Math.floor(Date.now() / 36e5)]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -59,7 +60,7 @@ export function registerProgress(c) {
     // predictions (payoff.js): saved at the start of a round, else worked out from the rounds before it. Each one beaten is worth points.
     const ph = PO.predictionHistory({ rounds: ds.rounds, predictions: J().predictions || [] }), pr = PO.predictionRun(ph);
     // the locker (locker.js): unlock state is worked out from level, bosses, streak, earned tiers, duels played and saved predictions beaten
-    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
+    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, duels: DU.pointsEntries(res), stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
     const lk = LCK.locker({ level: lv, bosses: J().journey?.bosses || [], streaks: st, tiers: tiers.filter((b) => b.earned).map((b) => b.id), duels: res.filter((r) => r.duel).length, predictions: ph.filter((h) => h.beat && h.stored).length });
     memo = { ds: c.DS, j: key, v: { lk, fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
     return memo.v;
@@ -269,7 +270,7 @@ export function registerProgress(c) {
       const on = now[it.kind] === it.key, pr = it.progress;
       return `<div class="lk-item${it.unlocked ? '' : ' off'}${on ? ' use' : ''}" data-lkitem="${esc(it.id)}">${preview(it)}<b>${esc(it.name)}</b>
         ${it.unlocked ? `<button type="button" class="btn ${on ? 'sec' : ''}" data-lkuse="${esc(it.id)}" ${on ? 'disabled' : ''}>${esc(on ? K.using : K.use)}</button>`
-          : `<span class="small muted">${icon('lock', 14)} ${esc(it.how)}${it.rule.t === 'duels' ? `. ${esc(K.duelNote)}` : ''}</span>${pr ? `<div class="bar"><i style="width:${Math.round(100 * pr.have / Math.max(1, pr.need))}%"></i></div><span class="small muted">${esc(K.progress(Math.round(pr.have), pr.need))}</span>` : ''}`}</div>`;
+          : `<span class="small muted">${icon('lock', 14)} ${esc(it.how)}</span>${pr ? `<div class="bar"><i style="width:${Math.round(100 * pr.have / Math.max(1, pr.need))}%"></i></div><span class="small muted">${esc(K.progress(Math.round(pr.have), pr.need))}</span>` : ''}`}</div>`;
     };
     return `<div class="card"><h2>${esc(K.title)}</h2><p class="small" style="margin:0 0 4px">${esc(K.intro)}</p><p class="small muted" style="margin:0">${esc(K.count(n, v.lk.items.length))}</p></div>
       ${LCK.KINDS.map(([k]) => `<div class="card"><h3 style="margin:0 0 8px">${esc(K.kinds[k])}</h3><div class="lk-grid">${v.lk.items.filter((i) => i.kind === k).map(card).join('')}</div></div>`).join('')}`;
