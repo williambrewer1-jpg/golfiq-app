@@ -1,5 +1,5 @@
 """Browser test for the friends ghost and weekly league (phase 8), against an in-page fake Firebase. Run: python3 tests/e2e_friends.py"""
-import http.server, threading, functools, sys, os, json
+import re, http.server, threading, functools, sys, os, json
 from playwright.sync_api import sync_playwright
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.join(HERE, '..')
 class Quiet(http.server.SimpleHTTPRequestHandler):
@@ -49,6 +49,10 @@ with sync_playwright() as p:
     play_hits(pg, [1, 1, 1, 1, 1, 1, 1])                                                          # finishes with 2+1+1... = 9 hits of 10
     pg.wait_for_selector('.gp-res')
     check('result says you beat Sam', 'You beat Sam' in pg.inner_text('.gp-res') and 'to 5' in pg.inner_text('.gp-res'), pg.inner_text('.gp-res'))
+    try: pg.wait_for_selector('#gpRLeague:not([hidden])', timeout=6000)
+    except Exception: pass
+    lc = pg.inner_text('#gpRLeague') if pg.query_selector('#gpRLeague:not([hidden])') else ''
+    check('the result shows the league points this score earned, once the shared scores have loaded', re.search(r'League\s*\+[1-5]', lc, re.I) is not None and 'of 3' in lc, lc)
     pg.wait_for_function("() => window.__fb.read('groups/grp1/scores').some(d => d.nick === 'Wills')", timeout=5000)
     mine = pg.evaluate("() => window.__fb.read('groups/grp1/scores').find(d => d.nick === 'Wills')")
     check('your guided score is posted with the per-step results', mine['mode'] == 'guided' and len(mine['detail']) == 10 and mine['seed'] == 11 and mine['score'] == 9, mine)

@@ -52,7 +52,7 @@ export function registerGuided(c) {
   // ------------------------------------------------------------ one tap: record it at once, answer back on screen, then move on
   // The answer is saved the moment the button is pressed. Only the screen waits (FEEL.feedbackMs, about 450 ms) so the verdict can be read; taps in that
   // window are ignored, so a double tap can never answer two balls.
-  let busy = false, seq = 0, timers = [];
+  let busy = false, seq = 0, timers = [], posting = null;     // posting: the score being shared with the group, so the league chip waits for it
   const view = { banner: null };                                                 // the mid-game banner, kept across the re-render so it does not restart
   const later = (ms, f) => { const t = seq; timers.push(setTimeout(() => { if (t === seq) f(); }, ms)); };
   const word = (key) => FEEL.COPY.verdict[key] || key;
@@ -118,11 +118,11 @@ export function registerGuided(c) {
   // a saved result's tier: benchmark games use the handicap table, own-history games judge it against the scores before it
   const tierOf = (g, r) => (G.isOwn(g) ? G.tierFor(g, r.score, unitM(), G.scoresBefore(g, J().results || [], r.id)) : G.tierFor(g, r.score, unitM()));
   async function finish(opts = {}) {
-    const d = draft(), g = gameOf(d.game); const before = G.bestScore(g, J().results || []), v0 = c.progress.data(), led0 = v0.plan.ledger.find((x) => x.game === g.id);
+    const d = draft(), g = gameOf(d.game); const before = G.bestScore(g, J().results || []), v0 = c.progress.data(), led0 = v0.plan.ledger.find((x) => x.game === g.id), inf0 = info(g.id);
     const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
-    c.ui.game_result = { id: res.id, prev_best: before, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
-    c.saveUi(); await save(); c.compete.onScore(res);
+    c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
+    c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) };
     // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
     const show = () => { busy = false; c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0); };
     if (opts.delay > 0) later(opts.delay, show); else show();
@@ -171,31 +171,98 @@ export function registerGuided(c) {
       return `<p class="small muted" style="margin:0 0 6px">${r.kind === 'test' ? 'Skills test' : 'Session'}: game ${r.i + 1} of ${r.queue.length}</p><div class="row">${last ? `<button class="btn" data-gpsesend>${r.kind === 'test' ? 'Finish test' : 'Finish session'}</button>` : `<button class="btn" data-gpsesnext>Next: ${esc(nx?.name || '')}</button>`}</div>`; }
     return `<div class="row"><button class="btn" data-gpagain="${esc(g.id)}">Play again</button><button class="btn sec" data-gpnext="${esc(g.id)}">Next game</button><button class="btn sec" data-gpdone>Done</button></div>`;
   }
+  // ---- the result screen: verdict, score counting up, tier badge, rewards, confetti, buttons (plan 5.2). Plain wording stays in feel.js COPY.
+  const rnd1 = (n) => Math.round(n * 10) / 10;
+  function leagueChip(L) {
+    const K = FEEL.COPY.rewards;
+    return L.full ? `<div class="l">${esc(K.leagueFull)}</div><div class="v">+0</div><div class="s">${esc(K.leagueFullNote)}</div>`
+      : `<div class="l">League</div><div class="v">+${L.pts}</div><div class="s">${esc(K.leagueTotal(L.total, L.rank, L.n))}</div>`;
+  }
   function resultScreen() {
-    const r = (J().results || []).find((x) => x.id === c.ui.game_result?.id), info0 = c.ui.game_result;
+    const info0 = c.ui.game_result, r = (J().results || []).find((x) => x.id === info0?.id);
     if (!r) { c.ui.game_result = null; return ''; }
-    const g = gameOf(r.game), u = unitM(), t = tierOf(g, r), inf = info(g.id), lv = c.compete.lvl(g.id, r.score);
+    const K = FEEL.COPY, g = gameOf(r.game), u = unitM(), t = tierOf(g, r), inf = info(g.id), lv = c.compete.lvl(g.id, r.score);
     const list = G.steps(g, { seed: r.seed, unitM: u }) || [], pr = r.pressure ? G.pressureOf(g, list, r.detail || [], r.balls) : null, un = u === 1 ? 'm' : 'yd';
-    const lower = g.better === 'lower', beat = inf.target !== undefined && inf.target !== null ? (lower ? r.score <= inf.target : r.score >= inf.target) : null;
-    const led = inf.ledger, hitsNow = led ? led.hits : null, potNow = inf.potential;
-    let credit = '';
-    if (led && beat) credit = `That's hit ${Math.min(hitsNow, led.need)} of ${led.need} for ${esc(led.title)}. ${potNow !== null && info0.pot_before !== null ? `Potential now ${fmt(potNow, 1)}${Math.abs(potNow - info0.pot_before) >= 0.05 ? ` (was ${fmt(info0.pot_before, 1)})` : ''}.` : ''}`;
-    else if (led) credit = `Not a hit yet. Aim for ${sc(inf.target)}${lower ? ' or fewer' : '+'} to count towards ${esc(led.title)} (${Math.min(hitsNow, led.need)} of ${led.need} so far).`;
-    else if (inf.skill) credit = 'This game is not one of your two focus areas right now, so it does not move your potential.';
+    const lower = g.better === 'lower', target = Number.isFinite(info0.target_before) ? info0.target_before : inf.target ?? null, verdict = G.verdictOf(g, r.score, { target, prevBest: info0.prev_best }), beat = target !== null ? verdict.met : null, lvT = Number.isFinite(info0.level_before) ? info0.level_before : inf.skill_h;
+    const led = inf.ledger, potNow = inf.potential, anim = !info0.seen && FEEL.revealMs(100) > 0;
+    const at = (cls, i) => `class="${cls}${anim ? ' fx-rise' : ''}"${anim ? ` style="--i:${i}"` : ''}`;
+    const short = !verdict.met && verdict.diff > 0 ? (lower ? K.over(sc(verdict.diff)) : K.short(sc(verdict.diff))) : '';
+    const vText = verdict.pb ? K.best : verdict.met ? K.met : short || K.done, vSub = verdict.pb ? (verdict.met ? K.met : short) : '';
     const own = G.isOwn(g);
     const nextT = t?.next ? `Next: <b>${t.next.name}</b> at ${sc(t.next.score)}${lower ? ' or fewer' : '+'}${own ? ` (${t.next.note})` : ''}` : t?.tier ? 'Top tier reached' : own ? `Tiers for this game come from your own scores, and start once you have ${G.OWN.min_scores}.` : '';
-    const fresh = info0.up ? `<div class="gp-up">New tier: ${esc(t.tier.name)}</div>` : '';
-    return `<div class="card gp-res" id="gpRoot"><h2>${esc(g.name)}</h2>${fresh}
-      <div class="gp-score"><b>${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''} ${tierChip(t?.tier)}</div>
-      ${g.id === 'range-driver' && r.balls ? `<p class="small" style="margin:0 0 6px">Average distance <b>${sc(r.avg_dist)} ${un}</b> · fairways <b>${r.fairways} of ${r.balls.length}</b> · wide <b>${r.wides}</b>. The score counts a miss as 20 yd less and a wide ball as half.</p>` : ''}
-      ${g.id === 'range-speed' && r.balls ? `<p class="small" style="margin:0 0 6px">Your balls: ${r.balls.map((b) => sc(Math.round(G.adjusted(b) * 10) / 10)).join(' · ')} ${un}</p>` : ''}
-      ${lv ? `<p class="small" style="margin:0 0 6px">Handicap level: <b>${esc(lv.label)}</b>${info0.prev_best !== null && info0.prev_best !== undefined ? ` · your best before was ${sc(info0.prev_best)}` : ''}</p>` : ''}
-      ${nextT ? `<p class="small" style="margin:0 0 6px">${nextT}</p>` : ''}
-      ${beat !== null ? `<p class="small" style="margin:0 0 6px">${beat ? '✓ You beat' : 'Beat'} the ${inf.skill_h}-handicapper: ${sc(inf.target)}${lower ? ' or fewer' : '+'}.</p>` : ''}
-      ${info0.ghost ? `<p class="small" style="margin:0 0 6px"><b>${info0.ghost.state === 'won' ? `You beat ${esc(info0.ghost.nick)}` : info0.ghost.state === 'lost' ? `${esc(info0.ghost.nick)} wins` : `Level with ${esc(info0.ghost.nick)}`}</b> · ${sc(r.score)} to ${sc(info0.ghost.score)}</p>` : ''}
-      ${pr ? `<p class="small" style="margin:0 0 6px">${esc(pr.label)}.${pr.hit ? ' Counts as 1.5 hits.' : ''}</p>` : ''}
-      ${credit ? `<p class="small" style="margin:0 0 8px">${credit}</p>` : ''}
-      ${sesButtons(g)}</div>`;
+    const badge = t?.tier ? `<span class="gp-badge ${t.tier.key}${anim ? ' fx-stamp' : ''}" id="gpBadge"${anim ? ` style="--d:${FEEL.revealMs(900)}ms"` : ''}>${info0.up ? `New tier: ${esc(t.tier.name)}` : `${esc(t.tier.name)} tier`}</span>` : '';
+    // rewards: practice streak, potential credit, league points
+    const rw = []; let i = 5; const rwAt = (extra = '') => at(`gp-rw${extra}`, i++);
+    const st = c.progress.data().st, stNow = st ? st.current : 0, stBefore = Number.isFinite(info0.streak_before) ? info0.streak_before : stNow;
+    if (stNow >= 1) rw.push(`<div ${rwAt(stNow > stBefore ? ' up' : '')} id="gpRStreakBox"><div class="l">${esc(K.rewards.streak)}</div><div class="v">${icon('flame', 22)}<span id="gpRStreak" data-from="${stBefore}" data-to="${stNow}">${stNow}</span></div><div class="s">${K.rewards.weeks(stNow)} in a row</div></div>`);
+    let potBefore = null, potTo = null, showNote = false;
+    if (led) {
+      const hits = rnd1(Math.min(led.hits, led.need)), moved = potNow !== null && Number.isFinite(info0.pot_before) && Math.abs(potNow - info0.pot_before) >= 0.05;
+      if (moved) { potBefore = info0.pot_before; potTo = potNow; }
+      showNote = potNow !== null && beat === true;
+      rw.push(`<div ${rwAt(beat ? ' up' : '')}><div class="l">${esc(led.title)}</div><div class="v">${beat ? K.rewards.hit(sc(hits), led.need) : K.rewards.of(sc(hits), led.need)}</div>
+        <div class="s">${beat ? (potNow === null ? '' : `${K.rewards.potential} ${moved ? `<s>${fmt(potBefore, 1)}</s> → ` : ''}<b id="gpRPot" data-from="${moved ? potBefore : potNow}" data-to="${potNow}">${fmt(potNow, 1)}</b>`) : K.rewards.noHit}</div></div>`);
+    }
+    if (c.compete.groupOn()) rw.push(`<div class="gp-rw" id="gpRLeague"${info0.league ? '' : ' hidden'}>${info0.league ? leagueChip(info0.league) : ''}</div>`);
+    let credit = '';
+    if (led && !beat) credit = `Aim for ${sc(inf.target)}${lower ? ' or fewer' : '+'} to count towards ${esc(led.title)}.`;
+    else if (!led && inf.skill) credit = 'This game is not one of your two focus areas right now, so it does not move your potential.';
+    const det = [
+      g.id === 'range-driver' && r.balls ? `Average distance <b>${sc(r.avg_dist)} ${un}</b> · fairways <b>${r.fairways} of ${r.balls.length}</b> · wide <b>${r.wides}</b>. The score counts a miss as 20 yd less and a wide ball as half.` : '',
+      g.id === 'range-speed' && r.balls ? `Your balls: ${r.balls.map((b) => sc(Math.round(G.adjusted(b) * 10) / 10)).join(' · ')} ${un}` : '',
+      info0.prev_best !== null && info0.prev_best !== undefined && !verdict.pb ? `Your best before was ${sc(info0.prev_best)}.` : '',
+      beat !== null ? `${beat ? '✓ You beat' : 'Beat'} the ${lvT}-handicapper: ${sc(target)}${lower ? ' or fewer' : '+'}.` : '',
+      info0.ghost ? `<b>${info0.ghost.state === 'won' ? `You beat ${esc(info0.ghost.nick)}` : info0.ghost.state === 'lost' ? `${esc(info0.ghost.nick)} wins` : `Level with ${esc(info0.ghost.nick)}`}</b> · ${sc(r.score)} to ${sc(info0.ghost.score)}` : '',
+      pr ? `${esc(pr.label)}.${pr.hit ? ' Counts as 1.5 hits.' : ''}` : '', credit,
+    ].filter(Boolean).map((x) => `<p class="small" style="margin:0 0 6px">${x}</p>`).join('');
+    return `<div class="card gp-res gp-rv" id="gpRoot" data-rid="${esc(r.id)}"${info0.seen ? '' : ' data-reveal="1"'}>
+      <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
+        <div ${at('gp-rname', 0)}>${esc(g.name)}</div>
+        <div ${at(`gp-rverdict ${verdict.key}`, 1)} id="gpVerdictL">${esc(vText)}</div>${vSub ? `<div ${at('gp-rsub', 1)}>${esc(vSub)}</div>` : ''}
+        <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
+        ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
+        ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
+      <div class="gp-rbody">${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
+        <div ${at('gp-rbtn', i)}>${sesButtons(g)}</div>
+        ${det ? `<div class="gp-rdet">${det}</div>` : ''}</div></div>`;
+  }
+  // the reveal: the score counts up, then the badge lands with its sound and the confetti, then the rewards count. Everything waits on FEEL.revealMs, so a test can ask for the finished screen at once.
+  function reveal() {
+    const root = $('#gpRoot.gp-rv[data-reveal]'), info0 = c.ui.game_result; if (!root || !info0 || info0.seen) return;
+    const r = (J().results || []).find((x) => x.id === info0.id); if (!r) return;
+    info0.seen = true; root.removeAttribute('data-reveal'); c.saveUi();
+    const g = gameOf(r.game), inf = info(g.id), ms = FEEL.revealMs, animated = ms(100) > 0, live = () => $('#gpRoot.gp-rv')?.dataset.rid === r.id, at = (t, f) => later(t, () => { if (live()) f(); });
+    const verdict = G.verdictOf(g, r.score, { target: Number.isFinite(info0.target_before) ? info0.target_before : inf.target ?? null, prevBest: info0.prev_best }), cel = G.celebrationOf({ verdict, tierUp: !!info0.up });
+    const num = $('#gpRNum'), to = r.score, nf = (v) => (Number.isInteger(to) ? String(Math.round(v)) : fmt(v, 1));
+    const st = $('#gpRStreak'), pot = $('#gpRPot');
+    if (animated) { if (num) num.textContent = nf(0); if (st) st.textContent = st.dataset.from; if (pot) pot.textContent = fmt(Number(pot.dataset.from), 1); }
+    const pulse = (el, kind) => { el?.classList.remove('fx-rise'); FEEL.pulse(el, kind); };      // the rise has finished by now; one animation at a time
+    at(ms(180), () => num && FEEL.countUp(num, 0, to, ms(700), nf));
+    at(ms(900), () => {
+      FEEL.play(cel.sound);
+      if (cel.confetti) FEEL.confetti($('#gpConf'));
+      if (cel.sound !== 'finish') pulse($('#gpVerdictL'), 'pop');
+      if (st && Number(st.dataset.to) > Number(st.dataset.from)) { FEEL.countUp(st, Number(st.dataset.from), Number(st.dataset.to), ms(500)); pulse($('#gpRStreakBox'), 'flame'); }
+      if (pot && Number(pot.dataset.to) < Number(pot.dataset.from)) FEEL.countUp(pot, Number(pot.dataset.from), Number(pot.dataset.to), ms(700), (v) => fmt(v, 1));
+    });
+    // a hit that lowers the potential target earns the unlock sound, once the number has come down
+    if (pot && verdict.met && Number(pot.dataset.to) < Number(pot.dataset.from) - 0.049) at(ms(1700), () => FEEL.play('unlock'));
+    at(ms(1800), () => { $('#gpRoot')?.setAttribute('data-revealed', '1'); });
+  }
+  // this week's league points for a shared score: only once the group has the score, so the number is never a guess
+  async function loadLeague() {
+    const info0 = c.ui.game_result; if (!info0 || info0.league !== undefined || !c.compete.groupOn() || !$('#gpRLeague')) return;
+    info0.league = null;
+    try {
+      const r = (J().results || []).find((x) => x.id === info0.id); if (!r) return;
+      if (posting && posting.id === info0.id) await posting.p;
+      const rows = await c.compete.weekScores(B.isoWeek(new Date(`${r.date}T12:00:00`))), uid = c.compete.myUid(), mine = rows.filter((x) => x.uid === uid);
+      const me = LG.league(rows).find((x) => x.uid === uid), shared = mine.some((x) => x.game === r.game && x.score === r.score && x.date === r.date);
+      if (!me || !shared) return;
+      const counted = mine.length <= LG.LEAGUE.cap, table = LG.league(rows);
+      info0.league = { pts: counted ? LG.points({ hit: shareInfo(r).hit, pressure: !!r.pressure }) : 0, total: me.points, rank: me.rank, n: table.length, full: !counted };
+    } catch { return; }
+    const el = $('#gpRLeague'); if (el && c.ui.game_result === info0 && info0.league) { el.innerHTML = leagueChip(info0.league); el.hidden = false; FEEL.pulse(el, 'rise'); }
   }
   // the launcher at the top of the Games tab: tier ladder, pressure toggle and a Play button
   function launcher(g) {
@@ -340,8 +407,8 @@ export function registerGuided(c) {
     $$('[data-gpstart]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpstart, { pressure: !!$('#gpPressure')?.checked })));
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
-    $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { c.ui.game_result = null; c.ui.session_summary = null; c.saveUi(); c.rerender(); }));
-    loadGhosts();
+    $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.saveUi(); c.rerender(); }));
+    loadGhosts(); reveal(); loadLeague();
     $$('[data-gptest]').forEach((b) => b.addEventListener('click', startTest));
     $$('[data-gpses]').forEach((b) => b.addEventListener('click', () => startSession(Number(b.dataset.gpses))));
     $$('[data-gpdaily]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpdaily)));

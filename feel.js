@@ -187,6 +187,8 @@ export function confetti(canvas, opts = {}) {
 // Tests set window.__feelDelay (for example 0) so they do not have to sit through it.
 export const FEEDBACK_MS = 450;
 export const feedbackMs = () => { const v = G.__feelDelay; return Number.isFinite(v) && v >= 0 ? v : FEEDBACK_MS; };
+// The result screen's reveal (count-ups, stamp, sounds) is scaled the same way, so a test that sets __feelDelay = 0 gets the finished screen at once.
+export const revealMs = (ms) => { const v = G.__feelDelay; return Number.isFinite(v) && v >= 0 ? Math.round(ms * v / FEEDBACK_MS) : ms; };
 
 // ------------------------------------------------------------------ wording
 // Every feedback phrase lives here, so the tone stays in one place. Short, plain, warm. The app is being renamed: new wording says BreakingPar.
@@ -199,7 +201,21 @@ export const COPY = {
   met: 'Target met',
   best: 'New personal best',
   short: (n) => `${n} short of your target`,
-  level: (h) => `That's a ${h}-handicap score.`,
+  over: (n) => `${n} over your target`,                                 // for games where fewer is better
+  done: 'Game complete',
+  // h is the benchmark level: 0 means scratch or better, 25 means worse than a 25 handicap; in between it is rounded
+  level: (h) => (h <= 0 ? "That's a scratch score or better." : h >= 25 ? "That's worse than a 25-handicap score." : `That's a ${Math.round(h)}-handicap score.`),
+  rewards: {
+    streak: 'Practice streak', weeks: (n) => (n === 1 ? 'week' : 'weeks'),
+    hit: (a, b) => `Hit ${a} of ${b}`, noHit: 'Not a hit yet', of: (a, b) => `${a} of ${b}`,
+    potential: 'potential',
+    note: 'Your potential is a target to play for, not a promise.',
+    league: (pts) => `League +${pts}`,
+    leagueFull: 'League: full week',
+    leagueTotal: (pts, rank, n) => `${pts} point${pts === 1 ? '' : 's'} · ${['1st', '2nd', '3rd'][rank - 1] || `${rank}th`} of ${n}`,
+    leagueFullNote: 'Your first 10 scores of the week count',
+  },
+  actions: { again: 'Play again', next: 'Next game', done: 'Done' },
   tier: (name) => `${name} tier`,
   next: 'Up next',
   progress: (i, n) => `${i} of ${n} done`,

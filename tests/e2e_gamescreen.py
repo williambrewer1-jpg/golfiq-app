@@ -112,11 +112,11 @@ with sync_playwright() as p:
         pg.click('[data-gp="1"]'); pg.wait_for_timeout(30)
         seen.append((k, pg.evaluate("() => [document.querySelector('#gpStreak').hidden, document.querySelector('#gpStreak b').textContent, document.querySelector('#gpBanner').hidden ? '' : document.querySelector('#gpBanner').textContent]")))
         settle(pg)
-    byk = dict(seen)
+    byk = dict(seen); pg.wait_for_timeout(500)         # the milestone sounds land 330 ms after the verdict
     check('the streak flame shows from two in a row, with the count', byk[1][0] is True and byk[2][0] is False and byk[2][1] == '2' and byk[4][1] == '4', seen)
     check('3 in a row gets a banner and the streak sound', '3 in a row' in byk[3][2] and 'streak' in pg.evaluate(LOG), (byk[3], pg.evaluate(LOG)))
     check('5 in a row gets its banner', byk.get(5) and '5 in a row' in byk[5][2], byk.get(5))
-    last = byk[need]; pg.wait_for_timeout(500)
+    last = byk[need]
     check(f'passing the target ({tg}) says "Target reached" and plays the target sound once', 'Target reached' in last[2] and pg.evaluate(LOG).count('target') == 1, (last, pg.evaluate(LOG)))
     check('the ball after the target is not a second target moment (the sound is not repeated)', pg.evaluate(LOG).count('target') == 1 and pg.evaluate("() => window.__feelHeard.filter((e) => e === 'target').length") == 1, pg.evaluate(LOG))
     check('a milestone sound lands after the verdict and the plain step tick is skipped for that step', pg.evaluate(LOG).count('step') < need, pg.evaluate(LOG))
