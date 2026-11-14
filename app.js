@@ -195,6 +195,7 @@ function pageHome() {
   ${PROG.levelRow()}
   ${PROG.homeCard()}
   ${PROG.journeyHome()}
+  ${PROG.homePayoff()}
   ${GUIDED.homeCard()}
   ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
@@ -434,7 +435,7 @@ function roundDetail(rid) {
     body = `<div class="card"><div class="kpis">${kpi('Gross', row.gross, null, false, 0)}${kpi('Stableford', row.stableford_round, null, true, 0)}${kpi('GIR', row.gir_pct, null, true, 0, '%')}${kpi('Fairways', row.fw_pct, null, true, 0, '%')}${kpi('Putts', row.putts_round, null, false, 0)}${kpi('Penalties', row.penalties, null, false, 0)}${kpi('Differential', row.differential)}${kpi('Playing hcp', row.ph, null, true, 0)}</div>
     <p class="small muted">${esc(row.tee || '?')} tee · CR ${fmt(row.course_rating)} / slope ${fmt(row.slope, 0)} · HI ${fmt(row.hi)} (${esc(row.hi_source || 'none')}) · ${esc(row.stableford_source || 'Stableford not reconstructable')}${state.weather?.[rid] ? ` · ${fmt(state.weather[rid].temp_c, 0)}°C, wind ${fmt(state.weather[rid].wind_kmh, 0)} km/h` : ''}</p>
     <h3>Scorecard</h3>${table(hh, [['hole', 'H'], ['par', 'Par'], ['stroke_index', 'SI', n0], ['strokes', 'Score', n0], ['putts_eff', 'Putts', n0], ['penalties_eff', 'Pen', n0], ['fairway', 'FW'], ['gir_eff', 'GIR', (v) => (v === 1 ? '✓' : v === 0 ? '·' : '–')], ['stableford', 'Pts', n0], ['swings_missing', 'Missing', n0]])}
-    ${killersCard(rid)}${sideCard(rid)}
+    ${killersCard(rid)}${sideCard(rid)}${PROG ? PROG.roundPayoffHtml(rid) : ''}
     <h3>Club usage</h3>${table(use, [['club', 'Club'], ['shots', 'Shots', n0]])}
     <details><summary>All shots</summary>${table(rs, [['hole', 'H'], ['shot_order', '#', n0], ['club', 'Club'], ['category', 'Type'], ['start_lie', 'Lie'], ['dist_m', `Dist ${UNIT}`, d0], ['start_to_pin', 'To pin', d0], ['lateral_m', 'Lat', d1], ['excluded_reason', 'Excluded']])}</details>
     ${note('Missing = score − putts − penalties − tracked swings (shots AutoShot didn\'t detect). Add them on the Review tab.')}

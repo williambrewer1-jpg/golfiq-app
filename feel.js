@@ -228,6 +228,17 @@ export const COPY = {
       ['daily', 'Today\'s challenge'], ['session', 'A full session'], ['round', 'A round (9 holes count half)'], ['challenge', 'An on-course challenge'], ['test', 'The monthly skills test']],
     welcomeRow: 'Welcome-back game: double points',
   },
+  payoff: {
+    predict: (p) => `BreakingPar predicts ${p.predicted}${p.lo === p.hi ? '' : ` (you usually score ${p.lo}–${p.hi} here)`}. Beat it.`,
+    beat: (by) => `You beat the prediction by ${by}.`, level: 'Right on the prediction.', over: (by, within) => `${by} over the prediction${within ? ' — within your usual range.' : '.'}`,
+    made: (p) => `Predicted ${p.predicted}${p.lo === p.hi ? '' : `, usual range ${p.lo}–${p.hi}`}`, points: (n) => `+${n} points`,
+    title: 'Practice payoff', predTitle: 'Your prediction', small: 'One round is a small sample. These are estimates from your own averages.',
+    none: 'Nothing clearly showed up today. One round is a small sample — the trend is what counts.', closest: (t) => `Closest to your usual: ${t}.`,
+    workOn: 'Worth a look', workBtn: (t) => `Play ${t}`, confirmed: (t) => `${t}: now showing up on the course.`, open: 'Open round',
+    homeTitle: 'Practice payoff', sheet: 'Predictions', beaten: (b, t) => `${b} of ${t} beaten`, run: (n) => `${n} in a row`, runNone: 'No run yet',
+    cardTitle: 'Beat the prediction', cardNote: 'Your prediction is your own typical score on the course. Beating it earns points, and missing it costs nothing.',
+    short: (n) => `You need ${n} more rounds with a score before BreakingPar can predict.`,
+  },
   boss: {
     kicker: 'Boss game', target: (s) => `Boss target ${s}`, pips: (h, p) => `${h} of ${p} games at the milestone score`, hit: 'At the milestone score', shortBy: (n) => `${n} short`,
     beat: (n, s, lower) => `Boss level for ${n === 0 ? 'scratch' : `the ${n}`}: ${s}${lower ? ' or fewer' : '+'}.`,

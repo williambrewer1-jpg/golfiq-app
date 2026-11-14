@@ -8,6 +8,7 @@ import * as BS from './boss.js';
 import * as SK from './skills.js';
 import * as GM from './games.js';
 import * as LV from './level.js';
+import * as PO from './payoff.js';
 import * as FEEL from './feel.js';
 import { icon } from './icons.js';
 
@@ -23,7 +24,7 @@ export function registerProgress(c) {
 
   let memo = { ds: null, j: null, v: null };
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().level_seen, Math.floor(Date.now() / 36e5)]);
+    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, J().level_seen, Math.floor(Date.now() / 36e5)]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -53,8 +54,10 @@ export function registerProgress(c) {
     const targets = {}; for (const k of sk.skills) for (const sub of k.subs) for (const gm of sub.games) if (A.isNum(gm.target) && !(gm.id in targets)) targets[gm.id] = gm.target;
     // the road to scratch (journey.js): stage progress comes from results; stage completions feed the points (50 each)
     const jidx = A.isNum(idx) ? idx : null, jr = JR.journey({ index: jidx, results: res, games: g, unitM: unitM(), bosses: J().journey?.bosses || [] });
-    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, stages: jr.completions });
-    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx } };
+    // predictions (payoff.js): saved at the start of a round, else worked out from the rounds before it. Each one beaten is worth points.
+    const ph = PO.predictionHistory({ rounds: ds.rounds, predictions: J().predictions || [] }), pr = PO.predictionRun(ph);
+    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
+    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
     return memo.v;
   }
 
@@ -308,9 +311,45 @@ export function registerProgress(c) {
   function advance(rid) { const v = data(); return JR.advance({ index: v.jidx, results: J().results || [], games: games(), unitM: unitM(), bosses: J().journey?.bosses || [] }, rid); }
   let jnScrolled = false;
 
+  // ---- practice payoff (payoff.js): what practice did for a round, shown on the round card, on Home for a week, and as predictions on Progress
+  const WEEK = 7 * 864e5;
+  function payoffFor(rid) {
+    const v = data(), row = c.DS.rounds.find((r) => r.round_id === rid); if (!row) return null;
+    const before = c.DS.rounds.filter((r) => r.round_id !== rid && r.date && r.date < row.date);
+    const po = PO.roundPayoff({ round: row, holes: c.DS.holes, shots: c.DS.shots, history: before, results: J().results || [], games: games(), ratings: v.sk, unitM: unitM() });
+    return { v, row, po, pred: v.ph.find((h) => h.round_id === rid) || null };
+  }
+  const predLine = (h) => { const K = FEEL.COPY.payoff; return `${h.beat ? K.beat(h.by) : h.level ? K.level : K.over(h.diff, h.within)} <span class="muted">${esc(K.made(h))}</span>`; };
+  function roundPayoffHtml(rid) {
+    const x = payoffFor(rid); if (!x) return '';
+    const { v, po, pred } = x, K = FEEL.COPY.payoff;
+    const predHtml = pred ? `<div class="card po-pred"><h3 style="margin:0 0 4px">${esc(K.predTitle)}</h3><p style="margin:0"><b>${predLine(pred)}</b>${pred.beat ? ` <span class="good">${esc(K.points(LV.POINTS.predicted))}</span>` : ''}</p></div>` : '';
+    if (po.reason === 'holes' || po.reason === 'history') return predHtml;
+    const sure = v.plan.ledger.filter((l) => l.confirmed && po.wins.some((w) => w.sub === l.sub));
+    const body = po.wins.length
+      ? `<ul class="po-list">${po.wins.map((w) => `<li>${esc(w.line)}</li>`).join('')}</ul>`
+      : `<p style="margin:6px 0">${esc(K.none)}</p>${po.closest ? `<p class="small muted" style="margin:0 0 6px">${esc(K.closest(po.closest.short))}</p>` : ''}`;
+    const work = po.work_on ? `<div class="po-work"><p class="small" style="margin:8px 0 6px"><b>${esc(K.workOn)}:</b> ${esc(po.work_on.line)}</p>${po.work_on.game ? `<button type="button" class="btn sec" data-jhome="${esc(po.work_on.game)}">${esc(K.workBtn(po.work_on.short))}</button>` : ''}</div>` : '';
+    return `${predHtml}<div class="card po-card"><h3 style="margin:0 0 4px">${esc(K.title)}</h3>${body}${sure.map((l) => `<p class="small good" style="margin:4px 0">${esc(K.confirmed(l.title))}</p>`).join('')}${work}<p class="small muted" style="margin:8px 0 0">${esc(K.small)}</p></div>`;
+  }
+  // Home: the latest round's payoff for a week after it was played. Nothing shows when there is nothing clear to say.
+  function homePayoff() {
+    const last = [...c.DS.rounds].filter((r) => r.date).sort((a, b) => (a.date + (a.start_time_local || '')).localeCompare(b.date + (b.start_time_local || ''))).pop();
+    if (!last || Date.now() - Date.parse(`${String(last.date).slice(0, 10)}T12:00:00`) > WEEK) return '';
+    const x = payoffFor(last.round_id); if (!x || (!x.po.wins.length && !x.pred)) return '';
+    const K = FEEL.COPY.payoff, top = x.po.wins[0];
+    return `<a class="card po-home" href="#rounds" data-openround="${esc(last.round_id)}"><h2 style="margin:0 0 6px">${esc(K.homeTitle)}</h2>${x.pred ? `<p style="margin:0 0 4px"><b>${predLine(x.pred)}</b></p>` : ''}${top ? `<p class="small" style="margin:0">${esc(top.line)}</p>` : ''}</a>`;
+  }
+  function predictionsCard(v = data()) {
+    const K = FEEL.COPY.payoff, pr = v.pr; if (!pr.total) return `<div class="card"><h2>${esc(K.cardTitle)}</h2><p class="muted">${esc(K.short(Math.max(1, PO.PREDICT.min_rounds)))}</p></div>`;
+    const last = v.ph.slice(-5).reverse();
+    return `<div class="card"><h2>${esc(K.cardTitle)}</h2><p style="margin:0 0 6px"><b>${esc(K.beaten(pr.beaten, pr.total))}</b> · ${esc(pr.run ? K.run(pr.run) : K.runNone)}</p>
+      <ul class="po-list small">${last.map((h) => `<li>${esc(String(h.date).slice(0, 10))} ${esc(h.course)}: ${h.gross} vs ${h.predicted} ${h.beat ? '✓' : ''}</li>`).join('')}</ul><p class="small muted" style="margin:6px 0 0">${esc(K.cardNote)}</p></div>`;
+  }
+
   function page() {
     const v = data();
-    return `${forecastCard(v)}${levelUpCard(v)}${weekCard(v)}${milestonesCard(v)}
+    return `${forecastCard(v)}${levelUpCard(v)}${predictionsCard(v)}${weekCard(v)}${milestonesCard(v)}
       ${roadmapCard('Short-game roadmap', v.short, 'Putting and chipping games, with the score that matches each scoring level.')}
       ${roadmapCard('Long-game roadmap', v.long, 'Range games, the monthly combine and range rounds.')}
       ${badgesCard(v)}`;
@@ -324,5 +363,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'} ${shield(v.st.freezes_held)}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance };
+  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, roundPayoffHtml, homePayoff, predictionsCard };
 }

@@ -45,7 +45,7 @@ export function roundPoints(r) {
 // playerLevel({ journal, rounds, duels, games, unitM, targets, floor, today })
 //   targets: { [gameId]: the score that counts as meeting this golfer's target }   floor: highest rank number already shown
 // → { points, rank: {n, name, at}, next: {n, name, at} | null, toNext, progress: 0..1, today, ledger: [{ date, what, points, rid?, capped? }] }   (ledger newest first)
-export function playerLevel({ journal = {}, rounds = [], duels = [], games = [], unitM = 0.9144, targets = {}, floor = 0, today = null, stages = [] } = {}) {
+export function playerLevel({ journal = {}, rounds = [], duels = [], games = [], unitM = 0.9144, targets = {}, floor = 0, today = null, stages = [], predictions = [] } = {}) {
   const results = (journal.results || []).filter((r) => r && r.game && day(r.date)), byId = new Map(games.map((g) => [g.id, g]));
   const lines = [];                                                                                    // { date, seq, what, points, capped, rid }
   let seq = 0;
@@ -82,6 +82,8 @@ export function playerLevel({ journal = {}, rounds = [], duels = [], games = [],
   for (const t of journal.skills_tests || []) add(t.date, 'Monthly skills test', POINTS.test);
   // journey stages (journey.js): one line per finished stage, on the day its last hit was posted. Counted from results, so nothing is stored.
   for (const s of stages || []) add(s.date, `Journey stage: ${s.title}`, POINTS.stage, s.rid);
+  // beaten predictions (payoff.js): one line per round that finished lower than its prediction. Derived from the rounds, so nothing is stored.
+  for (const p of predictions || []) add(p.date, p.title || 'Beat the prediction', POINTS.predicted, p.rid);
   for (const b of journal.journey?.bosses || []) if (b.passed) add(b.date, `Boss game passed: Beat the ${b.n}`, POINTS.boss);
   for (const d of duels || []) { add(d.date, 'Duel played', POINTS.duel); if (d.won) add(d.date, 'Duel won', POINTS.duelWin); }
 
