@@ -61,10 +61,15 @@ export function registerPages(c) {
       .sort((a, b) => (Math.max(...Object.values(b.vals).filter(Boolean), 0)) - (Math.max(...Object.values(a.vals).filter(Boolean), 0))).slice(0, 4);
     return { clubs, wedges: segVal('wp_wedges', 'on') === 'on' && rows.length ? { lengths: W.lengths, rows } : null };
   }
+  // only the themes the golfer has unlocked are offered (locker.js); the rest are in Settings → Locker
+  const wpAll = () => c.progress?.data?.().lk?.items.filter((i) => i.kind === 'wallpaper') || [];
+  const wpThemes = () => { const a = wpAll().filter((i) => i.unlocked); return (a.length ? a : [{ key: 'green', name: 'Augusta green' }, { key: 'night', name: 'Night' }, { key: 'cream', name: 'Cream' }]).map((i) => [i.key, i.name]); };
+  const wpDefault = () => c.progress?.look?.().wallpaper || 'green';
+  const wpMore = () => (wpAll().some((i) => !i.unlocked) ? `<p class="small muted" style="margin:4px 0 0">More themes are in <a href="#settings" data-lklink>Settings → Locker</a>.</p>` : '');
   function wallpaperCard() {
     return `<div class="card" id="wpCard"><h2>Lock-screen yardages</h2>
       <p class="small">Your current distances as an iPhone lock screen, so a glance at your phone gives you the number. Uses the distances above (GPS or yours) and your wedge matrix.</p>
-      ${seg('wp_theme', [['green', 'Augusta green'], ['night', 'Night'], ['cream', 'Cream']], 'green')}
+      ${seg('wp_theme', wpThemes(), wpDefault())}${wpMore()}
       ${seg('wp_wedges', [['on', 'With wedge matrix'], ['off', 'Clubs only']], 'on')}
       <div class="wpprev"><canvas id="wpCanvas" aria-label="Lock screen preview"></canvas><div class="wpclock"><span>Saturday 14 November</span><b>9:41</b></div></div>
       <p><button class="btn" id="wpSave">Save to Photos</button> <span id="wpMsg" class="small"></span></p>
@@ -73,7 +78,7 @@ export function registerPages(c) {
   function drawWallpaper() {
     const cv = $('#wpCanvas'); if (!cv) return null;
     const { w, h } = WP.phoneSize(), d = wallpaperData();
-    return WP.draw(cv, { w, h, ...d, unit: c.UNIT, date: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }), theme: segVal('wp_theme', 'green') });
+    return WP.draw(cv, { w, h, ...d, unit: c.UNIT, date: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }), theme: wpThemes().some(([k]) => k === segVal('wp_theme', wpDefault())) ? segVal('wp_theme', wpDefault()) : 'green' });
   }
   function wireCaddie() {
     if ($('#wpCanvas')) { try { drawWallpaper(); } catch (e) { $('#wpMsg').textContent = e.message; } }

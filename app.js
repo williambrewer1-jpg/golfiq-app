@@ -600,7 +600,7 @@ function pageSettings() {
     <label class="sw"><input type="checkbox" id="feelMotion" ${fl.motion ? 'checked' : ''}><span><b>${FC.motion}</b><small>${FC.motionNote}</small></span></label>
     <p style="margin:6px 0 0"><button type="button" class="btn sec" id="feelTry">${FC.try}</button> <span class="small muted" id="feelTryOut" aria-live="polite"></span></p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${unitsCard}${rangeCard}${feelCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
+  return `${demoBanner()}${links}${unitsCard}${rangeCard}${feelCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
