@@ -5,12 +5,13 @@ import { isoWeek } from './bench.js';
 // ------------------------------------------------------------------ what gets posted with a score
 // Only scores, tiers and per-step results go up (never rounds, shots or locations). A score document is limited to 20 fields by the Firestore rules.
 export const MAX_FIELDS = 20;
-export function shareExtras(res, { hit = null, tier = null } = {}) {
+export function shareExtras(res, { hit = null, tier = null, boss = null, boss_passed = null } = {}) {
   const o = {};
   if (typeof hit === 'boolean') o.hit = hit;
   if (tier) o.tier = tier;
   if (res.mode === 'guided' && Array.isArray(res.detail)) { o.mode = 'guided'; o.detail = res.detail.slice(0, 40); if (Number.isFinite(res.seed)) o.seed = res.seed; }
   if (res.pressure) o.pressure = true;
+  if (Number.isFinite(boss)) { o.boss = boss; if (boss_passed === true) o.boss_passed = true; }      // only the last game of a boss attempt (guided.js shareInfo); fields stay within the 20-field rule
   return o;
 }
 
