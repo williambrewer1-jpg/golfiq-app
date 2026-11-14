@@ -4,6 +4,7 @@ import * as F from './features.js';
 import * as B from './bench.js';
 import * as CO from './coach.js';
 import * as JR from './journey.js';
+import * as BS from './boss.js';
 import * as SK from './skills.js';
 import * as GM from './games.js';
 import * as LV from './level.js';
@@ -285,16 +286,23 @@ export function registerProgress(c) {
     $$('[data-jplay]').forEach((b) => b.addEventListener('click', () => { $('#sheet').classList.remove('open'); c.guided?.start(b.dataset.jplay); }));
   }
   function bossSheet(n) {
-    const s = data().jr.stretches.find((x) => x.n === n); if (!s) return; const K = FEEL.COPY.journey;
-    openSheet(`<h2 style="margin:0 0 4px">${esc(s.title)}</h2><p class="small" style="margin:6px 0 10px">${esc(s.boss.state === 'passed' ? K.bossPassed : s.boss.state === 'ready' ? `${K.bossReady} ${K.bossSoon}` : K.bossLocked)}</p>
-      <div class="jn-games">${s.stages.map((st) => `<div class="jn-g"><div><b>${esc(st.title)}</b></div><span class="small ${st.done ? 'good' : 'muted'}">${st.done ? '✓' : esc(K.stage(sc(st.hits), st.need))}</span></div>`).join('')}</div><p class="small muted" style="margin:10px 0 12px">${esc(K.note)}</p>`);
+    const s = data().jr.stretches.find((x) => x.n === n); if (!s) return; const K = FEEL.COPY.journey, B = FEEL.COPY.boss, bosses = J().journey?.bosses || [];
+    const last = [...bosses].reverse().find((b) => b.n === n), today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10), can = BS.canAttempt(bosses, n, today);
+    const lastRows = last ? BS.tally(n, last.scores, { games: games(), unitM: unitM() }).rows : [];
+    const body = s.boss.state === 'passed' ? `<p class="small">${esc(K.bossPassed)}</p>` : s.boss.state === 'ready'
+      ? `<p class="small" style="margin:6px 0 10px">${esc(B.startNote(BS.BOSS_MINUTES))}</p>${can.ok ? `<button type="button" class="btn" data-gpboss="${n}" style="margin:0 0 8px">${esc(B.start)}</button>` : `<p class="small muted">${esc(B.waitToday)}</p>`}`
+      : `<p class="small" style="margin:6px 0 10px">${esc(K.bossLocked)}</p>`;
+    openSheet(`<h2 style="margin:0 0 4px">${esc(s.title)}</h2>${body}
+      ${last && s.boss.state !== 'passed' ? `<h3 style="margin:10px 0 2px">${esc(B.last(last.date))}</h3><div class="jn-games">${lastRows.map((r) => `<div class="jn-g"><div><b>${esc(r.name)}</b><div class="small muted">${esc(B.target(sc(r.target)))}</div></div><span class="small ${r.state === 'hit' ? 'good' : 'muted'}">${r.score === null ? '–' : esc(sc(r.score))}${r.state === 'hit' ? ' ✓' : ''}</span></div>`).join('')}</div>` : ''}
+      <h3 style="margin:10px 0 2px">Stages</h3><div class="jn-games">${s.stages.map((st) => `<div class="jn-g"><div><b>${esc(st.title)}</b></div><span class="small ${st.done ? 'good' : 'muted'}">${st.done ? '✓' : esc(K.stage(sc(st.hits), st.need))}</span></div>`).join('')}</div><p class="small muted" style="margin:10px 0 12px">${esc(K.note)}</p>`);
+    $$('[data-gpboss]').forEach((b) => b.addEventListener('click', () => { $('#sheet').classList.remove('open'); c.guided?.startBoss(Number(b.dataset.gpboss)); }));
   }
   // Home: "Next on your journey". Shown once there is a step to take.
   function journeyHome() {
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
     const nx = data().jr.current?.next, K = FEEL.COPY.journey; if (!nx) return '';
     return `<div class="card jn-home"><div class="rv-h"><h2 style="margin:0">${esc(K.homeTitle)}</h2></div><p style="margin:6px 0 8px"><b>${esc(nx.line)}</b></p>
-      <div class="gp-btns two"><button type="button" class="btn" ${nx.game ? `data-jhome="${esc(nx.game)}"` : 'data-jopen'}>${esc(nx.game ? K.homePlay : K.homeOpen)}</button><a class="btn sec" href="#practice" data-practice="journey">${esc(K.homeOpen)}</a></div></div>`;
+      <div class="gp-btns two"><button type="button" class="btn" ${nx.game ? `data-jhome="${esc(nx.game)}"` : `data-jboss="${data().jr.current.n}"`}>${esc(nx.game ? K.homePlay : FEEL.COPY.boss.kicker)}</button><a class="btn sec" href="#practice" data-practice="journey">${esc(K.homeOpen)}</a></div></div>`;
   }
   // result screen: the stage line for a result that moved a stage in the open stretch (or null)
   function advance(rid) { const v = data(); return JR.advance({ index: v.jidx, results: J().results || [], games: games(), unitM: unitM(), bosses: J().journey?.bosses || [] }, rid); }
