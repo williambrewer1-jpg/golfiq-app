@@ -4,6 +4,12 @@ You do this once (about 10 minutes, on the iPhone in Safari or on a computer). F
 
 **What gets shared:** game scores (with a handicap level), your nickname, the group name and live side-game scorecards (names, handicap indexes, hole scores). For guided games it also shares the tier you reached, whether you beat your own target, whether you used a pressure finish, and the result of each step (hit or miss, or strokes) so friends can play against your score. **What stays on your phone:** rounds, shots, Garmin data, coach notes and everything else.
 
+> **Rules update (kudos and duels): do this once if you set up your group before.**
+> Kudos (Clap, Fire and Flag on a friend's score) and, in a later update, duels use two new Firestore paths, `kudos` and `duels`. Both are in the rules below, so you only have to update the rules once.
+> **What to do:** open **console.firebase.google.com → your project → Firestore Database → Rules**, replace everything with the rules below (or copy them from **BreakingPar → Settings → Friends**), and tap **Publish**. That's all.
+> **Until you do:** nothing breaks. Scores, the league, ghosts and live side games work as before. Kudos (and duels, when they arrive) stay hidden, and the Leaderboard shows one line saying the group owner should republish the rules. Friends don't need to do anything.
+> **What the new paths hold:** a kudos document is a score id, who gave it, which of the three reactions, a time and the score's week (at most 8 fields); a duel document is the challenge and each player's score (at most 20 fields). No round data, locations or contact details. A kudos document's id must be the score id plus the giver's id, which is what keeps it to one reaction each. Duel scores are hidden from the other player by the app until they have played; that is a courtesy, not security, since everyone in your private group is trusted.
+
 **Weekly league and ghosts need no new setup.** They read the same `scores` documents the leaderboards already use, so there are no new Firestore paths and **the security rules below are unchanged**. If you set up your group before this update, you do not need to touch Firebase. A score document now has up to 17 fields (the rules allow 20), and the league is worked out on each phone from the week's scores. It resets every ISO week (Monday).
 
 **Cost:** Firebase's free Spark plan. A group of friends uses a tiny fraction of its daily limits (50,000 reads and 20,000 writes per day), and the Spark plan has no billing account attached, so it can't charge you.
@@ -43,6 +49,17 @@ service cloud.firestore {
       match /live/{id} {
         allow read, create, update: if member(g);
         allow delete: if member(g) && resource.data.owner == request.auth.uid;
+      }
+      match /kudos/{id} {
+        allow read: if member(g);
+        allow create: if member(g) && request.resource.data.from_uid == request.auth.uid && id == request.resource.data.score_id + '_' + request.auth.uid && request.resource.data.size() <= 8;
+        allow delete: if member(g) && resource.data.from_uid == request.auth.uid;
+      }
+      match /duels/{id} {
+        allow read: if member(g);
+        allow create: if member(g) && request.resource.data.from_uid == request.auth.uid && request.resource.data.size() <= 20;
+        allow update: if member(g) && (resource.data.from_uid == request.auth.uid || resource.data.to_uid == request.auth.uid);
+        allow delete: if member(g) && resource.data.from_uid == request.auth.uid;
       }
     }
   }

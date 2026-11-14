@@ -12,6 +12,10 @@
       if (url.includes('accounts:signUp')) { const i = ++n; uids.push(`uid-${i}`); return json(200, { idToken: `tok-${i}`, refreshToken: `ref-${i}`, localId: `uid-${i}`, expiresIn: '3600' }); }
       if (url.includes('securetoken.googleapis.com')) return json(200, { id_token: `tok-r${++n}`, refresh_token: 'ref-r', user_id: uids[uids.length - 1] || 'uid-1', expires_in: '3600' });
       if (!url.includes('firestore.googleapis.com')) return json(404, {});
+      // opts.rules = 'old': the security rules from before kudos and duels, so those paths are refused
+      const newPath = (p) => /\/(kudos|duels)(\/|$)/.test('/' + p);
+      if (opts.rules === 'old' && method === 'POST' && url.includes(':runQuery') && ['kudos', 'duels'].includes(body?.structuredQuery?.from?.[0]?.collectionId)) return json(403, { error: { message: 'rules: kudos/duels not allowed' } });
+      if (opts.rules === 'old' && newPath(strip(url))) return json(403, { error: { message: 'rules: kudos/duels not allowed' } });
       if (method === 'POST' && url.includes(':runQuery')) {
         const parent = strip(url.split(':runQuery')[0] + '/documents/' + decodeURIComponent(url.split('/documents/')[1].split(':runQuery')[0])), q = body.structuredQuery, f = q.where.fieldFilter, want = Object.values(f.value)[0];
         const coll = `${parent}/${q.from[0].collectionId}`, hits = listChildren(coll).filter((k) => { const v = docs.get(k)[f.field.fieldPath]; return v && Object.values(v)[0] === want; });
@@ -22,6 +26,10 @@
       if (method === 'POST') {
         if (/\/scores$/.test(path) && Object.keys(body.fields).length > (opts.maxScoreFields || 20)) return json(403, { error: { message: 'rules: score too large' } });
         const id = `auto${++ids}`; docs.set(`${path}/${id}`, body.fields); return json(200, out(`${path}/${id}`));
+      }
+      if (method === 'PATCH' && /\/kudos\/[^/]+$/.test(path)) {      // the kudos rules: at most 8 fields, the document id is score_id + '_' + from_uid, and there is no update
+        const f = body.fields, id = path.split('/').pop(), sid = f.score_id?.stringValue, fu = f.from_uid?.stringValue;
+        if (Object.keys(f).length > 8 || !sid || id !== `${sid}_${fu}` || docs.has(path)) return json(403, { error: { message: 'rules: kudos not allowed' } });
       }
       if (method === 'PATCH') { const mask = [...new URL(url).searchParams.getAll('updateMask.fieldPaths')]; docs.set(path, mask.length ? { ...(docs.get(path) || {}), ...Object.fromEntries(mask.map((m) => [m, body.fields[m]])) } : body.fields); return json(200, out(path)); }
       if (method === 'DELETE') { docs.delete(path); return json(200, {}); }

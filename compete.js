@@ -6,6 +6,9 @@ import * as F from './features.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
 import * as LG from './league.js';
+import * as KU from './kudos.js';
+import * as FEEL from './feel.js';
+import { icon } from './icons.js';
 
 export function registerCompete(c) {
   const { A, S, $, $$, esc, fmt, note, table, kpi, select, toast } = c;
@@ -52,13 +55,74 @@ export function registerCompete(c) {
   }
   const rankTag = (uid) => (ranks.has(uid) ? `<i class="rk">${esc(ranks.get(uid))}</i>` : '');
 
+
+  // ------------------------------------------------------------ kudos (kudos.js): Clap, Fire and Flag on a friend's score
+  // Reactions are read for this week and last week only, in the same visit as the scores. If the group's Firestore rules are the old ones, the paths are refused (403):
+  // kudos are then hidden and one line tells the group to republish the rules. Any other error (offline) just leaves them out for now.
+  let kudos = [], kudosState = 'unknown', kudosAt = 0, homeNote = null;
+  const scoreIndex = new Map();                                              // score id -> score document, from whatever the page last fetched
+  const remember = (rows) => rows.forEach((r) => { if (r.id) scoreIndex.set(r.id, r); });
+  async function loadKudos(force = false) {
+    if (!groupOn() || kudosState === 'unavailable' || (!force && Date.now() - kudosAt < 30000)) return;
+    kudosAt = Date.now(); const week = B.isoWeek();
+    try { const [a, b] = await Promise.all([CL.kudosWhere(cloud(), cloud().group, week), CL.kudosWhere(cloud(), cloud().group, LG.prevWeek(week))]); kudos = [...a, ...b]; kudosState = 'ok'; }
+    catch (e) { if (e.status === 403) kudosState = 'unavailable'; }
+  }
+  const kuBtn = (id, kind, k, mine, nick) => `<button type="button" class="ku-b${mine === kind ? ' on' : ''}" data-ku="${esc(id)}|${kind}" aria-pressed="${mine === kind}" aria-label="${esc(mine === kind ? FEEL.COPY.kudos.take(FEEL.COPY.kudos.kinds[kind]) : FEEL.COPY.kudos.give(FEEL.COPY.kudos.kinds[kind], nick))}">${icon(KU.ICON[kind], 18)}<span>${k[kind] || ''}</span></button>`;
+  // the reaction row under a score: three buttons for a friend's score; plain counts (no buttons) for your own
+  function kuInner(id, owner, nick) {
+    if (kudosState !== 'ok' || !id) return '';
+    const wk = scoreIndex.get(id)?.week, cur = B.isoWeek(); if (wk !== cur && wk !== LG.prevWeek(cur)) return '';        // only this week's and last week's reactions are read
+    const me = cloud().auth?.uid, k = KU.counts(kudos, id, me);
+    if (owner === me) return k.total ? KU.KINDS.filter((x) => k[x]).map((x) => `<span class="ku-c">${icon(KU.ICON[x], 16)} ${k[x]}</span>`).join('') : '';
+    return KU.KINDS.map((x) => kuBtn(id, x, k, k.mine, nick)).join('');
+  }
+  const kuBox = (id, owner, nick) => (id ? `<div class="ku" data-kuscore="${esc(id)}" data-kuowner="${esc(owner || '')}" data-kunick="${esc(nick || '')}">${kuInner(id, owner, nick)}</div>` : '');
+  function paintKudos() {
+    $$('.ku[data-kuscore]').forEach((el) => { el.innerHTML = kuInner(el.dataset.kuscore, el.dataset.kuowner, el.dataset.kunick); });
+    const msg = $('#kuMsg'); if (msg) msg.textContent = kudosState === 'unavailable' ? FEEL.COPY.kudos.unavailable : '';
+    paintHome();
+  }
+  async function tapKudos(id, kind) {
+    const score = scoreIndex.get(id); if (!score || kudosState !== 'ok') return;
+    const a = await CL.signIn(cloud()), action = KU.tap(kudos, id, a.uid, kind), before = kudos;
+    const doc = KU.give({ score, uid: a.uid, nick: cloud().nick, kind }); if (!doc) return;           // your own score: no buttons are drawn, this is only a guard
+    try {
+      if (action === 'take') { kudos = KU.apply(kudos, doc, 'take'); paintKudos(); await CL.takeKudos(cloud(), cloud().group, id, a.uid); }
+      else { kudos = KU.apply(kudos, doc, 'give'); paintKudos(); if (action === 'switch') await CL.takeKudos(cloud(), cloud().group, id, a.uid); await CL.giveKudos(cloud(), cloud().group, doc); FEEL.play('good'); }
+    } catch (e) { kudos = before; if (e.status === 403) kudosState = 'unavailable'; paintKudos(); toast(FEEL.COPY.kudos.failed(e.message)); }
+  }
+  document.addEventListener('click', (e) => { const b = e.target.closest?.('[data-ku]'); if (b) { const [id, kind] = b.dataset.ku.split('|'); tapKudos(id, kind); } });
+
+  // Home: "Sam and 2 others reacted to your Up & down 9", once (J().kudos_seen = the newest reaction already shown). The first time, what is already there is not announced.
+  const kuHomeHtml = () => (homeNote?.length ? `<div class="card ku-note" role="status">${homeNote.slice(0, 2).map((it) => `<p style="margin:0 0 4px">${icon('clap', 18)} <b>${esc(FEEL.COPY.kudos.notice(KU.who(it), it.game_name, it.score))}</b></p>`).join('')}<button type="button" class="btn sec" data-kudismiss>${esc(FEEL.COPY.kudos.dismiss)}</button></div>` : '');
+  function paintHome() { const el = $('#kuHome'); if (!el) return; el.innerHTML = kuHomeHtml(); el.querySelector('[data-kudismiss]')?.addEventListener('click', () => { homeNote = null; paintHome(); }); }
+  async function loadHomeKudos() {
+    if (!groupOn() || !$('#kuHome')) return;
+    paintHome();
+    try {
+      const week = B.isoWeek(); await loadKudos(); if (kudosState !== 'ok') return;
+      const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]), me = (await CL.signIn(cloud())).uid, seen = J().kudos_seen;
+      remember([...cur, ...prev]);
+      if (seen === undefined || seen === null) { J().kudos_seen = KU.newest(kudos) || new Date().toISOString(); await S.saveJournal(c.state); return; }
+      const inc = KU.incoming(kudos, me, [...cur, ...prev], seen); if (!inc.items.length) return;
+      homeNote = inc.items; J().kudos_seen = inc.latest; await S.saveJournal(c.state); FEEL.play('good'); paintHome();
+    } catch { /* offline or old rules: nothing to show */ }
+  }
+  // friends' recent scores (this week and last), newest first, each with its reactions
+  function recentHtml(rows) {
+    if (!rows.length) return `<p class="small muted">${esc(FEEL.COPY.kudos.recentNone)}</p>`;
+    const uid = cloud().auth?.uid;
+    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${icon('flag', 16)}</span><b>${esc(r.nick || 'Golfer')}<i class="rk">${esc(r.game_name || r.game)}</i></b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? lvlText({ h: r.level_h }) : ''}</small>${kuBox(r.id, r.uid, r.nick)}</div>`).join('')}</div>`;
+  }
+
   // ------------------------------------------------------------ leaderboard tab
   const cache = new Map();
   function boardHtml(key, rows, better) {
     if (!rows) return '<p class="small muted">Loading…</p>';
     if (!rows.length) return '<p class="small muted">No scores yet – be the first.</p>';
     const uid = cloud().auth?.uid;
-    return `<div class="lb">${rows.map((r, i) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${i + 1}</span><b>${esc(r.nick || 'Golfer')}${rankTag(r.uid)}</b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? (r.level_h <= 0 ? 'scratch+' : r.level_h >= 25 ? '25+' : `≈${Math.round(r.level_h)} hcp`) : ''}</small></div>`).join('')}</div>`;
+    return `<div class="lb">${rows.map((r, i) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${i + 1}</span><b>${esc(r.nick || 'Golfer')}${rankTag(r.uid)}</b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? (r.level_h <= 0 ? 'scratch+' : r.level_h >= 25 ? '25+' : `≈${Math.round(r.level_h)} hcp`) : ''}</small>${kuBox(r.id, r.uid, r.nick)}</div>`).join('')}</div>`;
   }
   function pageBoard() {
     const week = B.isoWeek(), gid = B.weeklyChallenge(week), g = gameById(gid), mine = J().results.filter((r) => r.game === gid && inWeek(r.date, week));
@@ -68,6 +132,7 @@ export function registerCompete(c) {
     const bg = c.ui.lb_game || gid;
     return `${groupOn() ? `<div class="card" id="lbLeagueCard"><div class="rv-h"><h2 style="margin:0">Weekly league</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div><div id="lbLeague"><p class="small muted">Loading…</p></div>
       <p class="small muted" style="margin:8px 0 0">${LG.LEAGUE.hit} points for beating your own target, ${LG.LEAGUE.play} for playing, +${LG.LEAGUE.pressure} for a pressure finish. Your first ${LG.LEAGUE.cap} scores of the week count. It starts again each Monday.</p></div>` : ''}
+    ${groupOn() ? `<div class="card"><h2>${esc(FEEL.COPY.kudos.recentTitle)}</h2><div id="lbRecent"><p class="small muted">Loading…</p></div><p class="small muted" id="kuMsg" style="margin:6px 0 0"></p></div>` : ''}
     <div class="card challenge"><div class="rv-h"><h2 style="margin:0">This week's challenge</h2><span class="small muted">${week.replace('-W', ' · week ')}</span></div>
       <h3 style="margin-top:6px">${esc(g.name)}</h3><p class="small">${esc(g.how || '')}</p>
       ${B.hasLevel(gid) ? `<p class="small muted">Benchmarks: scratch ${t(0)} · 10 hcp ${t(10)} · 20 hcp ${t(20)} ${esc(F.unitOf(g, c.UNIT) || '')}</p>` : ''}
@@ -87,23 +152,23 @@ export function registerCompete(c) {
     const uid = cloud().auth?.uid;
     if (!rows.length) return '<p class="small muted">No scores yet this week. Play any game to get on the board.</p>';
     const last = prev.length ? `<p class="small" style="margin:8px 0 0">Last week's winner: <b>${LG.winners(prev).map((r) => esc(r.nick)).join(' and ')}</b> · ${LG.winners(prev)[0].points} points</p>` : '';
-    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}${rankTag(r.uid)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small></div>`).join('')}</div>${last}`;
+    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}${rankTag(r.uid)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small>${kuBox(r.score_id, r.uid, r.nick)}</div>`).join('')}</div>${last}`;
   }
   async function loadBoards() {
     if (!groupOn()) return;
-    await loadRanks();
+    await Promise.all([loadRanks(), loadKudos(true)]);
     const cl = cloud(), week = B.isoWeek(), gid = B.weeklyChallenge(week), month = B.monthKey(), bg = c.ui.lb_game || gid;
     const fill = async (sel, key, fetcher, better) => {
-      try { const rows = CL.board(await fetcher(), better); cache.set(key, rows); const el = $(sel); if (el) el.innerHTML = boardHtml(key, rows, better); }
+      try { const got = await fetcher(); remember(got); const rows = CL.board(got, better); cache.set(key, rows); const el = $(sel); if (el) el.innerHTML = boardHtml(key, rows, better); }
       catch (e) { const el = $(sel); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; }
     };
     await Promise.all([
-      (async () => { try { const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]); const el = $('#lbLeague'); if (el) el.innerHTML = leagueHtml(LG.league(cur), prev.length ? LG.league(prev) : []); } catch (e) { const el = $('#lbLeague'); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; } })(),
+      (async () => { try { const [cur, prev] = await Promise.all([weekScores(week), weekScores(LG.prevWeek(week)).catch(() => [])]); remember(cur); remember(prev); const rc = $('#lbRecent'); if (rc) rc.innerHTML = recentHtml([...cur, ...prev].filter((x) => x.id && x.date).sort((x, y) => String(y.date).localeCompare(String(x.date))).slice(0, 8)); const el = $('#lbLeague'); if (el) el.innerHTML = leagueHtml(LG.league(cur), prev.length ? LG.league(prev) : []); } catch (e) { const el = $('#lbLeague'); if (el) el.innerHTML = `<p class="small bad">${esc(e.message)}</p>`; } })(),
       fill('#lbWeek', `w|${week}|${gid}`, async () => (await CL.scoresWhere(cl, cl.group, 'week', week)).filter((s) => s.game === gid), gameById(gid).better),
       fill('#lbMonth', `m|${month}`, async () => (await CL.scoresWhere(cl, cl.group, 'month', month)).filter((s) => s.game === 'combine'), 'higher'),
       $('#lbAll') ? fill('#lbAll', `a|${bg}`, () => CL.scoresWhere(cl, cl.group, 'game', bg), gameById(bg).better) : null,
     ]);
-    await S.saveCloud(c.state);
+    paintKudos(); await S.saveCloud(c.state);
   }
 
   // ------------------------------------------------------------ the combine
@@ -187,7 +252,7 @@ export function registerCompete(c) {
         <h3>Or set up your own group</h3>
         <form id="frSetup"><label class="f">Paste your Firebase web config (the <code>firebaseConfig = {…}</code> block)</label><textarea name="cfg" rows="6" placeholder="apiKey: &quot;…&quot;, projectId: &quot;…&quot;"></textarea>
         <label class="f">Your nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn">Save</button></p></form>
-        <details><summary>Firestore security rules to paste</summary><textarea readonly rows="14">${esc(CL.RULES)}</textarea></details>`}
+        <details><summary>Firestore security rules to paste</summary><p class="small muted" style="margin:0 0 6px">${esc(FEEL.COPY.kudos.rulesNote(CL.RULES_VERSION))}</p><textarea readonly rows="14">${esc(CL.RULES)}</textarea></details>`}
         ${note('Only game scores, your nickname, the group name and live side-game scorecards are stored there. Your rounds, shots and everything else stay on this phone.')}</div>`;
     }
     return `<div class="card"><h2>Friends &amp; leaderboards</h2><p class="small">Firebase project <b>${esc(cl.projectId)}</b> · you are <b>${esc(cl.nick || '?')}</b></p>
@@ -196,7 +261,7 @@ export function registerCompete(c) {
     : `<form id="frCreate"><label class="f">New group name</label><input name="name" required maxlength="40" placeholder="e.g. Saturday crew"><p><button class="btn">Create group</button></p></form>
         <form id="frJoin"><label class="f">…or join with a code</label><input name="code" required><p><button class="btn sec">Join</button></p></form>`}
       <details><summary>Firebase settings</summary><form id="frNick"><label class="f">Nickname</label><input name="nick" maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn sec sm">Save nickname</button></p></form>
-      <p><button class="btn sec sm" id="frForget">Forget Firebase on this phone</button></p><textarea readonly rows="10">${esc(CL.RULES)}</textarea></details></div>`;
+      <p><button class="btn sec sm" id="frForget">Forget Firebase on this phone</button></p><p class="small muted" style="margin:8px 0 6px">${esc(FEEL.COPY.kudos.rulesNote(CL.RULES_VERSION))}</p><textarea readonly rows="10">${esc(CL.RULES)}</textarea></details></div>`;
   }
   function parseCfg(t) {
     const g = (k) => (new RegExp(`${k}["']?\\s*[:=]\\s*["']([^"']+)["']`).exec(t) || [])[1];
@@ -281,5 +346,5 @@ export function registerCompete(c) {
     const inv = CL.parseInvite(location.hash); if (!inv) return false;
     cloud().pending = inv; S.saveCloud(c.state); c.ui.st_tab = 'friends'; c.saveUi(); history.replaceState(null, '', '#settings'); return true;
   }
-  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, shareRank, handleInvite, lvl, lvlText, groupOn, weekScores, myUid: () => cloud().auth?.uid || null };
+  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, shareRank, handleInvite, lvl, lvlText, groupOn, weekScores, afterRender: loadHomeKudos, kuHome: () => (groupOn() ? `<div id="kuHome">${kuHomeHtml()}</div>` : ''), myUid: () => cloud().auth?.uid || null };
 }

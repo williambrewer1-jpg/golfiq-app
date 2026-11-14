@@ -248,6 +248,14 @@ export const COPY = {
     unlocked: (name) => `Unlocked: ${name}`, tryIt: 'Try it', later: 'Not now', progress: (a, b) => `${a} of ${b}`, count: (a, b) => `${a} of ${b} unlocked`,
     duelNote: 'Duels arrive in a later update.', wpNote: 'More themes are in the Locker.', chosen: (name) => `${name} on`,
   },
+  kudos: {
+    kinds: { clap: 'Clap', fire: 'Fire', flag: 'Flag' }, give: (k, nick) => `${k} ${nick}'s score`, take: (k) => `Take back your ${k}`, own: (n) => `${n} reaction${n === 1 ? '' : 's'} on your score`,
+    notice: (w, game, score) => `${(w?.who || []).join(' and ')}${w?.others ? ` and ${w.others} other${w.others === 1 ? '' : 's'}` : ''} reacted to your ${game || 'score'}${score !== null && score !== undefined ? ` ${score}` : ''}`,
+    recentTitle: 'Friends\' recent scores', recentNone: 'No scores from your group yet this week.', dismiss: 'Dismiss',
+    unavailable: 'Kudos need updated Firestore rules. The group owner can republish them from Settings → Friends (the rules are there to copy).',
+    rulesNote: (v) => `Rules version ${v}: adds kudos and duels. If your group was set up earlier, paste these rules into Firebase → Firestore Database → Rules and tap Publish, once. Until then kudos stay hidden and everything else works as before.`,
+    failed: (m) => `Could not send that: ${m}`,
+  },
   boss: {
     kicker: 'Boss game', target: (s) => `Boss target ${s}`, pips: (h, p) => `${h} of ${p} games at the milestone score`, hit: 'At the milestone score', shortBy: (n) => `${n} short`,
     beat: (n, s, lower) => `Boss level for ${n === 0 ? 'scratch' : `the ${n}`}: ${s}${lower ? ' or fewer' : '+'}.`,

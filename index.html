@@ -425,6 +425,12 @@ body:has(#gpRoot.gp-full){overflow:hidden}
 .lk-cf.flags i{width:11px;height:12px;border-radius:0;clip-path:polygon(0 0,100% 40%,0 70%,0 100%,0 100%);border-left:2px solid currentColor}
 .lknote{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom) + 76px);z-index:46;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:14px;color:#fff;background:linear-gradient(180deg,var(--head),var(--head2));border:1px solid var(--gold);box-shadow:var(--shadow)}
 .lknote>span{flex:1 1 120px;min-width:0}.lknote .btn{margin:0}.lknote .btn.sec{background:transparent;color:#fff;border:1px solid rgba(255,255,255,.4)}.lknote .small{color:rgba(255,255,255,.8)}
+/* kudos */
+.lb>div .ku{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center}.lb>div .ku:empty{display:none}
+.ku-b{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;min-height:40px;padding:0 10px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);font:600 13px var(--sans);cursor:pointer}
+.ku-b svg{stroke:currentColor;fill:none}.ku-b.on{background:var(--tint);color:var(--accent);border-color:var(--gold)}
+.ku-c{display:inline-flex;align-items:center;gap:4px;font:600 13px var(--sans);color:var(--muted)}.ku-c svg{stroke:currentColor}
+.ku-note .btn{margin:6px 0 0}.ku-note svg{vertical-align:-3px;stroke:var(--accent)}
 </style>
 </head>
 <body>
