@@ -98,6 +98,23 @@ with sync_playwright() as p:
         check(f'[{tag}] approach: GIR by par tiles', pg.locator('h3:has-text("GIR by par") + .kpis .kpi').count() >= 2)
         tap_detail('.ch-hrow', 2, 'by distance'); tap_detail('.ch-zone', 3, 'missed greens')
         check(f'[{tag}] approach: no horizontal scroll', no_hscroll(pg)); shot(pg, f'approach-{tag}')
+        # ---- phase C: Short game, Putting, Strokes gained, Handicap and Rounds compare
+        go(pg, 'short'); pg.wait_for_selector('.card:has(h2:has-text("Scrambling by round")) .ch svg'); check(f'[{tag}] short game: scrambling line is drawn, no Plotly', pg.evaluate("() => window.__plots.length") == 0)
+        go(pg, 'putting'); pg.wait_for_selector('h3:has-text("Share of holes by putts") + .ch .ch-seg'); check(f'[{tag}] putting: putts-per-hole strip, no Plotly', pg.evaluate("() => window.__plots.length") == 0 and pg.locator('.ch-strip .ch-seg').count() >= 2)
+        tap_detail('.ch-seg', 0, 'putts strip')
+        go(pg, 'sg'); pg.wait_for_selector('.ch-hbars, .err'); has_sg = pg.query_selector('.ch-hbars') is not None
+        if has_sg:
+            check(f'[{tag}] strokes gained: diverging bars and one small line per category, no Plotly', pg.evaluate("() => window.__plots.length") == 0 and pg.locator('.ch-hrow').count() >= 4 and pg.locator('.ch-spark').count() == 4, f"{pg.locator('.ch-hrow').count()} rows {pg.locator('.ch-spark').count()} sparks")
+            tap_detail('.ch-hrow', 0, 'strokes gained'); check(f'[{tag}] strokes gained: no horizontal scroll', no_hscroll(pg))
+        go(pg, 'handicap'); pg.wait_for_selector('.card:has(h2:has-text("Index over time")) .ch svg'); check(f'[{tag}] handicap: index chart is drawn, no Plotly', pg.evaluate("() => window.__plots.length") == 0)
+        hsvg = pg.locator('.card:has(h2:has-text("Index over time")) .ch svg').first; pg.evaluate("() => document.querySelector('.card:has(h2) .ch svg').scrollIntoView({block: 'center'})"); pg.wait_for_timeout(200); hb = hsvg.bounding_box()
+        pg.mouse.move(hb['x'] + hb['width'] * 0.8, hb['y'] + hb['height'] / 2); pg.mouse.down(); pg.mouse.move(hb['x'] + hb['width'] * 0.4, hb['y'] + hb['height'] / 2, steps=5)
+        cap = pg.locator('.card:has(h2:has-text("Index over time")) .ch-cap').inner_text(); pg.mouse.up()
+        check(f'[{tag}] handicap: scrubbing shows the date, index and differential', 'index' in cap and 'differential' in cap, cap); check(f'[{tag}] handicap: no horizontal scroll', no_hscroll(pg)); shot(pg, f'handicap-{tag}')
+        pg.evaluate("() => { location.hash = '#rounds' }"); pg.wait_for_selector('select[data-sel="cmp_a"]'); pg.wait_for_timeout(200)
+        check(f'[{tag}] rounds: compare shows rows A, B and the difference for each nine, no Plotly', pg.locator('.ch-holes.named').count() >= 1 and pg.locator('.ch-hole.dfg, .ch-hole.dfb, .ch-hole.df0').count() >= 9 and pg.evaluate("() => window.__plots.length") == 0)
+        tap_detail('.ch-hole', 0, 'round compare'); check(f'[{tag}] rounds: no horizontal scroll', no_hscroll(pg)); shot(pg, f'rounds-{tag}')
+        pg.select_option('select[data-sel="cmp_a"]', index=3); pg.wait_for_selector('.ch-holes.named'); check(f'[{tag}] rounds: choosing another round redraws the comparison', pg.locator('.ch-holes.named').count() >= 1)
         # ---- dark mode: nothing is hard-coded, the chart reads the theme
         pg.evaluate("() => document.documentElement.setAttribute('data-theme', 'dark')"); go(pg, 'scoring'); pg.wait_for_selector('.ch-trend'); pg.wait_for_timeout(300)
         big_col = pg.evaluate("() => getComputedStyle(document.querySelector('.ch-big')).color")
