@@ -200,6 +200,8 @@ export function registerGuided(c) {
     const rw = []; let i = 5; const rwAt = (extra = '') => at(`gp-rw${extra}`, i++);
     const lvl = c.progress.data().lv, pts = LV.pointsFor(lvl, r.id), capped = pts === 0 && lvl.today >= LV.DAILY_CAP;
     if (pts > 0 || capped) rw.push(`<div ${rwAt(pts > 0 ? ' up' : '')} id="gpRPtsBox"><div class="l">${esc(K.rewards.points)}</div><div class="v"><span id="gpRPts" data-to="${pts}">+${pts}</span></div><div class="s">${esc(capped ? K.rewards.pointsFull : K.rewards.pointsNote(lvl.points, lvl.toNext, lvl.next?.name))}</div></div>`);
+    const jn = c.progress.advance?.(r.id);                       // a stage that moved forward in the open stretch of the road to scratch
+    if (jn) rw.push(`<div ${rwAt(' up')} id="gpRJourney" data-done="${jn.done ? 1 : 0}"><div class="l">${esc(K.journey.rewardTitle)}</div><div class="v${jn.done && anim ? ' fx-stamp' : ''}">${esc(jn.title)}</div><div class="s">${esc(jn.done ? K.journey.stamp : K.journey.stage(rnd1(jn.to), jn.need))}</div></div>`);
     const st = c.progress.data().st, stNow = st ? st.current : 0, stBefore = Number.isFinite(info0.streak_before) ? info0.streak_before : stNow;
     if (stNow >= 1) rw.push(`<div ${rwAt(stNow > stBefore ? ' up' : '')} id="gpRStreakBox"><div class="l">${esc(K.rewards.streak)}</div><div class="v">${icon('flame', 22)}<span id="gpRStreak" data-from="${stBefore}" data-to="${stNow}">${stNow}</span></div><div class="s">${K.rewards.weeks(stNow)} in a row</div></div>`);
     let potBefore = null, potTo = null, showNote = false;
@@ -255,6 +257,8 @@ export function registerGuided(c) {
     });
     // a hit that lowers the potential target earns the unlock sound, once the number has come down
     if (pot && verdict.met && Number(pot.dataset.to) < Number(pot.dataset.from) - 0.049) at(ms(1700), () => FEEL.play('unlock'));
+    // finishing a stage of the road to scratch earns the tier sound
+    if ($('#gpRJourney[data-done="1"]')) at(ms(1500), () => { FEEL.play('tier'); pulse($('#gpRJourney'), 'pop'); });
     at(ms(1800), () => { $('#gpRoot')?.setAttribute('data-revealed', '1'); });
   }
   // this week's league points for a shared score: only once the group has the score, so the number is never a guess

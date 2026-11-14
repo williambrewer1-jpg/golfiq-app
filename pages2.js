@@ -419,9 +419,9 @@ export function registerPages(c) {
   }
   function pagePractice() {
     const tab = segVal('pr_tab', 'progress');
-    const body = { progress: () => c.progress.page(), focus: () => c.coachingPriorities(), games: practiceGames, board: () => c.compete.pageBoard(), combine: () => c.compete.pageCombine(), range: () => c.compete.pageRange(),
+    const body = { journey: () => c.progress.journeyPage(), progress: () => c.progress.page(), focus: () => c.coachingPriorities(), games: practiceGames, board: () => c.compete.pageBoard(), combine: () => c.compete.pageCombine(), range: () => c.compete.pageRange(),
       wedges: practiceWedges, log: practiceLog, notes: coachNotes, thoughts: coachThoughts }[tab] || practiceGames;
-    return `${seg('pr_tab', [['progress', 'Progress'], ['focus', 'Focus'], ['games', 'Games'], ['board', 'Leaderboard'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach'], ['thoughts', 'Swing thoughts']], 'progress', 'tabs')}${body()}`;
+    return `${seg('pr_tab', [['journey', 'Journey'], ['progress', 'Progress'], ['focus', 'Focus'], ['games', 'Games'], ['board', 'Leaderboard'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach'], ['thoughts', 'Swing thoughts']], 'progress', 'tabs')}${body()}`;
   }
   function wirePlaybook() {
     $('#pbElev')?.addEventListener('click', async (e) => {

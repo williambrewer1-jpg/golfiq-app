@@ -228,6 +228,15 @@ export const COPY = {
       ['daily', 'Today\'s challenge'], ['session', 'A full session'], ['round', 'A round (9 holes count half)'], ['challenge', 'An on-course challenge'], ['test', 'The monthly skills test']],
     welcomeRow: 'Welcome-back game: double points',
   },
+  journey: {
+    title: 'Road to scratch', tab: 'Journey', youAt: (i) => `You: ${i}`, course: 'Earned on the course', noIndex: 'Add a handicap index or a few rounds and your starting point moves up the path.',
+    stage: (h, need) => `${h} of ${need}`, stageDone: 'Stage complete', stageLeft: (n) => `${n} more to go`, needOther: 'Your hits so far are all in one game. A hit in another game finishes this stage.',
+    sheetLine: (n) => `Post the score a ${n === 0 ? 'scratch golfer' : `${n}-handicap golfer`} posts, three times, in any of these games.`, mine: 'Your best', target: 'Score to beat', play: 'Play',
+    bossLocked: 'Finish all four stages to open the boss game.', bossReady: 'All four stages are done. The boss game is the last step of this stretch.', bossSoon: 'The boss game arrives in the next update. Your stages stay earned.', bossPassed: 'Passed',
+    note: 'The journey measures your practice level. Your handicap follows when it shows up on the course.',
+    homeTitle: 'Next on your journey', homePlay: 'Play', homeOpen: 'See the path', rewardTitle: 'Journey',
+    stamp: 'Stage complete', done: 'All stretches complete. Keep playing.',
+  },
   freeze: {
     label: 'Streak freezes', held: (n) => `${n} freeze${n === 1 ? '' : 's'} held`,
     saved: (n) => (n > 1 ? `A freeze saved your ${n}-week streak. Earn another by finishing a session.` : 'A freeze saved your streak. Earn another by finishing a session.'),
