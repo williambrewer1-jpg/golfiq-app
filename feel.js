@@ -183,15 +183,19 @@ export function confetti(canvas, opts = {}) {
   } catch { return false; }
 }
 
+// How long the verdict stays on screen after a tap before the next step slides in. The answer itself is recorded at once; only the screen waits.
+// Tests set window.__feelDelay (for example 0) so they do not have to sit through it.
+export const FEEDBACK_MS = 450;
+export const feedbackMs = () => { const v = G.__feelDelay; return Number.isFinite(v) && v >= 0 ? v : FEEDBACK_MS; };
+
 // ------------------------------------------------------------------ wording
 // Every feedback phrase lives here, so the tone stays in one place. Short, plain, warm. The app is being renamed: new wording says BreakingPar.
 export const COPY = {
   app: 'BreakingPar',
-  verdict: { holed: 'Holed', missed: 'Missed', inside: 'Inside', outside: 'Outside', short: 'Just short', hit: 'Hit', fairway: 'Fairway', wide: 'Wide' },
+  verdict: { holed: 'Holed', missed: 'Missed', inside: 'Inside', outside: 'Outside', saved: 'Saved', on: 'On', worked: 'Worked', fairway: 'Fairway', wide: 'Wide', longest: 'Longest', logged: 'Logged', birdie: 'Birdie', par: 'Par', bogey: 'Bogey', double: 'Double', over: 'Over', short: 'Just short', hit: 'Hit' },
   target: (score, h, lower = false) => `Target ${score}${lower ? ' or fewer' : ''} · a ${h} handicap`,
   streak: (n) => `${n} in a row`,
   reachedTarget: 'Target reached',
-  pressure: 'Pressure ball — counts double',
   met: 'Target met',
   best: 'New personal best',
   short: (n) => `${n} short of your target`,

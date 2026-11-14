@@ -16,7 +16,7 @@ GAMES = ['putt-par18','putt-369','putt-lag','putt-streak','chip-updown','chip-pa
 URL = f'http://127.0.0.1:{port}/index.html'
 AUDIT = "() => { const s = document.querySelector('#gpRoot'); const bad = []; for (const el of s.querySelectorAll('button, input')) { const r = el.getBoundingClientRect(); if (r.height && r.height < 38) bad.push(el.textContent.trim() + ':' + Math.round(r.height)); } return { overflow: document.documentElement.scrollWidth > innerWidth + 1, small: bad }; }"
 with sync_playwright() as p:
-    b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); pg = ctx.new_page(); errs = []
+    b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); ctx.add_init_script('window.__feelDelay = 0'); pg = ctx.new_page(); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e))); pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort())
     pg.goto(URL); pg.wait_for_selector('#loadSample'); pg.click('#loadSample'); pg.wait_for_timeout(1500)
     pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games'}))"); pg.goto(URL + '#practice'); pg.reload(); pg.wait_for_selector('[data-gpstart]')
@@ -105,7 +105,7 @@ with sync_playwright() as p:
     pg.click('.gp-prem'); pg.fill('#gpDtype', '230'); pg.click('[data-gpball="w"]'); pg.wait_for_selector('#gpRoot .gp-dist'); pg.wait_for_timeout(60)
     d = pg.evaluate("() => window.__golfiq.state.journal.game_draft")
     check('premium ball skips the adjustment; a wide ball is half (230 / 2 = 115)', d['answers'][2] == 115 and d['balls'][2] == {'d': 230, 'r': 'w', 'a': 0} and d['premium'] is True, d)
-    check('the footer shows the running average', 'Average' in pg.inner_text('.gp-foot') and 'after 3 of 10' in pg.inner_text('.gp-foot'), pg.inner_text('.gp-foot'))
+    check('the score strip shows the running average', 'Average' in pg.inner_text('.gp-strip') and 'after 3 of 10' in pg.inner_text('.gp-strip'), pg.inner_text('.gp-strip'))
     check('dots: fairway green, the other two red', pg.evaluate("() => [...document.querySelectorAll('.gp-dots i')].slice(0, 3).map((e) => e.className)") == ['hit', 'miss', 'miss'])
     pg.click('[data-gpundo]'); pg.wait_for_timeout(80)
     d = pg.evaluate("() => window.__golfiq.state.journal.game_draft")
