@@ -5,9 +5,13 @@ import * as B from './bench.js';
 import * as CO from './coach.js';
 import * as SK from './skills.js';
 import * as GM from './games.js';
+import * as LV from './level.js';
+import * as FEEL from './feel.js';
+import { icon } from './icons.js';
 
 export function registerProgress(c) {
   const { A, esc, fmt, plot, note } = c;
+  const $ = (s) => document.querySelector(s);
   const J = () => c.state.journal;
   const games = () => [...F.DEFAULT_GAMES, ...(J().games || [])];
   const unitM = () => (c.UNIT === 'yd' ? 0.9144 : 1);
@@ -17,7 +21,7 @@ export function registerProgress(c) {
 
   let memo = { ds: null, j: null, v: null };
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, Math.floor(Date.now() / 36e5)]);
+    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().level_seen, Math.floor(Date.now() / 36e5)]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -38,12 +42,15 @@ export function registerProgress(c) {
     const off = [...(c.state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop()?.handicap_index;
     const hcp = A.isNum(fc.current) ? fc.current : A.isNum(off) ? off : null;
     const short = CO.roadmap(CO.SHORT_GAMES, res, g, unitM(), hcp), long = CO.roadmap(CO.LONG_GAMES, res, g, unitM(), hcp);
-    const st = CO.streaks(CO.practiceDates(J()));
+    const st = CO.streaks(CO.practiceDates(J()), new Date(), { sessions: J().sessions });
     const goals = CO.weeklyGoal({ findings: fs, roadmaps: [...short, ...long], results: res, games: g, assigned: CO.assignments(J().notes) });
     // Tier badges are listed only once earned (there are four per game), but the "X of Y" count has to include the ones still to win.
     const base = CO.badges({ rounds: ds.rounds, holes: ds.holes, journal: J(), roadmaps: [...short, ...long] }), tiers = GM.tierBadges(g, res, unitM());
     const bd = [...base, ...tiers.filter((b) => b.earned)], bd_total = base.length + tiers.length;
-    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total } };
+    // player level: points come from history (level.js). A game counts as a hit against the target for its skill, as on the game screen.
+    const targets = {}; for (const k of sk.skills) for (const sub of k.subs) for (const gm of sub.games) if (A.isNum(gm.target) && !(gm.id in targets)) targets[gm.id] = gm.target;
+    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0 });
+    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv } };
     return memo.v;
   }
 
@@ -146,7 +153,9 @@ export function registerProgress(c) {
     return `<div class="card"><div class="rv-h"><h2 style="margin:0">This week</h2><span class="small muted">${B.isoWeek().replace('-W', ' · week ')}</span></div>
       ${v.goals.map(goal).join('')}
       <div class="streak"><div><b class="gold">${st.current}</b><span>week streak</span></div><div><b>${st.best}</b><span>best</span></div>
-        <div class="strip12">${st.strip.map((w) => `<i class="${w.days ? (w.days >= 3 ? 'h3' : w.days === 2 ? 'h2' : 'h1') : ''}" title="${esc(w.week)}: ${w.days} day(s)"></i>`).join('')}</div></div>
+        <div class="strip12">${st.strip.map((w) => (w.frozen ? `<i class="fz" title="${esc(w.week)}: ${esc(FEEL.COPY.freeze.frozen)}" aria-label="${esc(FEEL.COPY.freeze.frozen)}">${icon('shield', 14)}</i>`
+          : `<i class="${w.days ? (w.days >= 3 ? 'h3' : w.days === 2 ? 'h2' : 'h1') : ''}" title="${esc(w.week)}: ${w.days} day(s)"></i>`)).join('')}</div></div>
+      <p class="small" style="margin:6px 0 2px">${shield(st.freezes_held)} <span class="muted">${esc(FEEL.COPY.freeze.note)}</span></p>
       <p class="small muted">${st.thisWeek ? 'Practised this week – streak safe.' : st.current ? 'Practise before Sunday to keep your streak.' : 'Any game score, practice log or wedge session this week starts a streak.'}</p></div>`;
   }
   function ladder(g) {
@@ -164,6 +173,67 @@ export function registerProgress(c) {
     return `<div class="card"><h2>Badges <span class="small muted">${got} of ${v.bd_total}</span></h2><p class="small muted" style="margin:0 0 8px">Game tier badges (up to four a game) appear here once you earn them.</p><div class="badges">${v.bd.map((b) => `<div class="bdg ${b.earned ? 'on' : ''}"><i>${b.earned ? '★' : '☆'}</i><b>${esc(b.name)}</b><span>${esc(b.desc)}</span><small>${b.earned ? (b.earned === 'yes' ? 'earned' : esc(b.earned)) : esc(b.progress || '')}</small></div>`).join('')}</div></div>`;
   }
 
+  // ---------------------------------------------------------------- player level (retention plan section 4) and the streak freeze (5.1)
+  const shield = (n) => { const t = FEEL.COPY.freeze.held(n); return `<span class="shield${n ? '' : ' none'}" title="${esc(t)}" role="img" aria-label="${esc(t)}">${icon('shield', 16)}<b>${n}</b></span>`; };
+  function chip(v) {
+    const l = v.lv, K = FEEL.COPY.playerLevel;
+    return `<button type="button" class="lvchip" data-level aria-label="${esc(`${K.title}: ${l.rank.name}`)}"><span class="lvring" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span>
+      <span class="lvtxt"><b>${esc(l.rank.name)}</b><small>${esc(l.next ? K.toNext(l.toNext, l.next.name) : K.top)}</small></span><span class="lvgo" aria-hidden="true">${icon('chevron', 18)}</span></button>`;
+  }
+  // "A freeze saved your 9-week streak": shown once for the latest freeze that is still part of the current streak. The week is remembered in J().freeze_seen;
+  // the card also stays for the rest of this visit, so a redraw does not take it away before it has been read.
+  let freezeShown = null;
+  function freezeCard(v) {
+    const live = v.st.frozen_live || [], wk = live[live.length - 1]; if (!wk) return '';
+    const seen = J().freeze_seen || '';
+    if (!(wk > seen || freezeShown === wk)) return '';
+    if (wk > seen) { freezeShown = wk; J().freeze_seen = wk; c.S.saveJournal(c.state); }
+    return `<div class="card lvfreeze" data-freezeline><span class="lvf-ic">${icon('shield', 24)}</span><p>${esc(FEEL.COPY.freeze.saved(v.st.saved[wk]))}</p><button type="button" class="btn sec" data-freezeok>${esc(FEEL.COPY.freeze.gotIt)}</button></div>`;
+  }
+  // the top of Home: the rank chip (opens the level sheet) and the freeze line
+  function levelRow() {
+    if (!c.DS.rounds.length && !(J().results || []).length) return '';
+    const v = data(); return `<div class="lvrow">${chip(v)}</div>${freezeCard(v)}`;
+  }
+  const ptsRow = (k) => { const x = LV.POINTS[k], extra = ['target', 'tier', 'pb', 'pressure', 'daily'].includes(k); return `<tr><td>${esc(FEEL.COPY.playerLevel.table.find((r) => r[0] === k)[1])}</td><td><b>${extra ? '+' : ''}${x}</b></td></tr>`; };
+  function levelSheet() {
+    const v = data(), l = v.lv, K = FEEL.COPY.playerLevel, lines = l.ledger.slice(0, LV.LEDGER_LINES);
+    $('#sheetPanel').innerHTML = `<div class="lvs-h"><span class="lvring big" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span><div><h2 style="margin:0">${esc(l.rank.name)}</h2><div class="small muted">${esc(K.rank(l.rank.n))} of ${LV.RANKS.length} · ${esc(K.total(l.points))}</div></div></div>
+      <p class="small" style="margin:10px 0 2px">${esc(l.next ? K.toNext(l.toNext, l.next.name) : K.top)}</p><div class="bar"><i style="width:${Math.round(l.progress * 100)}%"></i></div>
+      <p class="small muted" style="margin:6px 0 0">${esc(K.today(Math.min(l.today, LV.DAILY_CAP), LV.DAILY_CAP))}</p>
+      <h3 style="margin:14px 0 4px">${esc(K.recent)}</h3>
+      ${lines.length ? `<div class="lvled">${lines.map((x) => `<div><span class="small muted">${esc(x.date.slice(5))}</span><span>${esc(x.what)}</span><b>+${x.points}</b></div>`).join('')}</div>` : `<p class="small muted">${esc(K.none)}</p>`}
+      <h3 style="margin:14px 0 4px">${esc(K.tableTitle)}</h3>
+      <div class="tbl"><table><tbody>${K.table.map((r) => ptsRow(r[0])).join('')}<tr><td>${esc(K.welcomeRow)}</td><td><b>×${LV.POINTS.welcome_back}</b></td></tr></tbody></table></div>
+      <p class="small muted" style="margin:8px 0 0">${esc(K.capNote(LV.DAILY_CAP))}</p><p class="small muted" style="margin:6px 0 12px">${esc(K.note)}</p>
+      <button type="button" class="btn" id="lvClose">Close</button>`;
+    $('#sheet').classList.add('open'); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open'));
+  }
+  // The rank-up moment: a full-width card with the new rank stamped in. Shown once per rank (J().level_seen). The first time the feature runs, the rank the golfer
+  // already has is taken as the starting point rather than celebrated. Never shown over a game in play; after a game it waits for the result screen to finish.
+  function rankMoment() {
+    if (!(c.DS.rounds.length || (J().results || []).length) || J().game_draft || $('#lvMoment')) return;
+    const l = data().lv, seen = J().level_seen;
+    if (seen === undefined || seen === null) { J().level_seen = l.rank.n; memo.j = null; c.S.saveJournal(c.state); return; }
+    const up = LV.rankUp(l, seen); if (!up) return;
+    const root = $('#gpRoot.gp-rv'), show = () => {
+      if ($('#lvMoment') || J().game_draft) return;
+      J().level_seen = up.n; memo.j = null; c.S.saveJournal(c.state);
+      const K = FEEL.COPY.playerLevel, d = document.createElement('div'); d.id = 'lvMoment'; d.className = 'lvmoment'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', K.moment.kicker);
+      d.innerHTML = `<canvas class="lvm-conf" aria-hidden="true"></canvas><div class="lvm-k">${esc(K.moment.kicker)} · ${esc(K.rank(up.n))}</div><div class="lvm-name fx-stamp">${esc(up.name)}</div>
+        <div class="lvm-s">${esc(K.moment.line(l.points))}</div><button type="button" class="btn" id="lvmOk">${esc(K.moment.button)}</button>`;
+      document.body.appendChild(d); d.querySelector('#lvmOk').addEventListener('click', () => d.remove());
+      FEEL.play('tier'); FEEL.confetti(d.querySelector('.lvm-conf'));
+    };
+    if (root) setTimeout(show, FEEL.revealMs(2400)); else show();
+  }
+  // runs after every page draw (app.js): the rank chips open the sheet, the freeze line can be dismissed, the rank moment may appear, the rank is shared with friends
+  function afterRender() {
+    c.$$('[data-level]').forEach((b) => b.addEventListener('click', levelSheet));
+    c.$$('[data-freezeok]').forEach((b) => b.addEventListener('click', () => { freezeShown = null; b.closest('[data-freezeline]')?.remove(); }));
+    try { rankMoment(); if (c.compete?.shareRank && (c.DS.rounds.length || (J().results || []).length)) c.compete.shareRank(data().lv.rank.name); } catch (e) { console.error(e); }
+  }
+
   function page() {
     const v = data();
     return `${forecastCard(v)}${levelUpCard(v)}${weekCard(v)}${milestonesCard(v)}
@@ -177,8 +247,8 @@ export function registerProgress(c) {
     return `<a class="card prog-home" href="#practice" data-practice="progress"><h2>Progress</h2><div class="ph-row">
       ${v.fc.ok ? `<div><span>Potential in 6 months</span><b class="good">${n1(v.fc.potential)}</b><small>now ${n1(v.fc.current)}</small></div>` : ''}
       ${nx && nx.p_round !== null ? `<div><span>${nx.label}</span><b>${pct(nx.p_round)}</b><small>chance a round</small></div>` : ''}
-      <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'}</small></div></div>
+      <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'} ${shield(v.st.freezes_held)}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard, wire };
+  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield };
 }
