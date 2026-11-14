@@ -6,6 +6,7 @@ import { registerCompete } from './compete.js';
 import { registerProgress } from './progress.js';
 import { registerGuided } from './guided.js';
 import * as FEEL from './feel.js';
+import * as CHT from './charts.js';
 import * as CH from './challenges.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
@@ -151,13 +152,20 @@ const emptyMsg = () => `<div class="card"><h2>Welcome to GolfIQ</h2><p>Your golf
 
 // ------------------------------------------------------------------ trend chart
 function trendChart(rounds, metric, label, ref = null) {
-  const d = A.withRolling(rounds, metric);
-  const tr = [{ x: d.map((r) => r.date), y: d.map((r) => r.value), text: d.map((r) => r.label), type: 'scatter', mode: 'markers', name: 'Round', marker: { color: P.muted, size: 7 }, hovertemplate: '%{text}<br>%{y:.1f}<extra></extra>' }];
-  [[5, P.accent], [10, P.good], [20, P.gold]].forEach(([w, c]) => { if (d.some((r) => r[`roll${w}`] !== null)) tr.push({ x: d.map((r) => r.date), y: d.map((r) => r[`roll${w}`]), type: 'scatter', mode: 'lines', name: `${w}-rd avg`, line: { color: c, width: 2.5 } }); });
-  const shapes = ref !== null ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: ref, y1: ref, line: { dash: 'dot', color: '#888' } }] : [];
-  return plot(tr, { yaxis: { title: { text: label } }, shapes, height: 300 });
+  const m = A.METRICS[metric] || [label, true, ''], n = rounds.filter((r) => A.isNum(r[metric])).length, wins = CHT.trendWins(n), key = `tw_${metric}`;
+  const win = wins.includes(Number(ui[key])) ? Number(ui[key]) : (wins[0] || 0);
+  const ctl = wins.length > 1 ? `<div class="seg" data-seg="${key}">${wins.map((w) => `<button data-v="${w}" class="${w === win ? 'on' : ''}">${w} rounds</button>`).join('')}</div>` : '';
+  return ctl + CHT.trend({ rounds, metric, label, unit: m[2], hib: m[1], ref, win });
 }
 
+const SOFT_BAD = 'color-mix(in srgb, var(--bad) 70%, var(--card))';
+function distChart(rounds, metric) {
+  const vals = rounds.map((x) => x[metric]).filter(A.isNum); if (vals.length < 2) return '';
+  const intM = ['stableford_round', 'gross', 'to_par'].includes(metric), w = 2, bins = CHT.bin(vals, w), last = vals[vals.length - 1];
+  const hotI = Math.min(bins.length - 1, Math.max(0, Math.floor((last - bins[0].lo) / w + 1e-9))), name = A.METRICS[metric]?.[0] || metric;
+  const items = bins.map((b, i) => ({ label: intM ? `${b.lo}–${b.hi - 1}` : `${b.lo}–${b.hi}`, xl: String(b.lo), value: b.count, hot: i === hotI, tone: 'accent', note: `${intM ? `${b.lo}–${b.hi - 1}` : `${b.lo} to ${b.hi}`}: ${b.count} round${b.count === 1 ? '' : 's'}${i === hotI ? ' (includes your last round)' : ''}` }));
+  return `<h3>Distribution of rounds</h3>${CHT.bars({ items, digits: 0, aria: `How many rounds fall in each ${name} range`, caption: `Tap a bar. The outlined bar holds your last round (${fmt(last)}).` })}`;
+}
 // ------------------------------------------------------------------ pages
 const PAGES = {
   home: ['GolfIQ', 'home'], stats: ['Stats', 'chart'], rounds: ['Rounds', 'list'],
@@ -226,7 +234,7 @@ function killersTrend(ds) {
   const last = rows.slice(-5), prev = rows.slice(-10, -5), avg = (a, k) => (a.length ? A.mean(a.map((x) => x[k])) : null);
   return `<div class="card"><h2>Score killers</h2><p class="small">Per 18-hole round – after Scott Fawcett's five scoring rules, plus penalty strokes. Short-iron range = your 9-iron distance (${D(F.shortIronRange(DS))}).</p>
     ${table(F.KILLERS.map(([k, l]) => ({ l, last: avg(last, k), prev: avg(prev, k), all: avg(rows, k) })), [['l', 'Per round'], ['last', 'Last 5', n1], ['prev', 'Previous 5', n1], ['all', `All ${rows.length}`, n1]])}
-    ${plot([{ x: rows.map((r) => r.date), y: rows.map((r) => r.total), type: 'bar', marker: { color: P.bad } }], { height: 200, title: 'Score killers per round' })}</div>`;
+    <h3>Score killers per round</h3>${CHT.bars({ items: rows.map((r) => ({ label: r.date, xl: CHT.shortDate(r.date), value: r.total, tone: SOFT_BAD, note: `${r.date} · ${r.course || ''} · ${fmt(r.total, 0)} score killers` })), digits: 0, aria: 'Score killers in each 18-hole round', caption: 'Tap a bar for the round.' })}</div>`;
 }
 function bestWorst(r) {
   const basis = r.filter((x) => x.differential !== null).length >= 3 ? 'differential' : 'to_par';
@@ -249,7 +257,7 @@ function pageScoring() {
   ${trendChart(r, m, A.METRICS[m][0], m === 'stableford_round' ? 36 : null)}
   ${table(A.compareWindows(r.map((x) => x[m]), A.METRICS[m][1]), [['window', 'Last N vs previous N'], ['recent', 'Recent', n2], ['prior', 'Previous', n2], ['p', 'p', n2], ['verdict', 'Verdict']])}
   ${note('Welch t-test, p < 0.10. "No clear change" = within normal round-to-round noise; needs 2×N rounds.')}
-  ${plot([{ x: r.map((x) => x[m]).filter(A.isNum), type: 'histogram', marker: { color: P.accent }, nbinsx: 15 }], { title: 'Distribution of rounds', height: 220 })}</div>
+  ${distChart(r, m)}</div>
   <div class="card"><h2>Consistency</h2><div class="kpis">${['gross', 'stableford_round', 'differential'].map((mm) => { const cc = A.consistency(r, mm); return `<div class="kpi"><div class="l">${A.METRICS[mm][0]} – SD</div><div class="v">${fmt(cc.sd)}</div><div class="d muted">IQR ${fmt(cc.iqr)} · n=${cc.n}</div></div>`; }).join('')}</div></div>
   ${killersTrend(ds)}
   ${bestWorst(r)}
@@ -668,12 +676,12 @@ function render() {
   if (inSettings) $('#backBtn').innerHTML = `${icon('back', 24)}${key === 'settings' ? '' : 'Settings'}`;
   const gb = $('#gearBtn'); gb.classList.toggle('done', inSettings); gb.innerHTML = inSettings ? 'Done' : icon('gear', 25);
   gb.setAttribute('href', inSettings ? lastMain : '#settings'); gb.setAttribute('aria-label', inSettings ? 'Close settings' : 'Settings');
-  plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = []; SUBWIRE = []; EMBED = null;
+  plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = []; SUBWIRE = []; EMBED = null; CHT.resetCharts();
   let html;
   try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'corrections', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
   catch (e) { console.error(e); html = `<div class="err">Something went wrong on this page: ${esc(e.message)}</div>`; }
   $('#main').innerHTML = html;
-  drawPlots(); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm(); PROG?.afterRender();
+  drawPlots(); CHT.wireCharts($('#main')); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm(); PROG?.afterRender();
   $$('[data-share]').forEach((b) => b.addEventListener('click', () => EXTRA.shareRound(b.dataset.share)));
   $$('.seg.scroll, .seg.tabs').forEach((g) => { const b = $('button.on', g); if (b) g.scrollLeft = b.offsetLeft - (g.clientWidth - b.offsetWidth) / 2; });
 }

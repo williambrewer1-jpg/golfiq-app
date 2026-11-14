@@ -102,6 +102,21 @@ label.f{display:block;font-size:11.5px;font-weight:600;color:var(--muted);margin
 .badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--chip);color:var(--muted)}
 .badge.reliable{background:color-mix(in srgb,var(--good) 14%,var(--card));color:var(--good)}.badge.low{background:color-mix(in srgb,var(--warn) 14%,var(--card));color:var(--warn)}.badge.insufficient{background:color-mix(in srgb,var(--bad) 12%,var(--card));color:var(--bad)}
 .plot{width:100%;min-height:260px}.plot.tall{min-height:420px}.plot.map{min-height:460px;border-radius:14px;overflow:hidden}
+/* ---- charts (charts.js) */
+.ch{margin:4px 0 12px;animation:chin .25s ease-out}
+.ch svg{display:block;width:100%;height:auto;touch-action:pan-y;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;overflow:visible}
+.ch .grid{stroke:var(--hair);stroke-width:1}.ch .base{stroke:var(--line);stroke-width:1}
+.ch .tick{fill:var(--muted);font:11px var(--sans)}.ch .tick.gold{fill:var(--gold)}.ch .val{fill:var(--ink);font:600 11px var(--serif)}
+.ch .ref{stroke:var(--gold);stroke-width:1.5;stroke-dasharray:3 3}
+.ch .ln{fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;animation:chdraw .5s ease-out}.ch .ln.dash{stroke-dasharray:4 3;animation:none}
+.ch-cur{stroke:var(--gold);stroke-width:1.5;opacity:0}.ch-dot{fill:var(--gold);stroke:var(--card);stroke-width:2;opacity:0}
+.ch-lab{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.045em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-head{display:flex;align-items:baseline;gap:6px;margin:2px 0 0}.ch-big{font:700 34px/1.1 var(--serif);color:var(--accent);font-variant-numeric:tabular-nums}.ch-unit{font-size:13px;color:var(--muted)}
+.ch-sub{font-size:12.5px;color:var(--muted);min-height:18px;margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ch-sub .good,.ch-sub .bad{font-weight:600}
+.ch-cap{font-size:12px;color:var(--muted);min-height:18px;margin:2px 0 0}
+.ch-bar .hit{fill:transparent;cursor:pointer}.ch-bar.hot .b{stroke:var(--gold);stroke-width:2}.ch-bar.on .b{stroke:var(--ink);stroke-width:2}
+@keyframes chin{from{opacity:0}to{opacity:1}}@keyframes chdraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){.ch,.ch .ln{animation:none}}
 .grid2{display:grid;grid-template-columns:1fr;gap:12px}@media(min-width:800px){.grid2{grid-template-columns:1fr 1fr}}
 .sect{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:18px 4px 8px}
 .tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}@media(min-width:700px){.tiles{grid-template-columns:repeat(4,1fr)}}
