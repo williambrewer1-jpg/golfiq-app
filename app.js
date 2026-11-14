@@ -83,10 +83,26 @@ function refreshPalette() {
   COLORS.length = 0; COLORS.push(...base, ...base.map((c) => mixHex(c, P.card, 0.5)), mixHex(P.accent, P.bad, 0.5), mixHex(P.good, P.ink, 0.5));
 }
 refreshPalette();
-// every Plotly chart is locked (no drag-zoom, no double-tap, no scroll-zoom); only the course map keeps its own pan and zoom
+// Plotly is only downloaded when a page really has a Plotly chart (club distances, dispersion, weather, course map, radar, practice charts).
+// The service worker keeps it for offline use after the first time.
+const PLOTLY_URL = 'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js';
+let plotlyP = null, renderGen = 0;
+function loadPlotly() {
+  if (window.Plotly) return Promise.resolve();
+  if (!plotlyP) plotlyP = new Promise((res, rej) => { const s = document.createElement('script'); s.src = PLOTLY_URL; s.onload = res; s.onerror = () => { plotlyP = null; s.remove(); rej(new Error('Plotly could not load')); }; document.head.appendChild(s); });
+  return plotlyP;
+}
+const plotNote = (list, html) => { for (const [id] of list) { const e = document.getElementById(id); if (e) e.innerHTML = html; } };
 function drawPlots() {
-  if (!window.Plotly) { plots.forEach(([id]) => { const e = document.getElementById(id); if (e) e.innerHTML = '<p class="muted small">Charts load when online the first time.</p>'; }); return; }
-  for (const [id, traces, layout] of plots) {
+  if (!plots.length) return;
+  const list = plots, gen = renderGen;
+  if (window.Plotly) { paintPlots(list); return; }
+  plotNote(list, '<p class="muted small">Loading chart…</p>');
+  loadPlotly().then(() => { if (gen === renderGen) paintPlots(list); }).catch(() => { if (gen === renderGen) plotNote(list, '<p class="muted small">Charts load when online the first time.</p>'); });
+}
+// every Plotly chart is locked (no drag-zoom, no double-tap, no scroll-zoom); only the course map keeps its own pan and zoom
+function paintPlots(list) {
+  for (const [id, traces, layout] of list) {
     const e = document.getElementById(id); if (!e) continue;
     const isMap = !!layout.map, font = { family: P.sans, size: 11, color: P.ink };
     const ax = (a = {}) => ({ gridcolor: P.hair, zerolinecolor: P.line, linecolor: P.line, tickfont: { size: 11, color: P.muted }, ...a, ...(a.title ? { title: { ...a.title, font: { size: 11, color: P.muted } } } : {}), fixedrange: !isMap });
@@ -689,7 +705,7 @@ function render() {
   if (inSettings) $('#backBtn').innerHTML = `${icon('back', 24)}${key === 'settings' ? '' : 'Settings'}`;
   const gb = $('#gearBtn'); gb.classList.toggle('done', inSettings); gb.innerHTML = inSettings ? 'Done' : icon('gear', 25);
   gb.setAttribute('href', inSettings ? lastMain : '#settings'); gb.setAttribute('aria-label', inSettings ? 'Close settings' : 'Settings');
-  plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = []; SUBWIRE = []; EMBED = null; CHT.resetCharts();
+  plots.forEach(([id]) => { const e = document.getElementById(id); if (e && window.Plotly) Plotly.purge(e); }); plots = []; SUBWIRE = []; EMBED = null; CHT.resetCharts(); renderGen++;
   let html;
   try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'corrections', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
   catch (e) { console.error(e); html = `<div class="err">Something went wrong on this page: ${esc(e.message)}</div>`; }
@@ -919,6 +935,6 @@ addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); ret
   const PL = registerPlay(ctx); Object.assign(EXTRA.pages, PL.pages); Object.assign(EXTRA.render, PL.render); Object.assign(EXTRA.wire, PL.wire); EXTRA.noData.push(...PL.noData); EXTRA.play = PL;
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
   PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
-  if (window.Plotly || document.readyState === 'complete') render(); else addEventListener('load', render, { once: true });
+  render();
   window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; }, get progress() { return PROG; } };
 })();
