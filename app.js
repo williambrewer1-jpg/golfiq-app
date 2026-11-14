@@ -70,20 +70,32 @@ function kpi(label, value, delta = null, hib = true, d = 1, unit = '') {
 }
 function plot(traces, layout = {}, cls = '') { const id = `p${plots.length}`; plots.push([id, traces, layout]); return `<div class="plot ${cls}" id="${id}"></div>`; }
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// Chart colours come from the theme (light and dark), read again at every render, so charts never use fixed colours.
+const P = {}, COLORS = [];
+const hexRgb = (h) => { const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(h || ''); if (!m) return null; const x = m[1].length === 3 ? [...m[1]].map((d) => d + d).join('') : m[1]; return [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16)); };
+const mixHex = (a, b, t) => { const x = hexRgb(a), y = hexRgb(b); return x && y ? `rgb(${x.map((v, i) => Math.round(v + (y[i] - v) * t)).join(',')})` : a; };
+const alphaOf = (h, a) => { const x = hexRgb(h); return x ? `rgba(${x.join(',')},${a})` : h; };
+function refreshPalette() {
+  Object.assign(P, { accent: css('--accent'), gold: css('--gold'), good: css('--good'), bad: css('--bad'), warn: css('--warn'), ink: css('--ink'), muted: css('--muted'), line: css('--line'), hair: css('--hair'), card: css('--card'), sans: css('--sans') });
+  P.accentSoft = alphaOf(P.accent, 0.16);
+  const base = [P.accent, P.good, P.bad, P.ink, P.muted];
+  COLORS.length = 0; COLORS.push(...base, ...base.map((c) => mixHex(c, P.card, 0.5)), mixHex(P.accent, P.bad, 0.5), mixHex(P.good, P.ink, 0.5));
+}
+refreshPalette();
+// every Plotly chart is locked (no drag-zoom, no double-tap, no scroll-zoom); only the course map keeps its own pan and zoom
 function drawPlots() {
   if (!window.Plotly) { plots.forEach(([id]) => { const e = document.getElementById(id); if (e) e.innerHTML = '<p class="muted small">Charts load when online the first time.</p>'; }); return; }
   for (const [id, traces, layout] of plots) {
     const e = document.getElementById(id); if (!e) continue;
-    const L = { margin: { l: 44, r: 10, t: layout.title ? 34 : 10, b: 40 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { size: 11, color: css('--ink') }, legend: { orientation: 'h', y: -0.22 }, xaxis: { gridcolor: css('--line'), zerolinecolor: css('--line') },
-      yaxis: { gridcolor: css('--line'), zerolinecolor: css('--line') }, hovermode: 'closest', ...layout };
-    if (layout.title) L.title = { text: layout.title, font: { size: 13 }, x: 0.02 };
-    if (layout.xaxis) L.xaxis = { gridcolor: css('--line'), ...layout.xaxis };
-    if (layout.yaxis) L.yaxis = { gridcolor: css('--line'), ...layout.yaxis };
-    Plotly.newPlot(e, traces, L, { responsive: true, displayModeBar: false });
+    const isMap = !!layout.map, font = { family: P.sans, size: 11, color: P.ink };
+    const ax = (a = {}) => ({ gridcolor: P.hair, zerolinecolor: P.line, linecolor: P.line, tickfont: { size: 11, color: P.muted }, ...a, ...(a.title ? { title: { ...a.title, font: { size: 11, color: P.muted } } } : {}), fixedrange: !isMap });
+    const L = { margin: { l: 44, r: 10, t: layout.title ? 34 : 10, b: 40 }, paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font,
+      legend: { orientation: 'h', y: -0.22 }, hovermode: 'closest', hoverlabel: { bgcolor: P.ink, bordercolor: P.ink, font: { family: P.sans, size: 12, color: P.card } },
+      ...layout, xaxis: ax(layout.xaxis), yaxis: ax(layout.yaxis), dragmode: isMap ? 'pan' : false };
+    if (layout.title) L.title = { text: layout.title, font: { size: 13, family: P.sans, color: P.ink }, x: 0.02 };
+    Plotly.newPlot(e, traces, L, { responsive: true, displayModeBar: false, scrollZoom: isMap, doubleClick: isMap ? 'reset' : false, showTips: false });
   }
 }
-const COLORS = ['#1E88E5', '#43A047', '#FB8C00', '#8E24AA', '#E53935', '#00ACC1', '#6D4C41', '#3949AB', '#C0CA33', '#D81B60', '#00897B', '#5E35B1'];
 async function saveFile(name, text) {
   const file = new File([text], name, { type: 'application/json' });
   if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; } }
@@ -140,8 +152,8 @@ const emptyMsg = () => `<div class="card"><h2>Welcome to GolfIQ</h2><p>Your golf
 // ------------------------------------------------------------------ trend chart
 function trendChart(rounds, metric, label, ref = null) {
   const d = A.withRolling(rounds, metric);
-  const tr = [{ x: d.map((r) => r.date), y: d.map((r) => r.value), text: d.map((r) => r.label), type: 'scatter', mode: 'markers', name: 'Round', marker: { color: '#B0BEC5', size: 7 }, hovertemplate: '%{text}<br>%{y:.1f}<extra></extra>' }];
-  [[5, '#1E88E5'], [10, '#43A047'], [20, '#FB8C00']].forEach(([w, c]) => { if (d.some((r) => r[`roll${w}`] !== null)) tr.push({ x: d.map((r) => r.date), y: d.map((r) => r[`roll${w}`]), type: 'scatter', mode: 'lines', name: `${w}-rd avg`, line: { color: c, width: 2.5 } }); });
+  const tr = [{ x: d.map((r) => r.date), y: d.map((r) => r.value), text: d.map((r) => r.label), type: 'scatter', mode: 'markers', name: 'Round', marker: { color: P.muted, size: 7 }, hovertemplate: '%{text}<br>%{y:.1f}<extra></extra>' }];
+  [[5, P.accent], [10, P.good], [20, P.gold]].forEach(([w, c]) => { if (d.some((r) => r[`roll${w}`] !== null)) tr.push({ x: d.map((r) => r.date), y: d.map((r) => r[`roll${w}`]), type: 'scatter', mode: 'lines', name: `${w}-rd avg`, line: { color: c, width: 2.5 } }); });
   const shapes = ref !== null ? [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: ref, y1: ref, line: { dash: 'dot', color: '#888' } }] : [];
   return plot(tr, { yaxis: { title: { text: label } }, shapes, height: 300 });
 }
@@ -214,7 +226,7 @@ function killersTrend(ds) {
   const last = rows.slice(-5), prev = rows.slice(-10, -5), avg = (a, k) => (a.length ? A.mean(a.map((x) => x[k])) : null);
   return `<div class="card"><h2>Score killers</h2><p class="small">Per 18-hole round – after Scott Fawcett's five scoring rules, plus penalty strokes. Short-iron range = your 9-iron distance (${D(F.shortIronRange(DS))}).</p>
     ${table(F.KILLERS.map(([k, l]) => ({ l, last: avg(last, k), prev: avg(prev, k), all: avg(rows, k) })), [['l', 'Per round'], ['last', 'Last 5', n1], ['prev', 'Previous 5', n1], ['all', `All ${rows.length}`, n1]])}
-    ${plot([{ x: rows.map((r) => r.date), y: rows.map((r) => r.total), type: 'bar', marker: { color: '#b4472f' } }], { height: 200, title: 'Score killers per round' })}</div>`;
+    ${plot([{ x: rows.map((r) => r.date), y: rows.map((r) => r.total), type: 'bar', marker: { color: P.bad } }], { height: 200, title: 'Score killers per round' })}</div>`;
 }
 function bestWorst(r) {
   const basis = r.filter((x) => x.differential !== null).length >= 3 ? 'differential' : 'to_par';
@@ -230,14 +242,14 @@ function pageScoring() {
   const dist = A.distribution(h), bl = A.blowupSummary(h, r), bp = A.byPar(h), fb = A.frontBack(h, r);
   const courses = [...new Map(r.map((x) => [x.course_id, x.course_name])).entries()].filter(([c]) => c);
   const cid = segVal('sc_course', courses[0]?.[0]), ha = cid ? A.holeAverages(h, cid) : [];
-  const cols = ['#1B5E20', '#43A047', '#90CAF9', '#FFB74D', '#E57373', '#B71C1C'];
+  const cols = ['#1B5E20', P.good, '#90CAF9', '#FFB74D', '#E57373', '#B71C1C'];
   return `${filterSummary(ds)}<div class="kpis">${kpi('Avg Stableford', A.mean(r.map((x) => x.stableford_round)))}${kpi('Avg gross', A.mean(r.map((x) => x.gross)))}${kpi('Avg to par', A.mean(r.map((x) => x.to_par)))}${kpi('Avg differential', A.mean(r.map((x) => x.differential)))}</div>
   ${note(`Garmin doesn't export a Stableford total – all points are <b>reconstructed</b> (WHS playing handicap = 95% of course handicap, strokes by stroke index). ${missing} round(s) can't be reconstructed (add handicap, rating/slope or stroke index in Settings).`)}
   <div class="card"><h2>Is it improving?</h2>${seg('sc_m', [['stableford_round', 'Stableford'], ['gross', 'Gross'], ['to_par', 'To par'], ['differential', 'Differential']], 'stableford_round', 'scroll')}
   ${trendChart(r, m, A.METRICS[m][0], m === 'stableford_round' ? 36 : null)}
   ${table(A.compareWindows(r.map((x) => x[m]), A.METRICS[m][1]), [['window', 'Last N vs previous N'], ['recent', 'Recent', n2], ['prior', 'Previous', n2], ['p', 'p', n2], ['verdict', 'Verdict']])}
   ${note('Welch t-test, p < 0.10. "No clear change" = within normal round-to-round noise; needs 2×N rounds.')}
-  ${plot([{ x: r.map((x) => x[m]).filter(A.isNum), type: 'histogram', marker: { color: '#1E88E5' }, nbinsx: 15 }], { title: 'Distribution of rounds', height: 220 })}</div>
+  ${plot([{ x: r.map((x) => x[m]).filter(A.isNum), type: 'histogram', marker: { color: P.accent }, nbinsx: 15 }], { title: 'Distribution of rounds', height: 220 })}</div>
   <div class="card"><h2>Consistency</h2><div class="kpis">${['gross', 'stableford_round', 'differential'].map((mm) => { const cc = A.consistency(r, mm); return `<div class="kpi"><div class="l">${A.METRICS[mm][0]} – SD</div><div class="v">${fmt(cc.sd)}</div><div class="d muted">IQR ${fmt(cc.iqr)} · n=${cc.n}</div></div>`; }).join('')}</div></div>
   ${killersTrend(ds)}
   ${bestWorst(r)}
@@ -246,7 +258,7 @@ function pageScoring() {
   <div class="card"><h2>By hole par</h2>${table(bp, [['par', 'Par'], ['holes', 'Holes'], ['avg_score', 'Avg', n2], ['avg_to_par', 'To par', n2], ['stableford_avg', 'Pts', n2], ['gir_pct', 'GIR', p0], ['blowup_pct', 'Triple+', p0]])}
   <h3>Front vs back nine (18-hole rounds)</h3>${table(fb, [['nine', ''], ['avg_to_par_per_9', 'To par / 9', n2], ['stableford_per_9', 'Pts / 9', n1], ['putts_per_9', 'Putts / 9', n1]])}</div>
   <div class="card"><h2>By course</h2>${table(A.courseSummary(r), [['course', 'Course'], ['tee', 'Tee'], ['rounds', 'Rds'], ['avg_gross', 'Gross', n1], ['avg_differential', 'Diff', n1], ['avg_stableford', 'Pts', n1], ['rating', 'CR', n1], ['slope', 'Slope', n0]])}
-  ${courses.length ? `<h3>Hole by hole</h3>${select('sc_course', courses, cid)}${plot([{ x: ha.map((x) => x.hole), y: ha.map((x) => x.avg_to_par), type: 'bar', marker: { color: ha.map((x) => (x.avg_to_par > 1 ? '#E53935' : x.avg_to_par > 0.5 ? '#FB8C00' : '#43A047')) } }], { height: 230, xaxis: { dtick: 1, title: { text: 'Hole' } }, yaxis: { title: { text: 'Avg to par' } } })}
+  ${courses.length ? `<h3>Hole by hole</h3>${select('sc_course', courses, cid)}${plot([{ x: ha.map((x) => x.hole), y: ha.map((x) => x.avg_to_par), type: 'bar', marker: { color: ha.map((x) => (x.avg_to_par > 1 ? P.bad : x.avg_to_par > 0.5 ? P.gold : P.good)) } }], { height: 230, xaxis: { dtick: 1, title: { text: 'Hole' } }, yaxis: { title: { text: 'Avg to par' } } })}
   ${table(ha, [['hole', 'Hole'], ['par', 'Par'], ['si', 'SI'], ['played', 'n'], ['avg', 'Avg', n2], ['avg_to_par', 'To par', n2], ['stableford', 'Pts', n2], ['gir_pct', 'GIR', p0]])}` : ''}
   ${note('Compare courses on differential (accounts for rating/slope), not gross.')}</div>`;
 }
@@ -259,7 +271,7 @@ function pageTee() {
   <div class="card"><h2>What a missed fairway costs</h2><p>${sgn(fw.to_par_yes)} to par after hitting the fairway vs ${sgn(fw.to_par_no)} after missing it: <b>${n2(fw.delta)}</b> strokes per miss <span class="small muted">(${fw.n_yes} hit / ${fw.n_no} missed)</span>.</p>
   ${note('A personal contrast from your own par 4s and 5s. It overlaps with approach play – Practice → Focus ranks the areas together.')}</div>
   <div class="card"><h2>Trend</h2>${seg('te_m', [['fw_pct', 'Fairways'], ['penalties', 'Penalties']], 'fw_pct')}${trendChart(r, m, A.METRICS[m][0])}</div>
-  <div class="card"><h2>Fairway results</h2>${plot([{ x: ['Hit', 'Left', 'Right'], y: [drv.fw_hit_pct, drv.miss_left_pct, drv.miss_right_pct], type: 'bar', marker: { color: ['#43A047', '#FB8C00', '#E53935'] } }], { height: 220 })}
+  <div class="card"><h2>Fairway results</h2>${plot([{ x: ['Hit', 'Left', 'Right'], y: [drv.fw_hit_pct, drv.miss_left_pct, drv.miss_right_pct], type: 'bar', marker: { color: [P.good, P.gold, P.bad] } }], { height: 220 })}
   ${table(drv.by_club, [['club', 'Tee club'], ['shots', 'n'], ['median_m', `Median ${UNIT}`, d0], ['sd_m', 'SD', d1], ['lateral_sd_m', 'Lateral SD', d1]])}
   ${note('Fairway results come from your scorecard. Tee-shot distances are GPS total; lateral spread is measured from the usual line of your drives on each hole.')}</div>`;
 }
@@ -272,12 +284,12 @@ function pageApproach() {
   return `${filterSummary(ds)}<div class="kpis">${kpi('GIR', A.mean(h.map((x) => x.gir_eff)) * 100, null, true, 0, '%')}${kpi('Strokes per missed green', gir.delta, null, false, 2)}${kpi(`Long/short SD (${UNIT})`, cv(A.std(reach.map((x) => x.long_short_m))), null, false, 0)}${kpi(`Left/right SD (${UNIT})`, cv(A.std(reach.map((x) => x.lateral_m))), null, false, 0)}</div>
   ${note('GIR is derived (strokes − putts ≤ par − 2); holes with missing or default putts are excluded. If long/short spread is bigger than left/right, distance control is the bigger leak.')}
   <div class="card"><h2>Trend</h2>${trendChart(r, 'gir_pct', A.METRICS.gir_pct[0])}
-  ${plot([{ x: g1.map((x) => `Par ${x.par}`), y: g1.map((x) => x.gir_pct), type: 'bar', marker: { color: '#43A047' } }], { title: 'GIR % by par', height: 220 })}</div>
-  <div class="card"><h2>By distance</h2>${bands.length ? plot([{ x: bands.map((b) => b.band), y: bands.map((b) => b.green_hit_pct), type: 'bar', name: 'Green hit %', marker: { color: '#43A047' }, text: bands.map((b) => `n=${b.shots}`), textposition: 'outside' }], { height: 250 }) : ''}
+  ${plot([{ x: g1.map((x) => `Par ${x.par}`), y: g1.map((x) => x.gir_pct), type: 'bar', marker: { color: P.good } }], { title: 'GIR % by par', height: 220 })}</div>
+  <div class="card"><h2>By distance</h2>${bands.length ? plot([{ x: bands.map((b) => b.band), y: bands.map((b) => b.green_hit_pct), type: 'bar', name: 'Green hit %', marker: { color: P.good }, text: bands.map((b) => `n=${b.shots}`), textposition: 'outside' }], { height: 250 }) : ''}
   ${table(bands, [['band', 'From'], ['shots', 'n'], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['short_pct', 'Short', p0], ['long_pct', 'Long', p0], ['sd_lateral_m', 'L/R SD', d1]])}
   ${note(`Pin = Garmin's pin marker (green centre unless moved on the watch). Green hit uses Garmin's end lie, else within ${D(12)} of the pin. Short/long = more than ${D(10)} from the pin's distance.`)}</div>
   <div class="card"><h2>By club</h2>${table(byClub, [['club', 'Club'], ['shots', 'n'], ['median_start_m', `From ${UNIT}`, d0], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['sd_lateral_m', 'L/R SD', d1]])}</div>
-  ${miss.length ? `<div class="card"><h2>Missed greens</h2>${plot([{ x: miss.map((x) => x.direction), y: miss.map((x) => x.pct), type: 'bar', marker: { color: '#8E24AA' } }], { title: 'Dominant miss direction', height: 220 })}</div>` : ''}`;
+  ${miss.length ? `<div class="card"><h2>Missed greens</h2>${plot([{ x: miss.map((x) => x.direction), y: miss.map((x) => x.pct), type: 'bar', marker: { color: P.accent } }], { title: 'Dominant miss direction', height: 220 })}</div>` : ''}`;
 }
 
 function pageShort() {
@@ -287,7 +299,7 @@ function pageShort() {
   const tr = g.byRound.filter((x) => x.missed >= 3);
   return `${filterSummary(ds)}<div class="kpis">${kpi('Scrambling', g.scrambling_pct, null, true, 0, '%')}${kpi('Missed greens / round', g.missed_per_round, null, false, 1)}${kpi('Double+ after a miss', g.double_after_miss_pct, null, false, 0, '%')}${kpi('Up & down', g.up_down_pct, null, true, 0, '%')}${kpi('Chips onto the green', g.chip_on_green_pct, null, true, 0, '%')}${kpi('Sand saves', g.sand_save_pct, null, true, 0, '%')}</div>
   ${note(`Scrambling = par or better after missing the green (${g.missed_greens} holes). Up & down = one shot from around the green then one putt (${g.up_down_n} holes with tracked chips). Sand saves: ${g.sand_n} holes with a tracked bunker shot near the green.`)}
-  ${tr.length >= 3 ? `<div class="card"><h2>Scrambling by round</h2>${plot([{ x: tr.map((x) => x.date), y: tr.map((x) => x.scrambling), mode: 'lines+markers', line: { color: '#1b7f4b', width: 2 }, marker: { size: 6 } }], { height: 230, yaxis: { title: { text: '% of missed greens' }, range: [0, 100] } })}</div>` : ''}
+  ${tr.length >= 3 ? `<div class="card"><h2>Scrambling by round</h2>${plot([{ x: tr.map((x) => x.date), y: tr.map((x) => x.scrambling), mode: 'lines+markers', line: { color: P.accent, width: 2 }, marker: { size: 6 } }], { height: 230, yaxis: { title: { text: '% of missed greens' }, range: [0, 100] } })}</div>` : ''}
   <div class="card"><h2>Chips and pitches by distance</h2>${table(g.bands.map((b) => ({ ...b, band: bl(b) })), [['band', 'From'], ['shots', 'Shots', n0], ['on_green_pct', 'On green', p0], ['median_left_m', `Left ${UNIT === 'yd' ? 'ft' : 'm'}`, (v) => fmt(pcv(v), 0)]], { empty: 'No tracked shots from around the green yet.' })}
   ${note(`Shots that started within ${D(27.4)} of the pin, from Garmin GPS. "Left" = median distance from the pin after the shot. Chips AutoShot missed aren't counted – add them in Rounds → a round → Review.`)}</div>`;
 }
@@ -301,7 +313,7 @@ function pagePutting() {
   ${p.suspect_default_holes ? `<div class="warn">${p.suspect_default_holes} holes are excluded because their round shows 2 putts on every hole (looks like Garmin's default). If genuine, confirm them in Rounds → a round → Edit → Holes.</div>` : ''}
   ${note('Putts come from your scorecard entries, not GPS. Putts/round only counts rounds with a putt count on every hole.')}
   <div class="card"><h2>Trend</h2>${seg('pt_m', [['putts_round', 'Putts'], ['putts_per_gir', 'Per GIR'], ['three_putt_pct', '3-putt %'], ['one_putt_pct', '1-putt %']], 'putts_round')}${trendChart(r, m, A.METRICS[m][0])}
-  ${dist.length ? plot([{ x: dist.map((d) => d.putts), y: dist.map((d) => d.pct), type: 'bar', marker: { color: '#1E88E5' } }], { title: 'Share of holes by putts', height: 220 }) : ''}</div>
+  ${dist.length ? plot([{ x: dist.map((d) => d.putts), y: dist.map((d) => d.pct), type: 'bar', marker: { color: P.accent } }], { title: 'Share of holes by putts', height: 220 }) : ''}</div>
   <div class="card"><h2>By first-putt distance</h2>${seg('pt_src', [['user', 'Entered (reliable)'], ['estimated', 'GPS-estimated']], 'user')}
   ${fp.length ? table(fp, [['band', 'Distance'], ['holes', 'Holes'], ['avg_putts', 'Avg putts', n2], ['make_pct', 'Holed', p0], ['three_putt_pct', '3-putt', p0]]) : `<p class="muted">No holes with ${src === 'user' ? 'entered' : 'estimated'} first-putt distances. Add them in Rounds → a round → Edit → Holes to unlock short-putt conversion.</p>`}
   ${note(`GPS estimate = where your approach finished to the pin marker (green centre unless moved); typically ${DP(5)}–${DP(10)} error. The two sources are never mixed.`)}</div>
@@ -317,14 +329,14 @@ function pageClubs() {
   const cmp = ui.cl_cmp || [], tt = t.filter((x) => x.median_m !== null && (!cmp.length || cmp.includes(x.club))).sort((a, b) => a.median_m - b.median_m);
   const tr = [];
   tt.forEach((r) => {
-    const col = r.sample === 'insufficient' ? '#90A4AE' : r.sample === 'low' ? '#FB8C00' : '#1E88E5';
+    const col = r.sample === 'insufficient' ? P.muted : r.sample === 'low' ? P.gold : P.accent;
     tr.push({ x: cvA([r.p10_m, r.p90_m]), y: [r.club, r.club], mode: 'lines', line: { color: col, width: 3 }, showlegend: false, hoverinfo: 'skip' });
     tr.push({ x: cvA([r.p25_m, r.p75_m]), y: [r.club, r.club], mode: 'lines', line: { color: col, width: 12 }, opacity: 0.6, showlegend: false, hoverinfo: 'skip' });
   });
   tr.push({ x: tt.map((r) => cv(r.median_m)), y: tt.map((r) => r.club), mode: 'markers', name: 'Median', marker: { color: css('--ink'), size: 9 },
     text: tt.map((r) => `IQR ${d0(r.p25_m)}–${D(r.p75_m)} · n=${r.shots_stock} (${r.sample})`), hovertemplate: `%{y}: %{x:.0f} ${UNIT}<br>%{text}<extra></extra>` });
   const tg = tt.filter((r) => A.isNum(r.target_total_m));
-  if (tg.length) tr.push({ x: tg.map((r) => cv(r.target_total_m)), y: tg.map((r) => r.club), mode: 'markers', name: 'Your target total', marker: { symbol: 'diamond-open', size: 11, color: '#E53935' } });
+  if (tg.length) tr.push({ x: tg.map((r) => cv(r.target_total_m)), y: tg.map((r) => r.club), mode: 'markers', name: 'Your target total', marker: { symbol: 'diamond-open', size: 11, color: P.bad } });
   const sel = ui.cl_dist || t.filter((x) => x.sample !== 'insufficient').slice(0, 4).map((x) => x.club);
   const stock = A.stockShots(s, ds.clubs).filter((x) => !x.partial && !x.partial_by_intent && sel.includes(x.club));
   const trend = sel.map((c, i) => { const id = ds.clubs.find((x) => x.name === c)?.club_id, d = id ? A.distanceTrend(s, ds.clubs, id) : []; return { x: d.map((p) => p.period), y: d.map((p) => cv(p.median_m)), name: c, mode: 'lines+markers', line: { color: COLORS[i % 12] } }; });
@@ -351,7 +363,7 @@ function pageDispersion() {
   const pts = A.pattern(sel.length ? s.filter((x) => sel.includes(x.club)) : s, mode), st = A.dispersionStats(pts);
   const tr = [...new Set(pts.map((p) => p.club))].map((c, i) => ({ x: pts.filter((p) => p.club === c).map((p) => cv(p.x)), y: pts.filter((p) => p.club === c).map((p) => cv(p.y)), name: c, mode: 'markers', type: 'scatter', marker: { size: 7, color: COLORS[i % 12], opacity: 0.8 }, text: pts.filter((p) => p.club === c).map((p) => `${p.date} · ${D(p.dist_m)}`) }));
   if (st.enough) for (const [q, dash] of [[0.5, 'solid'], [0.9, 'dash']]) { if (q === 0.9 && !st.enough_90) continue; const [ex, ey] = A.ellipse(st.centre, st.cov, q); tr.push({ x: cvA(ex), y: cvA(ey), mode: 'lines', name: `${q * 100}%`, line: { color: css('--ink'), dash, width: 1.5 } }); }
-  if (mode === 'approach') tr.push({ x: [0], y: [0], mode: 'markers', name: 'Pin', marker: { symbol: 'x', size: 12, color: '#E53935' } });
+  if (mode === 'approach') tr.push({ x: [0], y: [0], mode: 'markers', name: 'Pin', marker: { symbol: 'x', size: 12, color: P.bad } });
   return `${filterSummary(ds)}<div class="card"><h2>Dispersion by club</h2>${seg('dp_mode', [['approach', 'Approach (vs pin)'], ['tee', 'Tee (vs aim line)']], 'approach')}${chips('dp_clubs', opts, sel)}
   <div class="kpis" style="margin-top:10px">${kpi('Shots', st.n, null, true, 0)}${st.enough ? kpi(`Mean lateral (${UNIT}, + right)`, cv(st.mean_lateral_m)) + kpi(`Lateral SD (${UNIT})`, cv(st.sd_lateral_m)) + kpi('Left / right', null) .replace('–', `${fmt(st.pct_left, 0)}% / ${fmt(st.pct_right, 0)}%`) + kpi(mode === 'approach' ? `Mean long/short (${UNIT})` : `Mean distance (${UNIT})`, cv(st.mean_y_m)) + kpi(`50% radius (${UNIT})`, cv(st.r50_m)) + kpi(`90% radius (${UNIT})`, st.enough_90 ? cv(st.r90_m) : null) + kpi(`50% / 90% area ${UNIT}²`, null).replace('–', `${fmt(area(st.area50_m2), 0)} / ${fmt(area(st.area90_m2), 0)}`) : ''}</div>
   ${st.enough ? '' : `<div class="warn">Dispersion statistics need ≥${A.T.min_shots_dispersion} shots (≥${A.T.min_shots_dispersion_90} for 90%). Showing raw points only.</div>`}
@@ -400,7 +412,7 @@ function pageSG() {
   const roll = cats.map((c, i) => { const v = br.map((r) => r[`${c}_per18`]); return { x: br.map((r) => r.date), y: v.map((_, j) => (j >= 4 ? A.mean(v.slice(Math.max(0, j - 9), j + 1)) : null)), name: c, mode: 'lines', line: { color: COLORS[i] } }; });
   const sw = res.states.filter((x) => x.kind === 'swing' && A.isNum(x.sg));
   const byClub = [...A.groupBy(sw, (x) => `${x.category}|${x.club}`)].map(([k, g]) => ({ category: k.split('|')[0], club: g[0].club, shots: g.length, sg_per_shot: A.mean(g.map((x) => x.sg)), sg_total: A.sum(g.map((x) => x.sg)) })).filter((x) => x.shots >= 5).sort((a, b) => a.sg_per_shot - b.sg_per_shot);
-  return head + `<div class="card"><h2>Average per 18 complete holes</h2>${plot([{ x: sm.map((x) => x.category), y: sm.map((x) => x.sg_per_round), type: 'bar', marker: { color: sm.map((x) => ((x.sg_per_round ?? 0) >= 0 ? '#43A047' : '#E53935')) }, text: sm.map((x) => sgn(x.sg_per_round)), textposition: 'outside' }], { height: 280 })}
+  return head + `<div class="card"><h2>Average per 18 complete holes</h2>${plot([{ x: sm.map((x) => x.category), y: sm.map((x) => x.sg_per_round), type: 'bar', marker: { color: sm.map((x) => ((x.sg_per_round ?? 0) >= 0 ? P.good : P.bad)) }, text: sm.map((x) => sgn(x.sg_per_round)), textposition: 'outside' }], { height: 280 })}
   <p class="small">${base === 'personal' ? 'Zero = your own average across every round stored. Negative recent values = losing strokes vs your usual level; positive = improving.' : 'Versus a PGA Tour player: every amateur category is negative – compare categories with each other, not with zero.'}</p>
   ${note(`Measured: lies and positions from Garmin GPS (straight line to pin). Estimated: ${Math.round(est * 100)}% of putting states use a GPS-estimated first-putt distance. 'unattributed' = penalties recorded on a hole but not against a shot.`)}</div>
   <div class="card"><h2>Rolling 10-round trend</h2>${plot(roll, { height: 280, shapes: [{ type: 'line', xref: 'paper', x0: 0, x1: 1, y0: 0, y1: 0, line: { color: '#888' } }] })}
@@ -641,6 +653,7 @@ const RENDER = { home: pageHome, stats: pageStats, rounds: pageRounds, data: pag
 
 // ------------------------------------------------------------------ render + events
 function render() {
+  refreshPalette();
   let page = (location.hash.slice(1) || 'home').split('?')[0];
   if (MOVED[page]) { const [to, set, hook] = MOVED[page]; Object.assign(ui, set || {}); hook?.(); saveUi(); history.replaceState(null, '', `#${to}`); page = to; }
   const key = RENDER[page] ? page : 'home';
@@ -877,7 +890,7 @@ $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#
 addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); return; } scrollTo(0, 0); render(); });
 (async () => {
   state = await S.loadState(); S.requestPersistence(); rebuild();
-  const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, css,
+  const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, P, css,
     cv, uncv, pcv, puncv, D, DP, d0, d1, numOrNull, badge, trendChart, mapPlot, filterSummary, filtered, coachingPriorities, done, rerender, render, saveUi,
     get state() { return state; }, get DS() { return DS; }, get embedRound() { return EMBED; }, get E() { return expectedFn(); }, get compete() { return COMP; }, get progress() { return PROG; }, get guided() { return GUIDED; }, get UNIT() { return UNIT; }, get PUNIT() { return PUNIT(); }, get ui() { return ui; } };
   COMP = registerCompete(ctx); COMP.handleInvite(); PROG = registerProgress(ctx); GUIDED = registerGuided(ctx);
