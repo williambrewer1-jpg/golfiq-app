@@ -144,8 +144,90 @@ export function bars({ items, unit = '', digits = 1, valueLabels, height = 130, 
     if (n <= 12) xl += `<text class="tick" x="${f1(cx)}" y="${height - 4}" text-anchor="middle">${esc(it.xl ?? it.label)}</text>`;
   });
   if (n > 12) xl = `<text class="tick" x="${L}" y="${height - 4}" text-anchor="start">${esc(its[0].xl ?? its[0].label)}</text><text class="tick" x="${L + W}" y="${height - 4}" text-anchor="end">${esc(its[n - 1].xl ?? its[n - 1].label)}</text>`;
-  const caps = its.map((it) => it.note ?? `${it.label} · ${num(it.value, digits)}${unit}`), id = reg({ kind: 'bars', caps });
+  const caps = its.map((it) => it.note ?? `${it.label} · ${num(it.value, digits)}${unit}`), id = reg({ kind: 'tap', sel: '.ch-bar', caps });
   return `<div class="ch" id="${id}" role="img" aria-label="${esc(aria || `Bar chart, ${n} bars`)}"><svg viewBox="0 0 ${VW} ${height}" aria-hidden="true" focusable="false">${g}<line class="base" x1="${L}" x2="${L + W}" y1="${f1(y0)}" y2="${f1(y0)}"/>${body}${xl}</svg><div class="ch-cap">${esc(caption)}</div></div>`;
+}
+
+// ------------------------------------------------------------------ golf-native pieces
+/** Colours for score types, defined once so every chart agrees (all from the theme). */
+export const SCORE_TONES = {
+  'Eagle+': 'var(--accent)', Birdie: 'var(--accent)', Par: 'color-mix(in srgb, var(--good) 35%, var(--card))', Bogey: 'var(--flag)',
+  Double: 'color-mix(in srgb, var(--bad) 55%, var(--card))', 'Triple+': 'var(--bad)',
+};
+const key = (rows) => rows.map((r) => `<span><i style="background:${tone(r.tone)}"></i>${esc(r.label)} <b>${esc(r.text)}</b></span>`).join('');
+
+/** One 100% strip split into parts (score types, putts per hole), with a key underneath. parts: [{ label, value, tone, note }]. */
+export function strip({ parts, digits = 1, unit = '', aria = '', caption = 'Tap a part for details.' }) {
+  const ps = parts.filter((p) => isNum(p.value) && p.value > 0);
+  if (!ps.length) return '';
+  const caps = ps.map((p) => p.note ?? `${p.label}: ${num(p.value, digits)}${unit}`), id = reg({ kind: 'tap', sel: '.ch-seg', caps });
+  return `<div class="ch" id="${id}" role="img" aria-label="${esc(aria || ps.map((p) => `${p.label} ${num(p.value, digits)}${unit}`).join(', '))}"><div class="ch-strip">${ps.map((p, i) => `<button type="button" class="ch-seg" data-i="${i}" style="flex:${p.value};background:${tone(p.tone)}" aria-label="${esc(caps[i])}"></button>`).join('')}</div>
+    <div class="ch-key">${key(ps.map((p) => ({ ...p, text: num(p.value, digits) + unit })))}</div><div class="ch-cap">${esc(caption)}</div></div>`;
+}
+
+/** Stat tiles in the app's own tile style. items: [{ label, value, unit, sub, digits }]. */
+export function tiles(items, digits = 0) {
+  const its = items.filter((i) => i);
+  return its.length ? `<div class="kpis">${its.map((i) => `<div class="kpi"><div class="l">${esc(i.label)}</div><div class="v">${isNum(i.value) ? num(i.value, i.digits ?? digits) + (i.unit ? esc(i.unit) : '') : '–'}</div>${i.sub ? `<div class="d muted">${esc(i.sub)}</div>` : ''}</div>`).join('')}</div>` : '';
+}
+
+/** Tone class for a to-par value: an average such as 0.8 or a single hole such as +1. */
+export const holeTone = (v) => (!isNum(v) ? 'n' : v < -0.25 ? 'a' : v < 0.5 ? 'p' : v < 1.25 ? 'b' : v < 2.25 ? 'd' : 't');
+/** A scorecard laid out as coloured cells, nine to a row. groups: [{ title, rows: [{ name, kind: 'score'|'diff', cells: [{ hole, value, detail }] }] }]. */
+export function holeGrid({ groups, digits = 1, caption = 'Tap a hole for details.', aria = 'Holes coloured by score to par' }) {
+  const gs = groups.filter((g) => g.rows.some((r) => r.cells.length));
+  if (!gs.length) return '';
+  const caps = []; let i = 0;
+  const body = gs.map((g) => {
+    const named = g.rows.some((r) => r.name);
+    const rows = g.rows.map((r) => `${named ? `<div class="rn">${esc(r.name || '')}</div>` : ''}${r.cells.map((c) => {
+      caps.push(c.detail ?? `Hole ${c.hole}: ${sgnTxt(c.value, digits)}`);
+      const cls = r.kind === 'diff' ? (!isNum(c.value) || Math.abs(c.value) < 1e-9 ? 'df0' : c.value < 0 ? 'dfg' : 'dfb') : `h${holeTone(c.value)}`;
+      return `<button type="button" class="ch-hole ${cls}" data-i="${i++}"><span>${esc(c.hole)}</span><b>${isNum(c.value) ? sgnTxt(c.value, digits) : '–'}</b></button>`;
+    }).join('')}`).join('');
+    return `${g.title ? `<div class="ch-nine">${esc(g.title)}</div>` : ''}<div class="ch-holes${named ? ' named' : ''}">${rows}</div>`;
+  }).join('');
+  const id = reg({ kind: 'tap', sel: '.ch-hole', caps });
+  return `<div class="ch" id="${id}" role="img" aria-label="${esc(aria)}">${body}<div class="ch-cap">${esc(caption)}</div></div>`;
+}
+const sgnTxt = (v, d = 1) => (isNum(v) ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d) : '–');
+
+/** Horizontal bars, one per row. diverging = around zero (green to the right, red to the left). items: [{ label, value, sub, note, tone }]. */
+export function hbars({ items, unit = '', digits = 0, diverging = false, signed = false, aria = '', caption = 'Tap a row for details.', max = null }) {
+  const its = items.filter((it) => isNum(it.value));
+  if (!its.length) return '';
+  const span = max ?? (Math.max(...its.map((it) => Math.abs(it.value))) || 1);
+  const rows = its.map((it, i) => {
+    const w = Math.min(100, Math.abs(it.value) / span * (diverging ? 50 : 100)), neg = it.value < 0;
+    const style = diverging ? `${neg ? `right:50%` : `left:50%`};width:${f1(w)}%;background:${tone(it.tone || (neg ? 'bad' : 'good'))}` : `left:0;width:${f1(w)}%;background:${tone(it.tone || 'accent')}`;
+    return `<button type="button" class="ch-hrow" data-i="${i}"><span class="hl">${esc(it.label)}</span><span class="ht"><i style="${style}"></i>${diverging ? '<u></u>' : ''}</span><span class="hv">${signed || diverging ? sgnTxt(it.value, digits) : num(it.value, digits)}${unit}${it.sub ? `<em>${esc(it.sub)}</em>` : ''}</span></button>`;
+  }).join('');
+  const caps = its.map((it) => it.note ?? `${it.label}: ${signed || diverging ? sgnTxt(it.value, digits) : num(it.value, digits)}${unit}`), id = reg({ kind: 'tap', sel: '.ch-hrow', caps });
+  return `<div class="ch" id="${id}" role="img" aria-label="${esc(aria || `Bar chart, ${its.length} rows`)}"><div class="ch-hbars">${rows}</div><div class="ch-cap">${esc(caption)}</div></div>`;
+}
+
+const pctTxt = (v) => (isNum(v) ? `${Math.round(v)}%` : '–');
+/** A fairway with the three outcomes written where they happen. */
+export function fairway({ hit, left, right, holes = null }) {
+  if (![hit, left, right].some(isNum)) return '';
+  const n = isNum(holes) ? ` of ${holes} par 4s and 5s` : '', caps = [`Fairway hit: ${pctTxt(hit)}${n}`, `Missed left: ${pctTxt(left)}${n}`, `Missed right: ${pctTxt(right)}${n}`], id = reg({ kind: 'tap', sel: '.ch-zone', caps });
+  const zone = (i, x, w, big, name, col) => `<g class="ch-zone" data-i="${i}"><rect class="hit" x="${x}" y="0" width="${w}" height="120"/><text class="big" x="${x + w / 2}" y="58" text-anchor="middle" style="fill:${col}">${pctTxt(big)}</text><text class="tick" x="${x + w / 2}" y="76" text-anchor="middle">${name}</text></g>`;
+  return `<div class="ch" id="${id}" role="img" aria-label="${esc(`Fairways: hit ${pctTxt(hit)}, missed left ${pctTxt(left)}, missed right ${pctTxt(right)}`)}"><svg viewBox="0 0 330 120" aria-hidden="true" focusable="false">
+    <rect width="330" height="120" rx="12" style="fill:color-mix(in srgb, var(--good) 12%, var(--card))"/><path d="M118 120 C124 78 112 38 130 0 L200 0 C218 38 206 78 212 120Z" style="fill:color-mix(in srgb, var(--good) 38%, var(--card))"/>
+    <rect x="140" y="106" width="50" height="8" rx="4" style="fill:var(--card);fill-opacity:.8"/>${zone(1, 0, 118, left, 'missed left', 'var(--warn)')}${zone(0, 118, 94, hit, 'fairway', 'var(--accent)')}${zone(2, 212, 118, right, 'missed right', 'var(--warn)')}</svg><div class="ch-cap">Tap an area for details.</div></div>`;
+}
+
+/** A green seen from the tee: where approach misses finish. dirs: [{ direction: 'Short'|'Long'|'Left'|'Right', pct, count }]. */
+export function green({ dirs }) {
+  const by = Object.fromEntries((dirs || []).map((d) => [d.direction, d])); if (!dirs?.length) return '';
+  const top = Math.max(...dirs.map((d) => d.pct || 0)), tot = dirs.reduce((s, d) => s + (d.count || 0), 0);
+  const order = ['Long', 'Left', 'Right', 'Short'], caps = order.map((k) => `${k}: ${pctTxt(by[k]?.pct)} of missed greens (${by[k]?.count ?? 0} of ${tot})`), id = reg({ kind: 'tap', sel: '.ch-zone', caps });
+  const pos = { Long: [165, 22, 120, 4, 330, 36], Left: [48, 70, 0, 38, 96, 54], Short: [165, 127, 120, 106, 330, 42], Right: [282, 70, 234, 38, 96, 54] };
+  const z = (k, i) => { const d = by[k] || {}, [cx, cy, hx, hy, hw, hh] = pos[k], dom = d.pct === top && top > 0;
+    return `<g class="ch-zone" data-i="${i}"><rect class="hit" x="${hx}" y="${hy - (k === 'Short' ? 0 : 0)}" width="${hw}" height="${hh}"/><text class="big" x="${cx}" y="${cy}" text-anchor="middle" style="fill:${dom ? 'var(--bad)' : 'var(--ink)'}">${pctTxt(d.pct)}</text><text class="tick" x="${cx}" y="${cy + 13}" text-anchor="middle">${k.toLowerCase()}</text></g>`; };
+  return `<div class="ch" id="${id}" role="img" aria-label="${esc(`Missed greens: ${order.map((k) => `${k.toLowerCase()} ${pctTxt(by[k]?.pct)}`).join(', ')}`)}"><svg viewBox="0 0 330 148" aria-hidden="true" focusable="false">
+    <rect width="330" height="148" rx="12" style="fill:color-mix(in srgb, var(--good) 8%, var(--card))"/><ellipse cx="165" cy="74" rx="66" ry="30" style="fill:color-mix(in srgb, var(--good) 40%, var(--card))"/>
+    <line x1="165" y1="74" x2="165" y2="58" style="stroke:var(--ink);stroke-width:1.5"/><path d="M165 58 L177 63 L165 68Z" style="fill:var(--gold)"/><circle cx="165" cy="74" r="2.5" style="fill:var(--ink)"/>${order.map((k, i) => z(k, i)).join('')}</svg><div class="ch-cap">Tap a side for details.</div></div>`;
 }
 
 // ------------------------------------------------------------------ wiring
@@ -153,7 +235,7 @@ export function bars({ items, unit = '', digits = 1, valueLabels, height = 130, 
 export function wireCharts(root = document) {
   for (const s of REG) {
     const el = root.querySelector(`#${s.id}`); if (!el || el.dataset.wired) continue; el.dataset.wired = '1';
-    if (s.kind === 'scrub') wireScrub(el, s); else if (s.kind === 'bars') wireBars(el, s);
+    if (s.kind === 'scrub') wireScrub(el, s); else wireTap(el, s);
   }
 }
 function wireScrub(el, s) {
@@ -173,11 +255,11 @@ function wireScrub(el, s) {
   });
   svg.addEventListener('pointercancel', () => { down = false; if (sticky >= 0) show(sticky); else restore(); });   // the page started to scroll
 }
-function wireBars(el, s) {
-  const cap = el.querySelector('.ch-cap'), orig = cap.textContent; let sel = -1;
+function wireTap(el, s) {
+  const cap = el.querySelector('.ch-cap'); if (!cap) return; const orig = cap.textContent; let sel = -1;
   el.addEventListener('click', (e) => {
-    const g = e.target.closest('.ch-bar'); if (!g) return; const i = +g.dataset.i;
-    el.querySelectorAll('.ch-bar.on').forEach((x) => x.classList.remove('on'));
+    const g = e.target.closest(s.sel); if (!g || !el.contains(g)) return; const i = +g.dataset.i;
+    el.querySelectorAll(`${s.sel}.on`).forEach((x) => x.classList.remove('on'));
     if (sel === i) { sel = -1; cap.textContent = orig; } else { sel = i; g.classList.add('on'); cap.textContent = s.caps[i]; }
   });
 }
