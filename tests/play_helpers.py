@@ -13,3 +13,8 @@ def answer_step(pg, taps, every=3):
     elif pg.query_selector('[data-gp="5"]'): pg.click('[data-gp="2"]')      # strokes games: par every time
     else: pg.click('[data-gp="0"]' if miss else '[data-gp="1"]')
     settle(pg)
+
+
+def go_next(pg):
+    """From a result inside a session or a skills test: Next opens the "N of M done" screen, and Start there begins the next game."""
+    pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot.gp-gap'); pg.click('[data-gpgapgo]'); pg.wait_for_selector('#gpRoot .gp-prompt')

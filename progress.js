@@ -5,6 +5,7 @@ import * as B from './bench.js';
 import * as CO from './coach.js';
 import * as SK from './skills.js';
 import * as GM from './games.js';
+import * as FEEL from './feel.js';
 
 export function registerProgress(c) {
   const { A, esc, fmt, plot, note } = c;
@@ -96,8 +97,26 @@ export function registerProgress(c) {
       <p class="small muted" style="margin:0">${has ? `From ${s.n} ${NOUN[s.full_key]}. ` : ''}${A.isNum(s.practice_hcp) ? `Practice level ${hc(s.practice_hcp)}. ` : ''}${esc(s.how)}</p>
       ${!ahead && s.games.length ? `<div class="lvl-g">${s.games.map(gameBtn).join('')}</div>` : ''}</div>`;
   }
+  // a skill handicap that has dropped since the tiles were last drawn counts down and pulses once, the next time they are on screen (plan 5.3).
+  // What was last shown is kept per device, as the whole number the tile shows, so a small change that does not move the number is not a drop.
+  const drops = {}, SEEN_KEY = 'golfiq-skill-seen'; let seenMem = null;
+  function noteSeen(sk) {
+    if (!seenMem) { try { seenMem = JSON.parse(localStorage.getItem(SEEN_KEY)) || {}; } catch { seenMem = {}; } }
+    let changed = false;
+    for (const s of sk.skills) { if (!s.rated || !A.isNum(s.hcp)) continue; const now = Math.round(s.hcp), was = seenMem[s.key];
+      if (Number.isFinite(was) && now < was) drops[s.key] = was; if (was !== now) { seenMem[s.key] = now; changed = true; } }
+    if (changed) { try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenMem)); } catch { /* storage full or blocked: the tiles just will not count down */ } }
+  }
+  function tiles() {
+    for (const key of Object.keys(drops)) {
+      const tile = c.$(`[data-skill="${key}"]`), num = tile?.querySelector('.st-hcp'); if (!tile || !num) continue;
+      const to = Number(num.textContent), from = drops[key]; delete drops[key];
+      if (Number.isFinite(to) && from > to) { FEEL.countUp(num, from, to, FEEL.revealMs(800)); FEEL.pulse(tile, 'pop'); }
+    }
+  }
   function levelUpCard(v = data(), { link = false } = {}) {
     const sk = v.sk; if (!sk) return '';
+    noteSeen(sk);
     const anyRated = sk.skills.some((s) => s.rated), open = sk.skills.find((s) => s.key === c.ui.lv_skill), pinned = J().focus?.pinned || [];
     if (!anyRated && !(J().results || []).length) return `<div class="card"><h2>Level up</h2><p class="muted">Play ${Math.max(1, SK.RATING.min_rounds - sk.rounds)} more 18-hole round${SK.RATING.min_rounds - sk.rounds === 1 ? '' : 's'} with a scorecard and each skill (putting, short game, approach, driving) gets its own handicap, with games to improve it.</p></div>`;
     const tile = (s) => `<button class="skill-tile ${s.focus ? 'focus' : ''} ${open === s ? 'open' : ''}" data-skill="${s.key}" aria-expanded="${open === s}">
@@ -116,6 +135,7 @@ export function registerProgress(c) {
       ${note(`Your last ${sk.rounds} 18-hole rounds against Shot Scope data (putting make %, approach proximity, up-and-down %, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}; sources: ${[...B.SOURCES, CO.STANDARD_SOURCE].map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t.split(' (')[0])}</a>`).join(', ')}). Chip proximity, tee penalties and the Landing zone and Imaginary fairways games have no published standard, so their levels are assumptions worked out from the tables above (marked "assumed"). Proximity compares your median finish with the published averages. Practice level comes from your last 5 game scores and is shown separately, because practice is easier than the course. Strokes are what reaching the next level would save per round; skills overlap a little, so treat the total as a target.`)}</div>`;
   }
   function wire() {
+    tiles();
     c.$$('[data-skill]').forEach((b) => b.addEventListener('click', () => { c.ui.lv_skill = c.ui.lv_skill === b.dataset.skill ? null : b.dataset.skill; c.saveUi(); c.rerender(); }));
     c.$$('[data-pin]').forEach((b) => b.addEventListener('click', async () => {
       const j = J(), cur = j.focus?.pinned || [], k = b.dataset.pin; j.focus = { ...(j.focus || {}), pinned: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k].slice(-2) };
@@ -180,5 +200,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard, wire };
+  return { page, homeCard, data, levelUpCard, wire, tiles };
 }
