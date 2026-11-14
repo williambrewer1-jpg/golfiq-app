@@ -104,6 +104,14 @@ export const kudosWhere = (cfg, code, week) => queryEq(cfg, `groups/${code}`, 'k
 export const giveKudos = (cfg, code, doc) => setDoc(cfg, `groups/${code}/kudos/${doc.score_id}_${doc.from_uid}`, doc);
 export const takeKudos = (cfg, code, scoreId, uid) => deleteDoc(cfg, `groups/${code}/kudos/${scoreId}_${uid}`);
 
+// ------------------------------------------------------------------ duels (duels.js): one document per duel, groups/{g}/duels/{id}
+// The group's duels are read in one go (a group is a handful of friends). If the rules are the old ones the read is refused (403): the app hides duels.
+export const listDuels = (cfg, code) => listDocs(cfg, `groups/${code}/duels`);
+export const createDuel = async (cfg, code, doc) => { const id = newCode(8); await setDoc(cfg, `groups/${code}/duels/${id}`, doc); return id; };
+// write only the named fields of a duel ({ a: {...} } or { status, winner }), so two phones never overwrite each other's attempt
+export const patchDuel = (cfg, code, id, patch) => setDoc(cfg, `groups/${code}/duels/${id}`, patch, Object.keys(patch));
+export const removeDuel = (cfg, code, id) => deleteDoc(cfg, `groups/${code}/duels/${id}`);
+
 // ------------------------------------------------------------------ live side games
 export async function createLive(cfg, code, game) { const id = newCode(6); const a = await signIn(cfg); await setDoc(cfg, `groups/${code}/live/${id}`, { ...game, owner: a.uid, updated: new Date().toISOString() }); return id; }
 export const getLive = (cfg, code, id) => getDoc(cfg, `groups/${code}/live/${id}`);

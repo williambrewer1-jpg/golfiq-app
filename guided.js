@@ -39,15 +39,24 @@ export function registerGuided(c) {
     const led = v.plan.ledger.find((x) => x.game === id) || null;
     return { ...(hit || {}), ledger: led, potential: v.fc.ok ? v.fc.potential : null };
   }
+  // A duel is measured against the golfer's own target for the game (duels.js margin): the target for their next handicap step in that skill, as on the game screen.
+  // Distances differ between metres and yards, so if the duel was set in the other unit the same handicap level is looked up in the duel's unit. With no skill level yet, the golfer's
+  // index is used, and failing that DUEL_LEVEL (a named default: an average club golfer).
+  const DUEL_LEVEL = 18;
+  function duelTarget(id, uM) {
+    const inf = info(id); if (Number.isFinite(inf.target) && Math.abs(uM - unitM()) < 1e-9) return inf.target;
+    const v = c.progress.data(), h = Number.isFinite(inf.skill_h) ? inf.skill_h : Number.isFinite(v.jidx) ? v.jidx : DUEL_LEVEL, t = B.expectedFor(id, h, uM);
+    return Number.isFinite(t) ? Math.round(t * 10) / 10 : null;
+  }
   // a welcome-back game is played against the golfer's own median, which the draft carries (retention plan 5.2)
-  const withTarget = (d, inf) => ((d?.welcome_back || d?.boss) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
+  const withTarget = (d, inf) => ((d?.welcome_back || d?.boss || d?.duel) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
   const tierChip = (t) => (t ? `<span class="tier ${t.key}">${esc(t.name)}</span>` : '');
 
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
     seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
-    J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target });
+    J().game_draft = G.newDraft(g, { unitM: opts.unitM || unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.seed ?? opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target, duel: opts.duel || null });
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
     scrollTo(0, 0);
@@ -119,7 +128,7 @@ export function registerGuided(c) {
     const ball = { d: Math.round(dist), r: result, a: d.premium ? 0 : d.adj || 0 };
     await answer(G.ballValue(ball, d.unitM), ball, btn);
   }
-  async function quit() { if (busy) return; if (!confirm(run()?.kind === 'boss' ? FEEL.COPY.boss.quit(run().results.length) : run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
+  async function quit() { if (busy) return; if (!confirm(draft0()?.duel ? FEEL.COPY.duels.quit : run()?.kind === 'boss' ? FEEL.COPY.boss.quit(run().results.length) : run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
   // a saved result's tier: benchmark games use the handicap table, own-history games judge it against the scores before it
   const tierOf = (g, r) => (G.isOwn(g) ? G.tierFor(g, r.score, unitM(), G.scoresBefore(g, J().results || [], r.id)) : G.tierFor(g, r.score, unitM()));
   async function finish(opts = {}) {
@@ -127,7 +136,7 @@ export function registerGuided(c) {
     const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
     c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
-    c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) };
+    c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) }; if (res.duel) c.compete.duelFinished(res, d.target);       // the duel's final status is worked out on this phone
     // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
     const show = () => { busy = false; c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0); };
     if (opts.delay > 0) later(opts.delay, show); else show();
@@ -171,6 +180,7 @@ export function registerGuided(c) {
         <div class="gp-foot"><button class="btn sec" data-gpundo ${i ? '' : 'disabled'}>Undo</button></div></div></div>`;
   }
   function sesButtons(g) {
+    if ((J().results || []).find((x) => x.id === c.ui.game_result?.id)?.duel) return `<div class="row"><button class="btn" data-gpdone>Done</button></div>`;       // a duel is one attempt: no "play again"
     const r = run();
     if (r && r.kind === 'boss' && c.ui.game_result?.session_id === r.id) { const last = r.i + 1 >= r.queue.length, nx = gameOf(r.queue[r.i + 1]);
       return `<div class="row">${last ? `<button class="btn" data-gpsesend>${esc(FEEL.COPY.boss.finish)}</button>` : `<button class="btn" data-gpsesnext>Next: ${esc(nx?.name || '')}</button>`}</div>`; }
@@ -235,7 +245,7 @@ export function registerGuided(c) {
         <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
         ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
         ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
-      <div class="gp-rbody">${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
+      <div class="gp-rbody">${c.compete.duelPanel(r.id)}${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
         <div ${at('gp-rbtn', i)}>${sesButtons(g)}</div>
         ${det ? `<div class="gp-rdet">${det}</div>` : ''}</div></div>`;
   }
@@ -252,8 +262,7 @@ export function registerGuided(c) {
     const pulse = (el, kind) => { el?.classList.remove('fx-rise'); FEEL.pulse(el, kind); };      // the rise has finished by now; one animation at a time
     at(ms(180), () => num && FEEL.countUp(num, 0, to, ms(700), nf));
     at(ms(900), () => {
-      FEEL.play(cel.sound);
-      if (cel.confetti) FEEL.confetti($('#gpConf'));
+      if (!r.duel) { FEEL.play(cel.sound); if (cel.confetti) FEEL.confetti($('#gpConf')); }          // a duel's sound comes with the head-to-head (compete.js)
       if (pts && Number(pts.dataset.to) > 0) { FEEL.countUp(pts, 0, Number(pts.dataset.to), ms(700), (v) => `+${Math.round(v)}`); pulse($('#gpRPtsBox'), 'pop'); }
       if (cel.sound !== 'finish') pulse($('#gpVerdictL'), 'pop');
       if (st && Number(st.dataset.to) > Number(st.dataset.from)) { FEEL.countUp(st, Number(st.dataset.from), Number(st.dataset.to), ms(500)); pulse($('#gpRStreakBox'), 'flame'); }
@@ -493,5 +502,5 @@ export function registerGuided(c) {
     $$('[data-gpwelcome]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpwelcome, { welcome_back: true, target: Number(b.dataset.wbtarget) })));
     $$('[data-gpsesnext]').forEach((b) => b.addEventListener('click', sesNext)); $$('[data-gpsesend]').forEach((b) => b.addEventListener('click', () => endSession(false)));
   }
-  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, startBoss, testCard, afterResult, shareInfo };
+  return { start, screen, launcher, wire, draft, info, duelTarget, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, startBoss, testCard, afterResult, shareInfo };
 }

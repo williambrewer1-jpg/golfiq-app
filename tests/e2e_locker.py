@@ -32,7 +32,7 @@ with sync_playwright() as p:
     lk = pg.evaluate(LK); rank = pg.evaluate("() => window.__golfiq.progress.data().lv.rank.n")
     check('free items are unlocked and the rank items follow the sample rank', all(lk[k] for k in ['wallpaper:green', 'skin:clubhouse', 'badge:roundel', 'confetti:classic']) and lk['skin:claret'] == (rank >= 4), (rank, lk))
     check('locked items say how to earn them and show a padlock', pg.query_selector('.lk-item.off .small svg') is not None and 'Reach rank' in pg.inner_text('body'), pg.inner_text('.lk-grid')[:200])
-    check('Links sand is locked and says duels arrive later', not lk['skin:sand'] and 'Duels arrive' in pg.inner_text('[data-lkitem="skin:sand"]'), pg.inner_text('[data-lkitem="skin:sand"]'))
+    check('Links sand is locked, says to play 10 duels, and no longer says duels are still to come', not lk['skin:sand'] and 'Play 10 duels' in pg.inner_text('[data-lkitem="skin:sand"]') and 'Duels arrive' not in pg.inner_text('[data-lkitem="skin:sand"]'), pg.inner_text('[data-lkitem="skin:sand"]'))
     a = pg.evaluate(AUDIT, '.lk-grid'); check('Locker has no overflow and big tap targets', not a['overflow'] and not a['small'], a); pg.screenshot(path='/tmp/locker.png', full_page=True)
     # using an unlocked skin
     check('Claret is unlocked at the sample rank', lk['skin:claret'])

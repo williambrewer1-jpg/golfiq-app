@@ -206,6 +206,7 @@ function pageHome() {
   <div class="kpis">${kpi('BreakingPar index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
   ${PROG.levelRow()}
   ${COMP ? COMP.kuHome() : ''}
+  ${COMP ? COMP.duHome() : ''}
   ${PROG.homeCard()}
   ${PROG.journeyHome()}
   ${PROG.homePayoff()}
