@@ -116,4 +116,16 @@ t('fairway and green: percentages in the right places, tolerant of gaps', () => 
   const g = C.green({ dirs: [{ direction: 'Short', pct: 40, count: 8 }, { direction: 'Long', pct: 20, count: 4 }, { direction: 'Left', pct: 25, count: 5 }, { direction: 'Right', pct: 15, count: 3 }] }); clean(g, 'green');
   assert.ok(g.includes('>40%<') && g.includes('var(--bad)')); assert.equal(C.green({ dirs: [] }), ''); clean(C.green({ dirs: [{ direction: 'Short', pct: 0, count: 0 }] }), 'green zero');
 });
+
+t('sparks: one chart per series, zero line, latest value, empty series dropped', () => {
+  const pts = (ys) => ys.map((y, i) => ({ x: Date.UTC(2026, 0, 1 + i * 7), y, t: `d${i}` }));
+  const h = C.sparks({ series: [{ name: 'Putting', pts: pts([-0.5, 0.2, 0.9]) }, { name: 'Approach', pts: pts([0.1, null, -0.3]) }, { name: 'Empty', pts: [] }], digits: 2 }); clean(h, 'sparks');
+  assert.equal((h.match(/class="ch-spark"/g) || []).length, 2); assert.ok(h.includes('Latest +0.90') && h.includes('Latest −0.30') && h.includes('class="ref"')); assert.equal(C.sparks({ series: [] }), '');
+});
+t('hbars: custom label width', () => { assert.ok(C.hbars({ items: [{ label: 'Around the green', value: 1 }], labelW: 104 }).includes('grid-template-columns:104px')); });
+t('line: step and dots series with hot points', () => {
+  const x = (i) => Date.UTC(2026, 0, 1 + i * 10);
+  const h = C.line({ series: [{ kind: 'dots', tone: 'muted', pts: [{ x: x(0), y: 12 }, { x: x(1), y: 10, hot: true }] }, { kind: 'line', tone: 'accent', scrub: true, label: 'Index', pts: [{ x: x(0), y: 11, t: 'a' }, { x: x(1), y: 10.5, t: 'b' }] }, { kind: 'step', tone: 'gold', label: 'Official', pts: [{ x: x(0), y: 12 }, { x: x(1), y: 11 }] }], xKind: 'date' });
+  clean(h, 'handicap line'); assert.ok(h.includes('class="ln dash"') && h.includes('r="4.5"') && h.includes('>Index<') && h.includes('>Official<'));
+});
 console.log(`\n${n} tests passed`);

@@ -125,6 +125,18 @@ export function line({ series, unit = '', ref = null, refLabel, yRange = null, r
   return `<div class="ch" id="${id}" role="img" aria-label="${esc(aria)}">${chart.svg}<div class="ch-cap">${esc(caption)}</div></div>`;
 }
 
+
+/** Small multiples: one small line per series with its own scale and a zero line. series: [{ name, pts: [{ x, y, t }], tone }]. */
+export function sparks({ series, unit = '', digits = 1, signed = true, zero = true }) {
+  const live = series.filter((s) => s.pts.some((p) => isNum(p.y) && isNum(p.x)));
+  if (!live.length) return '';
+  return live.map((s) => {
+    const pts = s.pts.filter((p) => isNum(p.y) && isNum(p.x)), last = pts[pts.length - 1], fmtv = (v) => (signed ? sgnTxt(v, digits) : num(v, digits)) + unit;
+    return `<div class="ch-spark"><div class="ch-lab">${esc(s.name)}</div>${line({ series: [{ kind: 'line', tone: s.tone || 'accent', pts, scrub: true, area: true }], ref: zero ? 0 : null, refLabel: '', xKind: 'date', height: 92,
+      caption: `Latest ${fmtv(last.y)}`, aria: `${s.name}, latest ${fmtv(last.y)}`, reads: (p) => `${p.t ? `${p.t} · ` : ''}${fmtv(p.y)}` })}</div>`;
+  }).join('');
+}
+
 // ------------------------------------------------------------------ bars: vertical bars, tap for the detail
 /** items: [{ label, value, note, tone, hot, xl }]. */
 export function bars({ items, unit = '', digits = 1, valueLabels, height = 130, caption = 'Tap a bar for details.', aria = '', zero = true, ref = null }) {
@@ -193,14 +205,14 @@ export function holeGrid({ groups, digits = 1, caption = 'Tap a hole for details
 const sgnTxt = (v, d = 1) => (isNum(v) ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d) : '–');
 
 /** Horizontal bars, one per row. diverging = around zero (green to the right, red to the left). items: [{ label, value, sub, note, tone }]. */
-export function hbars({ items, unit = '', digits = 0, diverging = false, signed = false, aria = '', caption = 'Tap a row for details.', max = null }) {
+export function hbars({ items, unit = '', digits = 0, diverging = false, signed = false, aria = '', caption = 'Tap a row for details.', max = null, labelW = 78 }) {
   const its = items.filter((it) => isNum(it.value));
   if (!its.length) return '';
   const span = max ?? (Math.max(...its.map((it) => Math.abs(it.value))) || 1);
   const rows = its.map((it, i) => {
     const w = Math.min(100, Math.abs(it.value) / span * (diverging ? 50 : 100)), neg = it.value < 0;
     const style = diverging ? `${neg ? `right:50%` : `left:50%`};width:${f1(w)}%;background:${tone(it.tone || (neg ? 'bad' : 'good'))}` : `left:0;width:${f1(w)}%;background:${tone(it.tone || 'accent')}`;
-    return `<button type="button" class="ch-hrow" data-i="${i}"><span class="hl">${esc(it.label)}</span><span class="ht"><i style="${style}"></i>${diverging ? '<u></u>' : ''}</span><span class="hv">${signed || diverging ? sgnTxt(it.value, digits) : num(it.value, digits)}${unit}${it.sub ? `<em>${esc(it.sub)}</em>` : ''}</span></button>`;
+    return `<button type="button" class="ch-hrow" data-i="${i}" style="grid-template-columns:${labelW}px minmax(0,1fr) 74px"><span class="hl">${esc(it.label)}</span><span class="ht"><i style="${style}"></i>${diverging ? '<u></u>' : ''}</span><span class="hv">${signed || diverging ? sgnTxt(it.value, digits) : num(it.value, digits)}${unit}${it.sub ? `<em>${esc(it.sub)}</em>` : ''}</span></button>`;
   }).join('');
   const caps = its.map((it) => it.note ?? `${it.label}: ${signed || diverging ? sgnTxt(it.value, digits) : num(it.value, digits)}${unit}`), id = reg({ kind: 'tap', sel: '.ch-hrow', caps });
   return `<div class="ch" id="${id}" role="img" aria-label="${esc(aria || `Bar chart, ${its.length} rows`)}"><div class="ch-hbars">${rows}</div><div class="ch-cap">${esc(caption)}</div></div>`;
