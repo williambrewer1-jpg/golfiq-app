@@ -68,11 +68,11 @@ export function registerProgress(c) {
     const hist = c.DS.rounds.filter((r) => A.isNum(r.index_after) && r.date && Date.parse(r.date) > Date.now() - 365 * 864e5);
     const d0 = new Date(), dAt = (m) => new Date(d0.getTime() + m * 30.4 * 864e5).toISOString().slice(0, 10);
     const tr = [
-      { x: hist.map((r) => r.date), y: hist.map((r) => r.index_after), mode: 'lines', name: 'Your index', line: { color: '#0a3d2b', width: 2.5 } },
-      { x: fc.path.map((p) => dAt(p.month)), y: fc.path.map((p) => p.likely), mode: 'lines', name: 'Without a plan', line: { color: '#9a9a8a', width: 1.5, dash: 'dot' } },
+      { x: hist.map((r) => r.date), y: hist.map((r) => r.index_after), mode: 'lines', name: 'Your index', line: { color: c.P.ink, width: 2.5 } },
+      { x: fc.path.map((p) => dAt(p.month)), y: fc.path.map((p) => p.likely), mode: 'lines', name: 'Without a plan', line: { color: c.P.muted, width: 1.5, dash: 'dot' } },
       { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.high), mode: 'lines', line: { width: 0 }, showlegend: false, hoverinfo: 'skip' },
-      { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.low), mode: 'lines', fill: 'tonexty', fillcolor: 'rgba(27,127,75,.18)', line: { width: 0 }, name: 'Potential range' },
-      { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.likely), mode: 'lines+markers', name: 'Your potential', line: { color: '#1b7f4b', width: 3 }, marker: { size: 5 } },
+      { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.low), mode: 'lines', fill: 'tonexty', fillcolor: c.P.accentSoft, line: { width: 0 }, name: 'Potential range' },
+      { x: fc.potential_path.map((p) => dAt(p.month)), y: fc.potential_path.map((p) => p.likely), mode: 'lines+markers', name: 'Your potential', line: { color: c.P.accent, width: 3 }, marker: { size: 5 } },
     ];
     const pl = v.plan, drop = fc.current - fc.potential, left = pl.locked, tot = Math.max(0.01, pl.base + pl.momentum + pl.unlocked + left);
     const when = new Date(d0.getTime() + 182 * 864e5).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
