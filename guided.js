@@ -6,6 +6,7 @@ import * as SS from './sessions.js';
 import * as ST from './skillstest.js';
 import * as LG from './league.js';
 import * as FEEL from './feel.js';
+import * as LV from './level.js';
 import { icon, shotArt } from './icons.js';
 
 export function registerGuided(c) {
@@ -27,7 +28,7 @@ export function registerGuided(c) {
     const b = $('#gpSound'); if (b) b.outerHTML = soundBtn(); $('#gpSound')?.addEventListener('click', toggleSound);
   }
   // audio can only start after a tap: wake it on the first tap of any game button (and again later if the phone suspended it)
-  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gptest]')) FEEL.unlock(); }, true);
+  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gpwelcome], [data-gptest]')) FEEL.unlock(); }, true);
 
   // what the golfer is aiming at in this game: the target for the skill's next handicap step, and where the plan stands
   function info(id) {
@@ -36,13 +37,15 @@ export function registerGuided(c) {
     const led = v.plan.ledger.find((x) => x.game === id) || null;
     return { ...(hit || {}), ledger: led, potential: v.fc.ok ? v.fc.potential : null };
   }
+  // a welcome-back game is played against the golfer's own median, which the draft carries (retention plan 5.2)
+  const withTarget = (d, inf) => (d?.welcome_back && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
   const tierChip = (t) => (t ? `<span class="tier ${t.key}">${esc(t.name)}</span>` : '');
 
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
     seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
-    J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.ghost?.seed, adj: c.state.settings?.range_ball_adj });
+    J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target });
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
     scrollTo(0, 0);
@@ -66,7 +69,7 @@ export function registerGuided(c) {
     busy = true; const tap0 = Date.now();
     const d = draft(); if (!d) return; const g = gameOf(d.game), list = G.steps(g, { seed: d.seed, unitM: d.unitM }), sc0 = G.scoreOf(g, list, d.answers);
     if (sc0.done) return;
-    const k = d.answers.length, step = list[k], inf = info(g.id);
+    const k = d.answers.length, step = list[k], inf = withTarget(d, info(g.id));
     d.answers.push(v); if (ball) (d.balls = d.balls || []).push(ball);
     const sc1 = G.scoreOf(g, list, d.answers), out = G.outcomeOf(g, step, v, { ball, before: d.answers.slice(0, k) });
     const streak = G.streakOf(g, list, d.answers, d.balls), passed = G.targetPassed(g, list, d.answers, d.balls, inf.target), mile = out.good === true && G.STREAK_MILESTONES.includes(streak), ms = FEEL.feedbackMs();
@@ -121,7 +124,7 @@ export function registerGuided(c) {
     const d = draft(), g = gameOf(d.game); const before = G.bestScore(g, J().results || []), v0 = c.progress.data(), led0 = v0.plan.ledger.find((x) => x.game === g.id), inf0 = info(g.id);
     const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
-    c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
+    c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
     c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) };
     // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
     const show = () => { busy = false; c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0); };
@@ -131,7 +134,7 @@ export function registerGuided(c) {
   // ------------------------------------------------------------ screens
   function playScreen() {
     const d = draft(), g = gameOf(d.game), list = G.steps(g, { seed: d.seed, unitM: d.unitM }), a = d.answers, sc0 = G.scoreOf(g, list, a), i = a.length, step = list[Math.min(i, list.length - 1)];
-    const inf = info(g.id), lower = g.better === 'lower', open = G.isOpen(g.id), last = i === list.length - 1 && !open, pr = d.pressure && last;
+    const inf = withTarget(d, info(g.id)), lower = g.better === 'lower', open = G.isOpen(g.id), last = i === list.length - 1 && !open, pr = d.pressure && last;
     const isD = step.input === 'distance', bl = d.balls || [], un = d.unitM === 1 ? 'm' : 'yd';
     const outs = a.map((v, k) => G.outcomeOf(g, list[k], v, { ball: bl[k], before: a.slice(0, k) }));
     const dots = list.slice(0, open ? Math.max(10, i + 1) : list.length).map((s, k) => `<i class="${k < i ? (outs[k].good === true ? 'hit' : outs[k].good === false ? 'miss' : 'done') : k === i ? 'now' : ''}"></i>`).join('');
@@ -151,7 +154,7 @@ export function registerGuided(c) {
       : `<button class="gp-b miss" data-gp="0">${X}<span>Miss</span></button><button class="gp-b hit" data-gp="1">${T}<span>${/holed|Holed/.test(step.sub) ? 'Holed' : 'Hit'}</span></button>`;
     const gh = d.ghost && i > 0 ? LG.compareAt(g, a, d.ghost.detail, i) : null;
     const ghostLine = d.ghost ? `<div class="gp-ghost ${gh ? gh.state : 'level'}">${esc(d.ghost.nick)}${gh ? ` had ${sc(gh.ghost)} after ${i} · ${gh.state === 'level' ? 'you are level' : `you are ${gh.state} by ${sc(Math.abs(gh.diff))}`}` : `'s ${sc(d.ghost.score)} to beat`}</div>` : '';
-    const tgt = inf.target !== undefined && inf.target !== null ? FEEL.COPY.target(sc(inf.target), inf.skill_h, lower) : '';
+    const tgt = d.welcome_back && Number.isFinite(d.target) ? FEEL.COPY.welcome.target(sc(d.target)) : inf.target !== undefined && inf.target !== null ? FEEL.COPY.target(sc(inf.target), inf.skill_h, lower) : '';
     const streak = G.streakOf(g, list, a, bl), prog = barOf(g, list, a, sc0.score, inf), ban = view.banner && Date.now() - view.banner.t0 < 1450 ? view.banner : null;
     return `<div class="gp gp-full${pr ? ' gp-pr' : ''}" id="gpRoot"${busy ? ' data-busy="1"' : ''}>
       <div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button>
@@ -185,6 +188,8 @@ export function registerGuided(c) {
     const list = G.steps(g, { seed: r.seed, unitM: u }) || [], pr = r.pressure ? G.pressureOf(g, list, r.detail || [], r.balls) : null, un = u === 1 ? 'm' : 'yd';
     const lower = g.better === 'lower', target = Number.isFinite(info0.target_before) ? info0.target_before : inf.target ?? null, verdict = G.verdictOf(g, r.score, { target, prevBest: info0.prev_best }), beat = target !== null ? verdict.met : null, lvT = Number.isFinite(info0.level_before) ? info0.level_before : inf.skill_h;
     const led = inf.ledger, potNow = inf.potential, anim = !info0.seen && FEEL.revealMs(100) > 0;
+    // the potential counts hits against the skill target, so a welcome-back game (played against the golfer's own median) is judged on that target here
+    const beatP = r.welcome_back ? (Number.isFinite(inf.target) ? (lower ? r.score <= inf.target : r.score >= inf.target) : null) : beat;
     const at = (cls, i) => `class="${cls}${anim ? ' fx-rise' : ''}"${anim ? ` style="--i:${i}"` : ''}`;
     const short = !verdict.met && verdict.diff > 0 ? (lower ? K.over(sc(verdict.diff)) : K.short(sc(verdict.diff))) : '';
     const vText = verdict.pb ? K.best : verdict.met ? K.met : short || K.done, vSub = verdict.pb ? (verdict.met ? K.met : short) : '';
@@ -193,32 +198,36 @@ export function registerGuided(c) {
     const badge = t?.tier ? `<span class="gp-badge ${t.tier.key}${anim ? ' fx-stamp' : ''}" id="gpBadge"${anim ? ` style="--d:${FEEL.revealMs(900)}ms"` : ''}>${info0.up ? `New tier: ${esc(t.tier.name)}` : `${esc(t.tier.name)} tier`}</span>` : '';
     // rewards: practice streak, potential credit, league points
     const rw = []; let i = 5; const rwAt = (extra = '') => at(`gp-rw${extra}`, i++);
+    const lvl = c.progress.data().lv, pts = LV.pointsFor(lvl, r.id), capped = pts === 0 && lvl.today >= LV.DAILY_CAP;
+    if (pts > 0 || capped) rw.push(`<div ${rwAt(pts > 0 ? ' up' : '')} id="gpRPtsBox"><div class="l">${esc(K.rewards.points)}</div><div class="v"><span id="gpRPts" data-to="${pts}">+${pts}</span></div><div class="s">${esc(capped ? K.rewards.pointsFull : K.rewards.pointsNote(lvl.points, lvl.toNext, lvl.next?.name))}</div></div>`);
+    const jn = c.progress.advance?.(r.id);                       // a stage that moved forward in the open stretch of the road to scratch
+    if (jn) rw.push(`<div ${rwAt(' up')} id="gpRJourney" data-done="${jn.done ? 1 : 0}"><div class="l">${esc(K.journey.rewardTitle)}</div><div class="v${jn.done && anim ? ' fx-stamp' : ''}">${esc(jn.title)}</div><div class="s">${esc(jn.done ? K.journey.stamp : K.journey.stage(rnd1(jn.to), jn.need))}</div></div>`);
     const st = c.progress.data().st, stNow = st ? st.current : 0, stBefore = Number.isFinite(info0.streak_before) ? info0.streak_before : stNow;
     if (stNow >= 1) rw.push(`<div ${rwAt(stNow > stBefore ? ' up' : '')} id="gpRStreakBox"><div class="l">${esc(K.rewards.streak)}</div><div class="v">${icon('flame', 22)}<span id="gpRStreak" data-from="${stBefore}" data-to="${stNow}">${stNow}</span></div><div class="s">${K.rewards.weeks(stNow)} in a row</div></div>`);
     let potBefore = null, potTo = null, showNote = false;
     if (led) {
       const hits = rnd1(Math.min(led.hits, led.need)), moved = potNow !== null && Number.isFinite(info0.pot_before) && Math.abs(potNow - info0.pot_before) >= 0.05;
       if (moved) { potBefore = info0.pot_before; potTo = potNow; }
-      showNote = potNow !== null && beat === true;
-      rw.push(`<div ${rwAt(beat ? ' up' : '')}><div class="l">${esc(led.title)}</div><div class="v">${beat ? K.rewards.hit(sc(hits), led.need) : K.rewards.of(sc(hits), led.need)}</div>
-        <div class="s">${beat ? (potNow === null ? '' : `${K.rewards.potential} ${moved ? `<s>${fmt(potBefore, 1)}</s> → ` : ''}<b id="gpRPot" data-from="${moved ? potBefore : potNow}" data-to="${potNow}">${fmt(potNow, 1)}</b>`) : K.rewards.noHit}</div></div>`);
+      showNote = potNow !== null && beatP === true;
+      rw.push(`<div ${rwAt(beatP ? ' up' : '')}><div class="l">${esc(led.title)}</div><div class="v">${beatP ? K.rewards.hit(sc(hits), led.need) : K.rewards.of(sc(hits), led.need)}</div>
+        <div class="s">${beatP ? (potNow === null ? '' : `${K.rewards.potential} ${moved ? `<s>${fmt(potBefore, 1)}</s> → ` : ''}<b id="gpRPot" data-from="${moved ? potBefore : potNow}" data-to="${potNow}">${fmt(potNow, 1)}</b>`) : K.rewards.noHit}</div></div>`);
     }
     if (c.compete.groupOn()) rw.push(`<div class="gp-rw" id="gpRLeague"${info0.league ? '' : ' hidden'}>${info0.league ? leagueChip(info0.league) : ''}</div>`);
     let credit = '';
-    if (led && !beat) credit = `Aim for ${sc(inf.target)}${lower ? ' or fewer' : '+'} to count towards ${esc(led.title)}.`;
-    else if (!led && inf.skill) credit = 'This game is not one of your two focus areas right now, so it does not move your potential.';
+    if (led && !beatP) credit = `Aim for ${sc(inf.target)}${lower ? ' or fewer' : '+'} to count towards ${esc(led.title)}.`;
+    else if (!led && inf.skill && !r.welcome_back) credit = 'This game is not one of your two focus areas right now, so it does not move your potential.';
     const det = [
       g.id === 'range-driver' && r.balls ? `Average distance <b>${sc(r.avg_dist)} ${un}</b> · fairways <b>${r.fairways} of ${r.balls.length}</b> · wide <b>${r.wides}</b>. The score counts a miss as 20 yd less and a wide ball as half.` : '',
       g.id === 'range-speed' && r.balls ? `Your balls: ${r.balls.map((b) => sc(Math.round(G.adjusted(b) * 10) / 10)).join(' · ')} ${un}` : '',
       info0.prev_best !== null && info0.prev_best !== undefined && !verdict.pb ? `Your best before was ${sc(info0.prev_best)}.` : '',
-      beat !== null ? `${beat ? '✓ You beat' : 'Beat'} the ${lvT}-handicapper: ${sc(target)}${lower ? ' or fewer' : '+'}.` : '',
+      r.welcome_back && target !== null ? `${beat ? '✓ ' : ''}${K.welcome.beat(sc(target))}` : beat !== null ? `${beat ? '✓ You beat' : 'Beat'} the ${lvT}-handicapper: ${sc(target)}${lower ? ' or fewer' : '+'}.` : '',
       info0.ghost ? `<b>${info0.ghost.state === 'won' ? `You beat ${esc(info0.ghost.nick)}` : info0.ghost.state === 'lost' ? `${esc(info0.ghost.nick)} wins` : `Level with ${esc(info0.ghost.nick)}`}</b> · ${sc(r.score)} to ${sc(info0.ghost.score)}` : '',
       pr ? `${esc(pr.label)}.${pr.hit ? ' Counts as 1.5 hits.' : ''}` : '', credit,
     ].filter(Boolean).map((x) => `<p class="small" style="margin:0 0 6px">${x}</p>`).join('');
     return `<div class="card gp-res gp-rv" id="gpRoot" data-rid="${esc(r.id)}"${info0.seen ? '' : ' data-reveal="1"'}>
       <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
         <div ${at('gp-rname', 0)}>${esc(g.name)}</div>
-        <div ${at(`gp-rverdict ${verdict.key}`, 1)} id="gpVerdictL">${esc(vText)}</div>${vSub ? `<div ${at('gp-rsub', 1)}>${esc(vSub)}</div>` : ''}
+        <div ${at(`gp-rverdict ${verdict.key}`, 1)} id="gpVerdictL">${esc(vText)}</div>${vSub ? `<div ${at('gp-rsub', 1)}>${esc(vSub)}</div>` : ''}${r.welcome_back ? `<div ${at('gp-rsub', 1)}>${esc(K.welcome.back)}</div>` : ''}
         <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
         ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
         ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
@@ -234,19 +243,22 @@ export function registerGuided(c) {
     const g = gameOf(r.game), inf = info(g.id), ms = FEEL.revealMs, animated = ms(100) > 0, live = () => $('#gpRoot.gp-rv')?.dataset.rid === r.id, at = (t, f) => later(t, () => { if (live()) f(); });
     const verdict = G.verdictOf(g, r.score, { target: Number.isFinite(info0.target_before) ? info0.target_before : inf.target ?? null, prevBest: info0.prev_best }), cel = G.celebrationOf({ verdict, tierUp: !!info0.up });
     const num = $('#gpRNum'), to = r.score, nf = (v) => (Number.isInteger(to) ? String(Math.round(v)) : fmt(v, 1));
-    const st = $('#gpRStreak'), pot = $('#gpRPot');
-    if (animated) { if (num) num.textContent = nf(0); if (st) st.textContent = st.dataset.from; if (pot) pot.textContent = fmt(Number(pot.dataset.from), 1); }
+    const st = $('#gpRStreak'), pot = $('#gpRPot'), pts = $('#gpRPts');
+    if (animated) { if (num) num.textContent = nf(0); if (pts) pts.textContent = '+0'; if (st) st.textContent = st.dataset.from; if (pot) pot.textContent = fmt(Number(pot.dataset.from), 1); }
     const pulse = (el, kind) => { el?.classList.remove('fx-rise'); FEEL.pulse(el, kind); };      // the rise has finished by now; one animation at a time
     at(ms(180), () => num && FEEL.countUp(num, 0, to, ms(700), nf));
     at(ms(900), () => {
       FEEL.play(cel.sound);
       if (cel.confetti) FEEL.confetti($('#gpConf'));
+      if (pts && Number(pts.dataset.to) > 0) { FEEL.countUp(pts, 0, Number(pts.dataset.to), ms(700), (v) => `+${Math.round(v)}`); pulse($('#gpRPtsBox'), 'pop'); }
       if (cel.sound !== 'finish') pulse($('#gpVerdictL'), 'pop');
       if (st && Number(st.dataset.to) > Number(st.dataset.from)) { FEEL.countUp(st, Number(st.dataset.from), Number(st.dataset.to), ms(500)); pulse($('#gpRStreakBox'), 'flame'); }
       if (pot && Number(pot.dataset.to) < Number(pot.dataset.from)) FEEL.countUp(pot, Number(pot.dataset.from), Number(pot.dataset.to), ms(700), (v) => fmt(v, 1));
     });
     // a hit that lowers the potential target earns the unlock sound, once the number has come down
     if (pot && verdict.met && Number(pot.dataset.to) < Number(pot.dataset.from) - 0.049) at(ms(1700), () => FEEL.play('unlock'));
+    // finishing a stage of the road to scratch earns the tier sound
+    if ($('#gpRJourney[data-done="1"]')) at(ms(1500), () => { FEEL.play('tier'); pulse($('#gpRJourney'), 'pop'); });
     at(ms(1800), () => { $('#gpRoot')?.setAttribute('data-revealed', '1'); });
   }
   // this week's league points for a shared score: only once the group has the score, so the number is never a guess
@@ -301,10 +313,18 @@ export function registerGuided(c) {
       <p class="small muted" style="margin:0 0 8px">${inf.target !== undefined && inf.target !== null ? `Target ${sc(inf.target)}${lower ? ' or fewer' : '+'} · ` : ''}about ${G.minutesFor(g.id)} min${done ? ' · done today ✓' : ''}</p>
       ${done ? '' : `<button class="btn" data-gpdaily="${esc(g.id)}">Play today's challenge</button>`}</div>`;
   }
+  // ------------------------------------------------------------ welcome back (retention plan 5.2): after 14 days away, one easy game in place of the daily challenge
+  const welcomeInfo = () => SS.welcomeBack({ results: J().results || [], sessions: J().sessions || [], rounds: c.DS.rounds, today: today(), games: games(), unitM: unitM(), tierScores: G.tierScores });
+  function welcomeCard(w) {
+    const g = gameOf(w.game), K = FEEL.COPY.welcome; if (!g) return '';
+    return `<div class="card gp-daily gp-welcome" data-welcome="${esc(g.id)}"><h2 style="margin:0 0 4px">${esc(K.title)}</h2>
+      <p class="small" style="margin:0 0 2px">${esc(K.line(g.name, G.minutesFor(g.id)))}</p><p class="small muted" style="margin:0 0 8px">${esc(w.basis === 'median' ? K.goal(sc(w.target)) : K.goalNew(sc(w.target)))}</p>
+      <button class="btn" data-gpwelcome="${esc(g.id)}" data-wbtarget="${w.target}">${esc(K.play)}</button></div>`;
+  }
   function homeCard() {
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
     const due = ST.due(J().skills_tests || [], today());
-    return (due.show ? `<div class="card gp-test"><h2 style="margin:0 0 4px">Time for your monthly skills test</h2><p class="small muted" style="margin:0 0 8px">${testGames()}, about ${ST.TEST_MINUTES} minutes. It re-rates your practice levels.</p><button class="btn" data-gptest>Start the skills test</button></div>` : '') + dailyCard('home');
+    return (due.show ? `<div class="card gp-test"><h2 style="margin:0 0 4px">Time for your monthly skills test</h2><p class="small muted" style="margin:0 0 8px">${testGames()}, about ${ST.TEST_MINUTES} minutes. It re-rates your practice levels.</p><button class="btn" data-gptest>Start the skills test</button></div>` : '') + (welcomeInfo() ? welcomeCard(welcomeInfo()) : dailyCard('home'));
   }
 
   // ------------------------------------------------------------ sessions: 30, 45 or 60 minutes of back-to-back guided games
@@ -324,7 +344,8 @@ export function registerGuided(c) {
     const r = run(); if (!r) return; const rs = (J().results || []).filter((x) => r.results.includes(x.id)); J().session_run = null;
     if (rs.length) {
       const test = r.kind === 'test';
-      J().sessions.push({ id: r.id, date: today(), minutes: r.total, focus: test ? 'other' : SS.SESSION_SKILL_FOCUS[r.skill] || 'other', notes: test ? 'Monthly skills test' : `Guided session: ${rs.map((x) => gameOf(x.game)?.name).join(', ')}`, guided: true, results: r.results });
+      J().sessions.push({ id: r.id, date: today(), minutes: r.total, focus: test ? 'other' : SS.SESSION_SKILL_FOCUS[r.skill] || 'other', notes: test ? 'Monthly skills test' : `Guided session: ${rs.map((x) => gameOf(x.game)?.name).join(', ')}`, guided: true, results: r.results,
+        ...(test ? {} : { complete: rs.length >= (r.queue || []).length }) });      // complete: every game in the session was finished; it earns a streak freeze
       if (test && rs.length >= ST.TEST_GAMES.length) {
         const scores = Object.fromEntries(rs.map((x) => [x.game, x.score])), rated = ST.rate(scores, games(), unitM());
         (J().skills_tests = J().skills_tests || []).push({ id: r.id, date: today(), results: r.results, ratings: rated.ratings, per_game: rated.per_game });
@@ -412,7 +433,8 @@ export function registerGuided(c) {
     $$('[data-gptest]').forEach((b) => b.addEventListener('click', startTest));
     $$('[data-gpses]').forEach((b) => b.addEventListener('click', () => startSession(Number(b.dataset.gpses))));
     $$('[data-gpdaily]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpdaily)));
+    $$('[data-gpwelcome]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpwelcome, { welcome_back: true, target: Number(b.dataset.wbtarget) })));
     $$('[data-gpsesnext]').forEach((b) => b.addEventListener('click', sesNext)); $$('[data-gpsesend]').forEach((b) => b.addEventListener('click', () => endSession(false)));
   }
-  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, dailyPick, startSession, startTest, testCard, afterResult, shareInfo };
+  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, testCard, afterResult, shareInfo };
 }

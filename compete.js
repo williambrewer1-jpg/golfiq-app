@@ -36,13 +36,29 @@ export function registerCompete(c) {
     } catch (e) { toast(`Saved here; not shared: ${e.message}`); }
   }
 
+  // ------------------------------------------------------------ player rank, shared as one extra field on the member document (retention plan 4.3)
+  // Only the rank name is shared. It rides on the member document the app already writes, so the existing rules allow it. It is a nicety: any failure is ignored.
+  const ranks = new Map(); let ranksAt = 0, sharedRank = null, sharing = false;
+  async function shareRank(name) {
+    if (!groupOn() || sharing || !name || sharedRank === name) return;
+    sharing = true; sharedRank = name;                                           // once per rank per visit: a failure is not retried on every redraw
+    try { const a = await CL.signIn(cloud()); await CL.setDoc(cloud(), `groups/${cloud().group}/members/${a.uid}`, { rank: name }, ['rank']); ranksAt = 0; } catch { /* the board still works without it */ }
+    finally { sharing = false; }
+  }
+  async function loadRanks() {
+    if (!groupOn() || Date.now() - ranksAt < 60000) return;
+    ranksAt = Date.now();
+    try { ranks.clear(); (await CL.members(cloud(), cloud().group)).forEach((m) => { if (typeof m.rank === 'string') ranks.set(m.id, m.rank); }); } catch { /* no ranks shown */ }
+  }
+  const rankTag = (uid) => (ranks.has(uid) ? `<i class="rk">${esc(ranks.get(uid))}</i>` : '');
+
   // ------------------------------------------------------------ leaderboard tab
   const cache = new Map();
   function boardHtml(key, rows, better) {
     if (!rows) return '<p class="small muted">Loading…</p>';
     if (!rows.length) return '<p class="small muted">No scores yet – be the first.</p>';
     const uid = cloud().auth?.uid;
-    return `<div class="lb">${rows.map((r, i) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${i + 1}</span><b>${esc(r.nick || 'Golfer')}</b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? (r.level_h <= 0 ? 'scratch+' : r.level_h >= 25 ? '25+' : `≈${Math.round(r.level_h)} hcp`) : ''}</small></div>`).join('')}</div>`;
+    return `<div class="lb">${rows.map((r, i) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${i + 1}</span><b>${esc(r.nick || 'Golfer')}${rankTag(r.uid)}</b><em>${fmt(r.score, Number.isInteger(r.score) ? 0 : 1)}</em><small>${A.isNum(r.level_h) ? (r.level_h <= 0 ? 'scratch+' : r.level_h >= 25 ? '25+' : `≈${Math.round(r.level_h)} hcp`) : ''}</small></div>`).join('')}</div>`;
   }
   function pageBoard() {
     const week = B.isoWeek(), gid = B.weeklyChallenge(week), g = gameById(gid), mine = J().results.filter((r) => r.game === gid && inWeek(r.date, week));
@@ -71,10 +87,11 @@ export function registerCompete(c) {
     const uid = cloud().auth?.uid;
     if (!rows.length) return '<p class="small muted">No scores yet this week. Play any game to get on the board.</p>';
     const last = prev.length ? `<p class="small" style="margin:8px 0 0">Last week's winner: <b>${LG.winners(prev).map((r) => esc(r.nick)).join(' and ')}</b> · ${LG.winners(prev)[0].points} points</p>` : '';
-    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small></div>`).join('')}</div>${last}`;
+    return `<div class="lb">${rows.map((r) => `<div class="${r.uid === uid ? 'me' : ''}"><span>${r.rank}</span><b>${esc(r.nick)}${rankTag(r.uid)}</b><em>${r.points}</em><small>${r.plays} played · ${r.hits} on target</small></div>`).join('')}</div>${last}`;
   }
   async function loadBoards() {
     if (!groupOn()) return;
+    await loadRanks();
     const cl = cloud(), week = B.isoWeek(), gid = B.weeklyChallenge(week), month = B.monthKey(), bg = c.ui.lb_game || gid;
     const fill = async (sel, key, fetcher, better) => {
       try { const rows = CL.board(await fetcher(), better); cache.set(key, rows); const el = $(sel); if (el) el.innerHTML = boardHtml(key, rows, better); }
@@ -264,5 +281,5 @@ export function registerCompete(c) {
     const inv = CL.parseInvite(location.hash); if (!inv) return false;
     cloud().pending = inv; S.saveCloud(c.state); c.ui.st_tab = 'friends'; c.saveUi(); history.replaceState(null, '', '#settings'); return true;
   }
-  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, handleInvite, lvl, lvlText, groupOn, weekScores, myUid: () => cloud().auth?.uid || null };
+  return { pageBoard, pageCombine, pageRange, friendsSettings, wire, onScore, shareRank, handleInvite, lvl, lvlText, groupOn, weekScores, myUid: () => cloud().auth?.uid || null };
 }

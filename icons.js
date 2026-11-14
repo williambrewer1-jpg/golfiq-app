@@ -32,6 +32,8 @@ const P = {
   share: '<path d="M12 15V4M8 7.500L12 4l4 3.500"/><path d="M6 11v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7"/>',
   spread: '<circle cx="8" cy="9" r="1.300" fill="currentColor"/><circle cx="13" cy="7" r="1.300" fill="currentColor"/><circle cx="15" cy="13" r="1.300" fill="currentColor"/><circle cx="10" cy="15" r="1.300" fill="currentColor"/><ellipse cx="12" cy="11.500" rx="8.500" ry="7.500"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
+  lock: '<rect x="5.500" y="10.500" width="13" height="9.500" rx="2"/><path d="M8.500 10.500V8a3.500 3.500 0 0 1 7 0v2.500"/>',
+  shield: '<path d="M12 3.200l7 2.600v5.700c0 4.200-2.900 7.600-7 9.300-4.100-1.700-7-5.100-7-9.300V5.800z"/><path d="M8.800 12.200l2.200 2.200 4.200-4.400"/>',
 };
 export const icon = (name, size = 22) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.700" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || P.chart}</svg>`;
 
