@@ -115,6 +115,20 @@ label.f{display:block;font-size:11.5px;font-weight:600;color:var(--muted);margin
 .ch-sub{font-size:12.5px;color:var(--muted);min-height:18px;margin:0 0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ch-sub .good,.ch-sub .bad{font-weight:600}
 .ch-cap{font-size:12px;color:var(--muted);min-height:18px;margin:2px 0 0}
 .ch-bar .hit{fill:transparent;cursor:pointer}.ch-bar.hot .b{stroke:var(--gold);stroke-width:2}.ch-bar.on .b{stroke:var(--ink);stroke-width:2}
+.ch-strip{display:flex;height:30px;border-radius:9px;overflow:hidden;gap:2px;margin:6px 0 10px}.ch-seg{border:0;padding:0;min-width:4px;cursor:pointer}.ch-seg.on{outline:2px solid var(--ink);outline-offset:-2px}
+.ch-key{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--muted)}.ch-key span{display:inline-flex;align-items:center;gap:5px}.ch-key i{width:10px;height:10px;border-radius:3px;display:inline-block}.ch-key b{color:var(--ink);font-variant-numeric:tabular-nums}
+.ch-nine{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.045em;margin:8px 0 4px}
+.ch-holes{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:3px;margin-bottom:4px}.ch-holes.named{grid-template-columns:22px repeat(9,minmax(0,1fr))}.ch-holes .rn{font-size:11px;font-weight:600;color:var(--muted);align-self:center}
+.ch-hole{border:0;border-radius:7px;min-height:42px;padding:3px 0;display:flex;flex-direction:column;align-items:center;justify-content:center;font:inherit;line-height:1.15;cursor:pointer;color:var(--ink);background:var(--chip)}
+.ch-hole span{font-size:10px;opacity:.7}.ch-hole b{font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.ch-hole.ha{background:var(--accent);color:var(--accent-ink)}.ch-hole.hp{background:color-mix(in srgb,var(--good) 35%,var(--card))}.ch-hole.hb{background:var(--flag);color:#2b2200}
+.ch-hole.hd{background:color-mix(in srgb,var(--bad) 55%,var(--card))}.ch-hole.ht{background:var(--bad);color:var(--accent-ink)}.ch-hole.hn{background:var(--chip);color:var(--muted)}
+.ch-hole.dfg{background:color-mix(in srgb,var(--good) 22%,var(--card));color:var(--good)}.ch-hole.dfb{background:color-mix(in srgb,var(--bad) 22%,var(--card));color:var(--bad)}.ch-hole.df0{background:var(--chip);color:var(--muted)}.ch-hole.on{outline:2px solid var(--ink);outline-offset:1px}
+.ch-hbars{display:flex;flex-direction:column;gap:4px}.ch-hrow{display:grid;grid-template-columns:78px minmax(0,1fr) 74px;align-items:center;gap:8px;border:0;background:transparent;padding:5px 0;font:inherit;color:var(--ink);cursor:pointer;text-align:left;border-radius:8px}
+.ch-hrow.on{background:var(--chip)}.ch-hrow .hl{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ch-hrow .ht{position:relative;height:14px;background:var(--chip);border-radius:7px;overflow:hidden}.ch-hrow .ht i{position:absolute;top:0;bottom:0;border-radius:7px}.ch-hrow .ht u{position:absolute;left:50%;top:0;bottom:0;width:1.5px;background:var(--line)}
+.ch-hrow .hv{font:700 13px var(--serif);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}.ch-hrow .hv em{display:block;font:400 10.5px var(--sans);color:var(--muted);font-style:normal}
+.ch-zone .hit{fill:transparent;cursor:pointer}.ch-zone .big{font:700 22px var(--serif)}.ch-zone.on .big{text-decoration:underline}
 @keyframes chin{from{opacity:0}to{opacity:1}}@keyframes chdraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
 @media (prefers-reduced-motion:reduce){.ch,.ch .ln{animation:none}}
 .grid2{display:grid;grid-template-columns:1fr;gap:12px}@media(min-width:800px){.grid2{grid-template-columns:1fr 1fr}}

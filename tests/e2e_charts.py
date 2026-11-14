@@ -77,6 +77,27 @@ with sync_playwright() as p:
         # ---- other trend charts (Tee, Approach, Putting) use the same chart
         for tab in ['tee', 'approach', 'putting']:
             go(pg, tab); check(f'[{tag}] {tab}: trend chart is drawn', pg.query_selector('.ch-trend svg') is not None and pg.evaluate("() => !document.querySelector('.ch-trend').innerHTML.includes('NaN')"))
+        # ---- phase B: Scoring, Tee and Approach have no Plotly left and the golf-native charts respond to taps
+        def tap_detail(sel, nth=0, label=''):
+            pg.evaluate("([s, n]) => document.querySelectorAll(s)[n].scrollIntoView({block: 'center'})", [sel, nth]); pg.wait_for_timeout(120)
+            host = pg.locator(f'.ch:has({sel})').first; before = host.locator('.ch-cap').inner_text()
+            pg.locator(sel).nth(nth).click(); pg.wait_for_timeout(60); after = host.locator('.ch-cap').inner_text()
+            check(f'[{tag}] {label}: tapping shows detail', after != before and pg.locator(f'{sel}.on').count() == 1, f'{before!r} -> {after!r}')
+        go(pg, 'scoring'); pg.wait_for_selector('.ch-strip'); pg.wait_for_timeout(200)
+        check(f'[{tag}] scoring: no Plotly chart is requested', pg.evaluate("() => window.__plots.length") == 0, str(pg.evaluate("() => window.__plots.length")))
+        check(f'[{tag}] scoring: score types strip has parts and a key', pg.locator('.ch-strip .ch-seg').count() >= 4 and pg.locator('.ch-key span').count() >= 4)
+        tap_detail('.ch-seg', 1, 'score types strip')
+        check(f'[{tag}] scoring: hole by hole is 18 coloured cells in two nines', pg.locator('.ch-hole').count() == 18 and pg.locator('.ch-nine').count() == 2, str(pg.locator('.ch-hole').count()))
+        tap_detail('.ch-hole', 4, 'hole grid'); check(f'[{tag}] scoring: hole detail names the hole', 'Hole 5' in pg.locator('.ch:has(.ch-hole) .ch-cap').inner_text())
+        check(f'[{tag}] scoring: hole grid has no horizontal overflow', pg.evaluate("() => { const g = document.querySelector('.ch-holes'); return g.scrollWidth <= g.clientWidth + 1 }") and no_hscroll(pg))
+        pg.select_option('select[data-sel="sc_course"]', index=1); pg.wait_for_selector('.ch-hole'); check(f'[{tag}] scoring: switching course redraws the grid', pg.locator('.ch-hole').count() >= 9)
+        go(pg, 'tee'); pg.wait_for_selector('.ch-zone'); check(f'[{tag}] tee: no Plotly chart is requested', pg.evaluate("() => window.__plots.length") == 0)
+        check(f'[{tag}] tee: fairway shows three percentages', pg.locator('.ch-zone .big').count() == 3 and all('%' in t for t in pg.locator('.ch-zone .big').all_text_contents()))
+        tap_detail('.ch-zone', 0, 'fairway'); check(f'[{tag}] tee: fairway detail says what the area is', 'Fairway' in pg.locator('.ch:has(.ch-zone) .ch-cap').inner_text() or 'Missed' in pg.locator('.ch:has(.ch-zone) .ch-cap').inner_text())
+        go(pg, 'approach'); pg.wait_for_selector('.ch-hrow'); check(f'[{tag}] approach: no Plotly chart is requested', pg.evaluate("() => window.__plots.length") == 0)
+        check(f'[{tag}] approach: GIR by par tiles', pg.locator('h3:has-text("GIR by par") + .kpis .kpi').count() >= 2)
+        tap_detail('.ch-hrow', 2, 'by distance'); tap_detail('.ch-zone', 3, 'missed greens')
+        check(f'[{tag}] approach: no horizontal scroll', no_hscroll(pg)); shot(pg, f'approach-{tag}')
         # ---- dark mode: nothing is hard-coded, the chart reads the theme
         pg.evaluate("() => document.documentElement.setAttribute('data-theme', 'dark')"); go(pg, 'scoring'); pg.wait_for_selector('.ch-trend'); pg.wait_for_timeout(300)
         big_col = pg.evaluate("() => getComputedStyle(document.querySelector('.ch-big')).color")

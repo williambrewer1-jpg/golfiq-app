@@ -86,4 +86,34 @@ t('line: handles dates, a reference and a single series with one point', () => {
 t('every chart gets its own id', () => {
   const a = C.bars({ items: [{ label: 'a', value: 1 }] }), b = C.bars({ items: [{ label: 'a', value: 1 }] }); const id = (h) => /id="(ch\d+)"/.exec(h)[1]; assert.notEqual(id(a), id(b));
 });
+
+t('strip: parts, key and tap captions', () => {
+  const h = C.strip({ parts: [{ label: 'Par', value: 7.2, tone: C.SCORE_TONES.Par }, { label: 'Bogey', value: 6, tone: 'warn' }, { label: 'Eagle+', value: 0 }], digits: 1 }); clean(h, 'strip');
+  assert.equal((h.match(/class="ch-seg"/g) || []).length, 2); assert.ok(h.includes('Par <b>7.2</b>') && !h.includes('Eagle+')); assert.equal(C.strip({ parts: [{ label: 'x', value: 0 }] }), '');
+});
+t('tiles: values, units, missing values', () => {
+  const h = C.tiles([{ label: 'Par 3', value: 41.6, unit: '%', sub: '36 holes' }, { label: 'Par 4', value: null }]); clean(h, 'tiles'); assert.ok(h.includes('42%') && h.includes('36 holes') && h.includes('–')); assert.equal(C.tiles([]), '');
+});
+t('holeTone: averages and single holes colour the same way', () => {
+  assert.deepEqual([-1, 0, 1, 2, 3, 4].map(C.holeTone), ['a', 'p', 'b', 'd', 't', 't']); assert.deepEqual([0.3, 0.8, 1.6, 2.6].map(C.holeTone), ['p', 'b', 'd', 't']); assert.equal(C.holeTone(null), 'n');
+});
+t('holeGrid: nines, signs, tone classes and a compare row', () => {
+  const cells = (vs) => vs.map((v, i) => ({ hole: i + 1, value: v, detail: `hole ${i + 1}` }));
+  const h = C.holeGrid({ groups: [{ title: 'Front 9', rows: [{ cells: cells([-1, 0, 1, 2, 3, 0.4, null, 1, 0]) }] }, { title: 'Back 9', rows: [{ cells: [] }] }], digits: 1 }); clean(h, 'grid');
+  assert.equal((h.match(/class="ch-hole /g) || []).length, 9); assert.ok(h.includes('ch-hole ha') && h.includes('ch-hole hp') && h.includes('ch-hole hb') && h.includes('ch-hole hd') && h.includes('ch-hole ht') && h.includes('ch-hole hn'));
+  assert.ok(h.includes('−1.0') && h.includes('+1.0') && !h.includes('Back 9'), 'minus sign, empty nine dropped');
+  const cmp = C.holeGrid({ groups: [{ title: 'Front 9', rows: [{ name: 'A', cells: cells([1, 2]) }, { name: 'B', cells: cells([0, 2]) }, { name: 'B − A', kind: 'diff', cells: cells([-1, 0]) }] }], digits: 0 }); clean(cmp, 'cmp');
+  assert.ok(cmp.includes('holes named') && cmp.includes('dfg') && cmp.includes('df0')); assert.equal(C.holeGrid({ groups: [] }), '');
+});
+t('hbars: plain and diverging', () => {
+  const h = C.hbars({ items: [{ label: '100-125', value: 62, sub: 'n=40' }, { label: '125-150', value: 48 }], unit: '%', max: 100 }); clean(h, 'hbars'); assert.ok(h.includes('width:62%') && h.includes('n=40'));
+  const d = C.hbars({ items: [{ label: 'Putting', value: -1.4 }, { label: 'Approach', value: 0.7 }], diverging: true, digits: 1 }); clean(d, 'div'); assert.ok(d.includes('right:50%') && d.includes('left:50%') && d.includes('−1.4') && d.includes('+0.7') && d.includes('<u>'));
+  assert.equal(C.hbars({ items: [] }), ''); clean(C.hbars({ items: [{ label: 'a', value: 0 }] }), 'zero');
+});
+t('fairway and green: percentages in the right places, tolerant of gaps', () => {
+  const f = C.fairway({ hit: 48.4, left: 30.9, right: 20.7, holes: 120 }); clean(f, 'fairway'); assert.ok(f.includes('>48%<') && f.includes('>31%<')); assert.equal(C.fairway({ hit: null, left: null, right: null }), '');
+  clean(C.fairway({ hit: 50, left: null, right: 50 }), 'fairway gap');
+  const g = C.green({ dirs: [{ direction: 'Short', pct: 40, count: 8 }, { direction: 'Long', pct: 20, count: 4 }, { direction: 'Left', pct: 25, count: 5 }, { direction: 'Right', pct: 15, count: 3 }] }); clean(g, 'green');
+  assert.ok(g.includes('>40%<') && g.includes('var(--bad)')); assert.equal(C.green({ dirs: [] }), ''); clean(C.green({ dirs: [{ direction: 'Short', pct: 0, count: 0 }] }), 'green zero');
+});
 console.log(`\n${n} tests passed`);

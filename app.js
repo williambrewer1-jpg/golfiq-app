@@ -166,6 +166,10 @@ function distChart(rounds, metric) {
   const items = bins.map((b, i) => ({ label: intM ? `${b.lo}–${b.hi - 1}` : `${b.lo}–${b.hi}`, xl: String(b.lo), value: b.count, hot: i === hotI, tone: 'accent', note: `${intM ? `${b.lo}–${b.hi - 1}` : `${b.lo} to ${b.hi}`}: ${b.count} round${b.count === 1 ? '' : 's'}${i === hotI ? ' (includes your last round)' : ''}` }));
   return `<h3>Distribution of rounds</h3>${CHT.bars({ items, digits: 0, aria: `How many rounds fall in each ${name} range`, caption: `Tap a bar. The outlined bar holds your last round (${fmt(last)}).` })}`;
 }
+function holeChart(ha) {
+  const cells = ha.map((x) => ({ hole: x.hole, value: x.avg_to_par, detail: `Hole ${x.hole} · par ${x.par} · SI ${x.si ?? '–'} · avg ${fmt(x.avg, 1)} (${sgn(x.avg_to_par, 1)}) · GIR ${fmt(x.gir_pct, 0)}% · ${x.played} played` }));
+  return CHT.holeGrid({ groups: [{ title: 'Front 9', rows: [{ cells: cells.filter((c) => c.hole <= 9) }] }, { title: 'Back 9', rows: [{ cells: cells.filter((c) => c.hole > 9) }] }], digits: 1, aria: 'Average score to par on each hole', caption: 'Average to par per hole. Tap a hole for details.' });
+}
 // ------------------------------------------------------------------ pages
 const PAGES = {
   home: ['GolfIQ', 'home'], stats: ['Stats', 'chart'], rounds: ['Rounds', 'list'],
@@ -261,12 +265,12 @@ function pageScoring() {
   <div class="card"><h2>Consistency</h2><div class="kpis">${['gross', 'stableford_round', 'differential'].map((mm) => { const cc = A.consistency(r, mm); return `<div class="kpi"><div class="l">${A.METRICS[mm][0]} – SD</div><div class="v">${fmt(cc.sd)}</div><div class="d muted">IQR ${fmt(cc.iqr)} · n=${cc.n}</div></div>`; }).join('')}</div></div>
   ${killersTrend(ds)}
   ${bestWorst(r)}
-  <div class="card"><h2>Score types per 18 holes</h2>${plot([{ x: dist.map((d) => d.bucket), y: dist.map((d) => d.per_18), type: 'bar', marker: { color: cols }, text: dist.map((d) => d.per_18.toFixed(1)), textposition: 'outside' }], { height: 260 })}
+  <div class="card"><h2>Score types per 18 holes</h2>${CHT.strip({ parts: dist.map((d) => ({ label: d.bucket, value: d.per_18, tone: CHT.SCORE_TONES[d.bucket], note: `${d.bucket}: ${fmt(d.per_18, 1)} per 18 holes (${fmt(d.pct, 0)}% of holes)` })), digits: 1, caption: 'Tap a colour for details.' })}
   <div class="kpis">${kpi('Triple+ holes / round', bl.per_round, null, false, 2)}${kpi('Strokes beyond double / rd', bl.beyond_double_per_round, null, false, 2)}${kpi('Blow-ups with a penalty', bl.with_penalty_pct, null, false, 0, '%')}</div></div>
   <div class="card"><h2>By hole par</h2>${table(bp, [['par', 'Par'], ['holes', 'Holes'], ['avg_score', 'Avg', n2], ['avg_to_par', 'To par', n2], ['stableford_avg', 'Pts', n2], ['gir_pct', 'GIR', p0], ['blowup_pct', 'Triple+', p0]])}
   <h3>Front vs back nine (18-hole rounds)</h3>${table(fb, [['nine', ''], ['avg_to_par_per_9', 'To par / 9', n2], ['stableford_per_9', 'Pts / 9', n1], ['putts_per_9', 'Putts / 9', n1]])}</div>
   <div class="card"><h2>By course</h2>${table(A.courseSummary(r), [['course', 'Course'], ['tee', 'Tee'], ['rounds', 'Rds'], ['avg_gross', 'Gross', n1], ['avg_differential', 'Diff', n1], ['avg_stableford', 'Pts', n1], ['rating', 'CR', n1], ['slope', 'Slope', n0]])}
-  ${courses.length ? `<h3>Hole by hole</h3>${select('sc_course', courses, cid)}${plot([{ x: ha.map((x) => x.hole), y: ha.map((x) => x.avg_to_par), type: 'bar', marker: { color: ha.map((x) => (x.avg_to_par > 1 ? P.bad : x.avg_to_par > 0.5 ? P.gold : P.good)) } }], { height: 230, xaxis: { dtick: 1, title: { text: 'Hole' } }, yaxis: { title: { text: 'Avg to par' } } })}
+  ${courses.length ? `<h3>Hole by hole</h3>${select('sc_course', courses, cid)}${holeChart(ha)}
   ${table(ha, [['hole', 'Hole'], ['par', 'Par'], ['si', 'SI'], ['played', 'n'], ['avg', 'Avg', n2], ['avg_to_par', 'To par', n2], ['stableford', 'Pts', n2], ['gir_pct', 'GIR', p0]])}` : ''}
   ${note('Compare courses on differential (accounts for rating/slope), not gross.')}</div>`;
 }
@@ -279,7 +283,7 @@ function pageTee() {
   <div class="card"><h2>What a missed fairway costs</h2><p>${sgn(fw.to_par_yes)} to par after hitting the fairway vs ${sgn(fw.to_par_no)} after missing it: <b>${n2(fw.delta)}</b> strokes per miss <span class="small muted">(${fw.n_yes} hit / ${fw.n_no} missed)</span>.</p>
   ${note('A personal contrast from your own par 4s and 5s. It overlaps with approach play – Practice → Focus ranks the areas together.')}</div>
   <div class="card"><h2>Trend</h2>${seg('te_m', [['fw_pct', 'Fairways'], ['penalties', 'Penalties']], 'fw_pct')}${trendChart(r, m, A.METRICS[m][0])}</div>
-  <div class="card"><h2>Fairway results</h2>${plot([{ x: ['Hit', 'Left', 'Right'], y: [drv.fw_hit_pct, drv.miss_left_pct, drv.miss_right_pct], type: 'bar', marker: { color: [P.good, P.gold, P.bad] } }], { height: 220 })}
+  <div class="card"><h2>Fairway results</h2>${CHT.fairway({ hit: drv.fw_hit_pct, left: drv.miss_left_pct, right: drv.miss_right_pct, holes: drv.fairway_holes })}
   ${table(drv.by_club, [['club', 'Tee club'], ['shots', 'n'], ['median_m', `Median ${UNIT}`, d0], ['sd_m', 'SD', d1], ['lateral_sd_m', 'Lateral SD', d1]])}
   ${note('Fairway results come from your scorecard. Tee-shot distances are GPS total; lateral spread is measured from the usual line of your drives on each hole.')}</div>`;
 }
@@ -292,12 +296,12 @@ function pageApproach() {
   return `${filterSummary(ds)}<div class="kpis">${kpi('GIR', A.mean(h.map((x) => x.gir_eff)) * 100, null, true, 0, '%')}${kpi('Strokes per missed green', gir.delta, null, false, 2)}${kpi(`Long/short SD (${UNIT})`, cv(A.std(reach.map((x) => x.long_short_m))), null, false, 0)}${kpi(`Left/right SD (${UNIT})`, cv(A.std(reach.map((x) => x.lateral_m))), null, false, 0)}</div>
   ${note('GIR is derived (strokes − putts ≤ par − 2); holes with missing or default putts are excluded. If long/short spread is bigger than left/right, distance control is the bigger leak.')}
   <div class="card"><h2>Trend</h2>${trendChart(r, 'gir_pct', A.METRICS.gir_pct[0])}
-  ${plot([{ x: g1.map((x) => `Par ${x.par}`), y: g1.map((x) => x.gir_pct), type: 'bar', marker: { color: P.good } }], { title: 'GIR % by par', height: 220 })}</div>
-  <div class="card"><h2>By distance</h2>${bands.length ? plot([{ x: bands.map((b) => b.band), y: bands.map((b) => b.green_hit_pct), type: 'bar', name: 'Green hit %', marker: { color: P.good }, text: bands.map((b) => `n=${b.shots}`), textposition: 'outside' }], { height: 250 }) : ''}
+  <h3>GIR by par</h3>${CHT.tiles(g1.map((x) => ({ label: `Par ${x.par}`, value: x.gir_pct, unit: '%', sub: `${x.holes} holes` })))}</div>
+  <div class="card"><h2>By distance</h2><p class="small muted" style="margin:0 0 4px">Green hit %, by distance from the pin</p>${bands.length ? CHT.hbars({ items: bands.map((b) => ({ label: b.band, value: b.green_hit_pct, sub: `n=${b.shots}`, note: `${b.band}: ${fmt(b.green_hit_pct, 0)}% of ${b.shots} shots hit the green` })), unit: '%', digits: 0, max: 100 }) : ''}
   ${table(bands, [['band', 'From'], ['shots', 'n'], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['short_pct', 'Short', p0], ['long_pct', 'Long', p0], ['sd_lateral_m', 'L/R SD', d1]])}
   ${note(`Pin = Garmin's pin marker (green centre unless moved on the watch). Green hit uses Garmin's end lie, else within ${D(12)} of the pin. Short/long = more than ${D(10)} from the pin's distance.`)}</div>
   <div class="card"><h2>By club</h2>${table(byClub, [['club', 'Club'], ['shots', 'n'], ['median_start_m', `From ${UNIT}`, d0], ['green_hit_pct', 'Green', p0], ['median_proximity_m', `Prox ${UNIT}`, d0], ['mean_long_short_m', 'Long/short', d1], ['sd_lateral_m', 'L/R SD', d1]])}</div>
-  ${miss.length ? `<div class="card"><h2>Missed greens</h2>${plot([{ x: miss.map((x) => x.direction), y: miss.map((x) => x.pct), type: 'bar', marker: { color: P.accent } }], { title: 'Dominant miss direction', height: 220 })}</div>` : ''}`;
+  ${miss.length ? `<div class="card"><h2>Missed greens</h2><p class="small muted" style="margin:0 0 4px">Where approach shots finished when they missed the green</p>${CHT.green({ dirs: miss })}</div>` : ''}`;
 }
 
 function pageShort() {
