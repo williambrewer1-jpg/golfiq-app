@@ -64,7 +64,8 @@ with sync_playwright() as p:
     check('pressure hit is stored', pr == [True, True, 10], pr); check('result mentions the pressure finish', 'Pressure' in pg.inner_text('.gp-res') or 'pressure' in pg.inner_text('.gp-res'))
     check('perfect score reaches Platinum', 'Platinum' in pg.inner_text('.gp-res'))
     check('result shows the beat-the-handicapper line', 'handicapper' in pg.inner_text('.gp-res'))
-    check('result shows a handicap level', 'Handicap level' in pg.inner_text('.gp-res'))
+    LEVEL = r"That's (a scratch score or better|a \d+-handicap score|worse than a 25-handicap score)"   # the line under the score (was "Handicap level: …" before the result reveal)
+    check('result shows a handicap level', re.search(LEVEL, pg.inner_text('.gp-res')) is not None, pg.inner_text('.gp-res')[:200])
     a = pg.evaluate(AUDIT); check('result screen: no overflow, tap targets ok', not a['overflow'] and not a['small'], a); pg.screenshot(path='/tmp/guided_result.png')
     nxt = pg.get_attribute('[data-gpnext]', 'data-gpnext'); pg.click('[data-gpnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
     check('Next game starts a different game', pg.evaluate("() => window.__golfiq.state.journal.game_draft.game") != nxt)
@@ -119,7 +120,7 @@ with sync_playwright() as p:
     check('result keeps average distance, fairways and wide balls', r['fairways'] == 9 and r['wides'] == 0 and r['avg_dist'] > 200 and isinstance(r['score'], (int, float)), r)
     txt = pg.inner_text('.gp-res')
     check('result screen shows average, fairways out of ten and wide balls in yards', 'Average distance' in txt and 'fairways' in txt and 'of 10' in txt and 'wide' in txt and 'yd' in txt, txt[:300])
-    check('result screen shows a handicap level and a tier ladder position', 'Handicap level' in txt, txt[:300])
+    check('result screen shows a handicap level and a tier ladder position', re.search(LEVEL, txt) is not None, txt[:300])
     a = pg.evaluate(AUDIT); check('Driver test result: no overflow, tap targets ok', not a['overflow'] and not a['small'], a); pg.screenshot(path='/tmp/driver_result.png')
     pg.click('[data-gpdone]'); pg.wait_for_selector('[data-gpstart]')
     # Max out
@@ -129,7 +130,7 @@ with sync_playwright() as p:
         pg.fill('#gpDtype', v); pg.click('[data-gpball="f"]'); pg.wait_for_timeout(80)
     pg.wait_for_selector('.gp-res'); r = last_res(); txt = pg.inner_text('.gp-res')
     check('Max out scores the longest ball (262 + 10% = 288.2)', r['game'] == 'range-speed' and abs(r['score'] - 288.2) < 0.06 and r['longest'] == r['score'], r)
-    check('Max out result lists the balls and has no handicap level', 'Your balls' in txt and 'Handicap level' not in txt, txt[:300])
+    check('Max out result lists the balls and has no handicap level', 'Your balls' in txt and re.search(LEVEL, txt) is None, txt[:300])
     pg.click('[data-gpdone]'); pg.wait_for_selector('[data-gpstart]')
     # pressure ball
     pg.evaluate("() => { window.__golfiq.state.journal.game_draft = null; }"); pg.evaluate("() => window.__golfiq.guided.start('range-driver', { pressure: true })"); pg.wait_for_selector('#gpRoot .gp-dist')

@@ -110,6 +110,19 @@ export function outcomeOf(game, step, answer, { ball, before } = {}) {
   if (step.input === 'strokes') { const par = step.par ?? 2; return { good: answer <= par, key: answer <= par - 1 ? 'birdie' : answer === par ? 'par' : answer === par + 1 ? 'bogey' : answer === par + 2 ? 'double' : 'over' }; }
   const w = WORDS[game.id] || ['missed', 'holed']; return answer === 1 ? { good: true, key: w[1] } : { good: false, key: w[0] };
 }
+// ---- the result headline (phase C)
+// A personal best needs a score to beat, so a first play is never one. "Met" and "short" are about the target for the golfer's next handicap step.
+export function verdictOf(game, score, { target = null, prevBest = null } = {}) {
+  const lower = game.better === 'lower', beats = (a, b) => (lower ? a < b : a > b);
+  const pb = Number.isFinite(score) && Number.isFinite(prevBest) && beats(score, prevBest);
+  const has = Number.isFinite(score) && Number.isFinite(target), met = has && (lower ? score <= target : score >= target);
+  return { key: pb ? 'pb' : met ? 'met' : has ? 'short' : 'done', pb, met, diff: has && !met ? Math.max(0.1, Math.round(Math.abs(target - score) * 10) / 10) : 0 };
+}
+// which sound the finish makes and whether there is confetti: a new tier beats a personal best, which beats a met target; the rest is a plain finish
+export function celebrationOf({ verdict, tierUp = false }) {
+  const sound = tierUp ? 'tier' : verdict.pb ? 'pb' : verdict.met ? 'win' : 'finish';
+  return { sound, confetti: sound !== 'finish' };
+}
 export const STREAK_MILESTONES = [3, 5, 10];                                               // good in a row: these get a banner and a sound
 export const countsStreak = (game) => game.id !== 'range-speed';                          // Max out has no hit or miss
 // how many good answers in a row end the list (worked out from the answers, so undo and reload always agree)
