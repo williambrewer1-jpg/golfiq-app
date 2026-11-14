@@ -152,6 +152,9 @@ export function countUp(el, from, to, ms = 600, fmt) {
 export const CONFETTI = { count: 70, ms: 1200, gravity: 900, fallback: ['#0b6b47', '#f2cf4a', '#c9a43a', '#f3efe3'] };
 const lum = (c) => { const m = /^#([0-9a-f]{6})$/i.exec(c || ''); if (!m) return null; const n = parseInt(m[1], 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); };
 // green, gold and cream from the current theme's own tokens; cream is whichever of --bg and --ink is the lighter, so it works in light and dark
+// The confetti look the golfer chose in the Locker: 'classic' (green, gold, cream), 'gold' (gold only) or 'flags' (small pennants in the classic colours)
+let LOOK = 'classic';
+export const setLook = (l) => { LOOK = ['classic', 'gold', 'flags'].includes(l) ? l : 'classic'; };
 export function palette() {
   const cs = G.getComputedStyle?.(G.document.documentElement), v = (n) => (cs?.getPropertyValue(n) || '').trim();
   const bg = v('--bg'), ink = v('--ink'), cream = (lum(bg) ?? -1) >= (lum(ink) ?? -1) ? bg : ink;
@@ -165,7 +168,7 @@ export function confetti(canvas, opts = {}) {
   try {
     const dpr = Math.min(2, G.devicePixelRatio || 1), r = canvas.getBoundingClientRect(), w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
     canvas.width = w * dpr; canvas.height = h * dpr; const x = canvas.getContext('2d'); x.scale(dpr, dpr);
-    const pick = palette();
+    const base = palette(), pick = LOOK === 'gold' ? [base[1], base[2], base[1], base[2]] : base, flags = LOOK === 'flags';
     const ms = opts.ms || CONFETTI.ms, n = opts.count || CONFETTI.count, ox = opts.x ?? w / 2, oy = opts.y ?? h * 0.35;
     const ps = Array.from({ length: n }, (_, i) => { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = 260 + Math.random() * 380; return { x: ox, y: oy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, w: 5 + Math.random() * 5, h: 3 + Math.random() * 4, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 12, c: pick[i % pick.length] }; });
     let t0 = null, last = null;
@@ -175,7 +178,7 @@ export function confetti(canvas, opts = {}) {
       x.clearRect(0, 0, w, h);
       if (age >= ms) return;
       x.globalAlpha = Math.max(0, Math.min(1, (ms - age) / 400));                           // fade out over the last 400 ms
-      for (const p of ps) { p.vy += CONFETTI.gravity * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.99; p.rot += p.vr * dt; x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.fillStyle = p.c; x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }
+      for (const p of ps) { p.vy += CONFETTI.gravity * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.99; p.rot += p.vr * dt; x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.fillStyle = p.c; if (flags) { x.fillRect(-1, -p.h - 3, 2, p.h * 2 + 6); x.beginPath(); x.moveTo(1, -p.h - 3); x.lineTo(p.w + 5, -p.h / 2 - 1); x.lineTo(1, 2); x.closePath(); x.fill(); } else x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }
       G.requestAnimationFrame(frame);
     };
     G.requestAnimationFrame(frame);
@@ -238,6 +241,12 @@ export const COPY = {
     homeTitle: 'Practice payoff', sheet: 'Predictions', beaten: (b, t) => `${b} of ${t} beaten`, run: (n) => `${n} in a row`, runNone: 'No run yet',
     cardTitle: 'Beat the prediction', cardNote: 'Your prediction is your own typical score on the course. Beating it earns points, and missing it costs nothing.',
     short: (n) => `You need ${n} more rounds with a score before BreakingPar can predict.`,
+  },
+  locker: {
+    title: 'Locker', intro: 'Things you earn by practising and playing. Nothing is bought, and nothing is ever taken away.', use: 'Use', using: 'In use', open: 'Open Locker',
+    kinds: { wallpaper: 'Lock-screen themes', skin: 'App colours', badge: 'Badge style', confetti: 'Confetti' },
+    unlocked: (name) => `Unlocked: ${name}`, tryIt: 'Try it', later: 'Not now', progress: (a, b) => `${a} of ${b}`, count: (a, b) => `${a} of ${b} unlocked`,
+    duelNote: 'Duels arrive in a later update.', wpNote: 'More themes are in the Locker.', chosen: (name) => `${name} on`,
   },
   boss: {
     kicker: 'Boss game', target: (s) => `Boss target ${s}`, pips: (h, p) => `${h} of ${p} games at the milestone score`, hit: 'At the milestone score', shortBy: (n) => `${n} short`,

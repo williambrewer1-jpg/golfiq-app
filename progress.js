@@ -9,6 +9,8 @@ import * as SK from './skills.js';
 import * as GM from './games.js';
 import * as LV from './level.js';
 import * as PO from './payoff.js';
+import * as LCK from './locker.js';
+import * as WP from './wallpaper.js';
 import * as FEEL from './feel.js';
 import { icon } from './icons.js';
 
@@ -56,8 +58,10 @@ export function registerProgress(c) {
     const jidx = A.isNum(idx) ? idx : null, jr = JR.journey({ index: jidx, results: res, games: g, unitM: unitM(), bosses: J().journey?.bosses || [] });
     // predictions (payoff.js): saved at the start of a round, else worked out from the rounds before it. Each one beaten is worth points.
     const ph = PO.predictionHistory({ rounds: ds.rounds, predictions: J().predictions || [] }), pr = PO.predictionRun(ph);
+    // the locker (locker.js): unlock state is worked out from level, bosses, streak, earned tiers, duels played and saved predictions beaten
     const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
-    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
+    const lk = LCK.locker({ level: lv, bosses: J().journey?.bosses || [], streaks: st, tiers: tiers.filter((b) => b.earned).map((b) => b.id), duels: res.filter((r) => r.duel).length, predictions: ph.filter((h) => h.beat && h.stored).length });
+    memo = { ds: c.DS, j: key, v: { lk, fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
     return memo.v;
   }
 
@@ -203,6 +207,7 @@ export function registerProgress(c) {
     const v = data(); return `<div class="lvrow">${chip(v)}</div>${freezeCard(v)}`;
   }
   const ptsRow = (k) => { const x = LV.POINTS[k], extra = ['target', 'tier', 'pb', 'pressure', 'daily'].includes(k); return `<tr><td>${esc(FEEL.COPY.playerLevel.table.find((r) => r[0] === k)[1])}</td><td><b>${extra ? '+' : ''}${x}</b></td></tr>`; };
+  function openLocker(e) { e?.preventDefault?.(); c.ui.st_tab = 'locker'; c.saveUi(); $('#sheet')?.classList.remove('open'); if (location.hash === '#settings') c.rerender(); else location.hash = '#settings'; }
   function levelSheet() {
     const v = data(), l = v.lv, K = FEEL.COPY.playerLevel, lines = l.ledger.slice(0, LV.LEDGER_LINES);
     $('#sheetPanel').innerHTML = `<div class="lvs-h"><span class="lvring big" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span><div><h2 style="margin:0">${esc(l.rank.name)}</h2><div class="small muted">${esc(K.rank(l.rank.n))} of ${LV.RANKS.length} · ${esc(K.total(l.points))}</div></div></div>
@@ -213,8 +218,8 @@ export function registerProgress(c) {
       <h3 style="margin:14px 0 4px">${esc(K.tableTitle)}</h3>
       <div class="tbl"><table><tbody>${K.table.map((r) => ptsRow(r[0])).join('')}<tr><td>${esc(K.welcomeRow)}</td><td><b>×${LV.POINTS.welcome_back}</b></td></tr></tbody></table></div>
       <p class="small muted" style="margin:8px 0 0">${esc(K.capNote(LV.DAILY_CAP))}</p><p class="small muted" style="margin:6px 0 12px">${esc(K.note)}</p>
-      <button type="button" class="btn" id="lvClose">Close</button>`;
-    $('#sheet').classList.add('open'); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open'));
+      <button type="button" class="btn sec" data-lklink>${esc(FEEL.COPY.locker.open)}</button> <button type="button" class="btn" id="lvClose">Close</button>`;
+    $('#sheet').classList.add('open'); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open')); $('#sheetPanel [data-lklink]')?.addEventListener('click', openLocker);
   }
   // The rank-up moment: a full-width card with the new rank stamped in. Shown once per rank (J().level_seen). The first time the feature runs, the rank the golfer
   // already has is taken as the starting point rather than celebrated. Never shown over a game in play; after a game it waits for the result screen to finish.
@@ -235,8 +240,64 @@ export function registerProgress(c) {
     if (root) setTimeout(show, FEEL.revealMs(2400)); else show();
   }
   // runs after every page draw (app.js): the rank chips open the sheet, the freeze line can be dismissed, the rank moment may appear, the rank is shared with friends
+  // ---- locker (locker.js): the chosen look is applied after every page draw; unlocks announce themselves once
+  const look = () => LCK.resolveLook(c.state.settings?.look, data().lk);
+  function applyLook() {
+    try {
+      if (!document.getElementById('skinCss')) { const el = document.createElement('style'); el.id = 'skinCss'; el.textContent = LCK.skinCss(); document.head.appendChild(el); }
+      const l = look(), r = document.documentElement;
+      if (l.skin === LCK.DEFAULTS.skin) r.removeAttribute('data-skin'); else r.dataset.skin = l.skin;
+      if (l.badge === LCK.DEFAULTS.badge) r.removeAttribute('data-badge'); else r.dataset.badge = l.badge;
+      FEEL.setLook(l.confetti);
+    } catch { /* no data yet: the free defaults stay */ }
+  }
+  async function useItem(id) {
+    const [kind, key] = id.split(':'), it = data().lk.items.find((x) => x.id === id); if (!it || !it.unlocked) return;
+    const st = c.state.settings; st.look = { ...(st.look || {}), [kind]: key };
+    if (kind === 'wallpaper') { c.ui.wp_theme = key; c.saveUi(); }
+    await c.S.saveSettings(c.state, 'set_look', null, { look: st.look }); applyLook(); FEEL.play('good');
+  }
+  function preview(it) {
+    if (it.kind === 'skin') { const t = it.key === 'clubhouse' ? { bg: '#f3efe3', head: '#0a3d2b', accent: '#0b5a3e', gold: '#c9a43a' } : LCK.SKINS[it.key].light; return `<span class="lk-prev lk-skin" style="background:${t.bg}"><i style="background:${t.head}"></i><i style="background:${t.accent}"></i><i style="background:${t.gold}"></i></span>`; }
+    if (it.kind === 'wallpaper') { const t = WP.THEMES[it.key]; return `<span class="lk-prev" style="background:linear-gradient(${t.top},${t.bottom})"><i class="lk-wl" style="background:${t.line}"></i></span>`; }
+    if (it.kind === 'badge') return `<span class="lk-prev"><span class="gp-badge gold" data-badge="${it.key}">Gold</span></span>`;
+    return `<span class="lk-prev lk-cf ${it.key}"><i></i><i></i><i></i><i></i><i></i></span>`;
+  }
+  function lockerPage() {
+    const v = data(), K = FEEL.COPY.locker, now = look(), n = v.lk.items.filter((i) => i.unlocked).length;
+    const card = (it) => {
+      const on = now[it.kind] === it.key, pr = it.progress;
+      return `<div class="lk-item${it.unlocked ? '' : ' off'}${on ? ' use' : ''}" data-lkitem="${esc(it.id)}">${preview(it)}<b>${esc(it.name)}</b>
+        ${it.unlocked ? `<button type="button" class="btn ${on ? 'sec' : ''}" data-lkuse="${esc(it.id)}" ${on ? 'disabled' : ''}>${esc(on ? K.using : K.use)}</button>`
+          : `<span class="small muted">${icon('lock', 14)} ${esc(it.how)}${it.rule.t === 'duels' ? `. ${esc(K.duelNote)}` : ''}</span>${pr ? `<div class="bar"><i style="width:${Math.round(100 * pr.have / Math.max(1, pr.need))}%"></i></div><span class="small muted">${esc(K.progress(Math.round(pr.have), pr.need))}</span>` : ''}`}</div>`;
+    };
+    return `<div class="card"><h2>${esc(K.title)}</h2><p class="small" style="margin:0 0 4px">${esc(K.intro)}</p><p class="small muted" style="margin:0">${esc(K.count(n, v.lk.items.length))}</p></div>
+      ${LCK.KINDS.map(([k]) => `<div class="card"><h3 style="margin:0 0 8px">${esc(K.kinds[k])}</h3><div class="lk-grid">${v.lk.items.filter((i) => i.kind === k).map(card).join('')}</div></div>`).join('')}`;
+  }
+  // "Unlocked: Claret" with a Try it button. Shown once per item (J().locker_seen). The first time, what is already unlocked is the starting point, not a surprise.
+  function unlockNote() {
+    if (!(c.DS.rounds.length || (J().results || []).length) || J().game_draft || $('#lkNote')) return;
+    const lk = data().lk, seen = J().locker_seen;
+    if (!Array.isArray(seen)) { J().locker_seen = [...lk.unlocked]; c.S.saveJournal(c.state); return; }
+    const fr = LCK.fresh(lk, seen); if (!fr.length) return;
+    const root = $('#gpRoot.gp-rv'), K = FEEL.COPY.locker, show = () => {
+      if ($('#lkNote') || J().game_draft) return;
+      if ($('#lvMoment')) { setTimeout(show, 800); return; }                       // the rank moment goes first
+      J().locker_seen = [...new Set([...(J().locker_seen || []), ...fr.map((i) => i.id)])]; c.S.saveJournal(c.state);
+      const d = document.createElement('div'); d.id = 'lkNote'; d.className = 'lknote'; d.setAttribute('role', 'status');
+      d.innerHTML = `<span><b>${esc(K.unlocked(fr[0].name))}</b>${fr.length > 1 ? ` <span class="small muted">+${fr.length - 1}</span>` : ''}</span><button type="button" class="btn" id="lkTry">${esc(K.tryIt)}</button><button type="button" class="btn sec" id="lkX">${esc(K.later)}</button>`;
+      document.body.appendChild(d); FEEL.play('good');
+      d.querySelector('#lkX').addEventListener('click', () => d.remove());
+      d.querySelector('#lkTry').addEventListener('click', async () => { d.remove(); await useItem(fr[0].id); c.done(K.chosen(fr[0].name)); });
+    };
+    if (root) setTimeout(show, FEEL.revealMs(3200)); else show();
+  }
+
   function afterRender() {
+    applyLook(); unlockNote();
     c.$$('[data-level]').forEach((b) => b.addEventListener('click', levelSheet));
+    c.$$('[data-lkuse]').forEach((b) => b.addEventListener('click', async () => { await useItem(b.dataset.lkuse); c.done(FEEL.COPY.locker.chosen(data().lk.items.find((x) => x.id === b.dataset.lkuse).name)); }));
+    c.$$('[data-lklink]').forEach((b) => b.addEventListener('click', openLocker));
     c.$$('[data-jstage]').forEach((b) => b.addEventListener('click', () => { const [n, k] = b.dataset.jstage.split(':'); stageSheet(Number(n), k); }));
     c.$$('[data-jboss]').forEach((b) => b.addEventListener('click', () => bossSheet(Number(b.dataset.jboss))));
     c.$$('[data-jhome]').forEach((b) => b.addEventListener('click', () => c.guided?.start(b.dataset.jhome)));
@@ -363,5 +424,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'} ${shield(v.st.freezes_held)}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, roundPayoffHtml, homePayoff, predictionsCard };
+  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, lockerPage, applyLook, look, roundPayoffHtml, homePayoff, predictionsCard };
 }

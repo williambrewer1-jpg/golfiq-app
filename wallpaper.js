@@ -8,9 +8,13 @@ export function phoneSize() {
   return { w, h };
 }
 
-const THEMES = {
+export const THEMES = {
   green: { top: '#0d5239', bottom: '#052117', stripe: 'rgba(255,255,255,.035)', card: 'rgba(4,28,19,.55)', line: '#c9a43a', ink: '#ffffff', sub: 'rgba(255,255,255,.62)', accent: '#f2cf4a' },
   night: { top: '#15181a', bottom: '#030404', stripe: 'rgba(255,255,255,.025)', card: 'rgba(255,255,255,.05)', line: '#c9a43a', ink: '#f5f2e8', sub: 'rgba(245,242,232,.55)', accent: '#e8c45a' },
+  dawn: { top: '#33526a', bottom: '#d98c5f', stripe: 'rgba(255,255,255,.04)', card: 'rgba(16,26,38,.6)', line: '#f0c987', ink: '#ffffff', sub: 'rgba(255,255,255,.68)', accent: '#f6d98c' },
+  tweed: { top: '#4a3f33', bottom: '#201a14', stripe: 'rgba(255,240,210,.07)', card: 'rgba(20,14,8,.55)', line: '#c9a43a', ink: '#f3ead8', sub: 'rgba(243,234,216,.6)', accent: '#e2c06a' },
+  sunday: { top: '#7a1426', bottom: '#2a0710', stripe: 'rgba(255,255,255,.03)', card: 'rgba(20,3,8,.55)', line: '#d9b650', ink: '#ffffff', sub: 'rgba(255,255,255,.66)', accent: '#f2cf4a' },
+  gold: { top: '#c9a43a', bottom: '#6e550f', stripe: 'rgba(255,255,255,.06)', card: 'rgba(36,26,3,.6)', line: '#fff0a8', ink: '#fff8de', sub: 'rgba(255,248,222,.72)', accent: '#fff0a8' },
   cream: { top: '#f6f1e2', bottom: '#e6dcc2', stripe: 'rgba(10,61,43,.04)', card: 'rgba(255,255,255,.55)', line: '#0a3d2b', ink: '#0a2a1e', sub: 'rgba(10,42,30,.6)', accent: '#0a3d2b' },
 };
 const SERIF = 'Didot, "Bodoni 72", Baskerville, Georgia, serif', SANS = '-apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif';
