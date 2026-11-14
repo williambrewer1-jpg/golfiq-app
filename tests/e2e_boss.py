@@ -84,7 +84,7 @@ with sync_playwright() as p:
     check('all five results carry the boss number and the pressure finish', allr == [[n, True]] * 5, allr)
     if passed:
         check('a pass shows the big stamped number, "Boss passed", and 150 points', 'boss passed' in pg.inner_text('#gpRoot').lower() and f'Beat the {n}' in pg.inner_text('#gpRoot') and '+150 points' in pg.inner_text('#gpRoot'), pg.inner_text('#gpRoot')[:200])
-        log = pg.evaluate("() => window.__feelLog"); tail = log[-3:]; check('win then tier sounds play', tail[0] == 'win' and tail[-1] == 'tier', tail)
+        log = pg.evaluate("() => window.__feelLog"); w = len(log) - 1 - log[::-1].index('win') if 'win' in log else -1; check('win then tier sounds play', w >= 0 and 'tier' in log[w:], log[-12:])   # order, not position: the streak sound may follow
         led = pg.evaluate("() => window.__golfiq.progress.data().lv.ledger.filter((l) => l.what.startsWith('Boss game passed')).map((l) => l.points)"); check('the ledger has the 150 points', led == [150], led)
         check('the next stretch opens on the path', pg.evaluate("(n) => { const j = window.__golfiq.progress.data().jr; return j.stretches.find((s) => s.n === n).state === 'done' && j.current && j.current.n < n; }", n))
         a = pg.evaluate(AUDIT, '#gpRoot'); check('the pass screen: no overflow, tap targets 38px or more', not a['overflow'] and not a['small'], a)
