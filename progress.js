@@ -210,7 +210,7 @@ export function registerProgress(c) {
   function openLocker(e) { e?.preventDefault?.(); c.ui.st_tab = 'locker'; c.saveUi(); $('#sheet')?.classList.remove('open'); if (location.hash === '#settings') c.rerender(); else location.hash = '#settings'; }
   function levelSheet() {
     const v = data(), l = v.lv, K = FEEL.COPY.playerLevel, lines = l.ledger.slice(0, LV.LEDGER_LINES);
-    $('#sheetPanel').innerHTML = `<div class="lvs-h"><span class="lvring big" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span><div><h2 style="margin:0">${esc(l.rank.name)}</h2><div class="small muted">${esc(K.rank(l.rank.n))} of ${LV.RANKS.length} · ${esc(K.total(l.points))}</div></div></div>
+    $('#sheetPanel').innerHTML = `${sheetBar()}<div class="lvs-h"><span class="lvring big" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span><div><h2 style="margin:0">${esc(l.rank.name)}</h2><div class="small muted">${esc(K.rank(l.rank.n))} of ${LV.RANKS.length} · ${esc(K.total(l.points))}</div></div></div>
       <p class="small" style="margin:10px 0 2px">${esc(l.next ? K.toNext(l.toNext, l.next.name) : K.top)}</p><div class="bar"><i style="width:${Math.round(l.progress * 100)}%"></i></div>
       <p class="small muted" style="margin:6px 0 0">${esc(K.today(Math.min(l.today, LV.DAILY_CAP), LV.DAILY_CAP))}</p>
       <h3 style="margin:14px 0 4px">${esc(K.recent)}</h3>
@@ -219,7 +219,7 @@ export function registerProgress(c) {
       <div class="tbl"><table><tbody>${K.table.map((r) => ptsRow(r[0])).join('')}<tr><td>${esc(K.welcomeRow)}</td><td><b>×${LV.POINTS.welcome_back}</b></td></tr></tbody></table></div>
       <p class="small muted" style="margin:8px 0 0">${esc(K.capNote(LV.DAILY_CAP))}</p><p class="small muted" style="margin:6px 0 12px">${esc(K.note)}</p>
       <button type="button" class="btn sec" data-lklink>${esc(FEEL.COPY.locker.open)}</button> <button type="button" class="btn" id="lvClose">Close</button>`;
-    $('#sheet').classList.add('open'); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open')); $('#sheetPanel [data-lklink]')?.addEventListener('click', openLocker);
+    $('#sheet').classList.add('open'); wireSheetX(); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open')); $('#sheetPanel [data-lklink]')?.addEventListener('click', openLocker);
   }
   // The rank-up moment: a full-width card with the new rank stamped in. Shown once per rank (J().level_seen). The first time the feature runs, the rank the golfer
   // already has is taken as the starting point rather than celebrated. Never shown over a game in play; after a game it waits for the result screen to finish.
@@ -338,7 +338,10 @@ export function registerProgress(c) {
     return `<div class="card jn-head"><h2 style="margin:0">${esc(K.title)}</h2><p class="small" style="margin:4px 0 0">${nx ? esc(nx.line) : esc(K.done)}</p></div>
       <div class="jn-path" id="jnPath">${html}</div><p class="small muted jn-note">${esc(K.note)}</p>`;
   }
-  function openSheet(html) { $('#sheetPanel').innerHTML = `${html}<button type="button" class="btn" id="jnClose">Close</button>`; $('#sheet').classList.add('open'); $('#jnClose').addEventListener('click', () => $('#sheet').classList.remove('open')); }
+  // a close button that stays at the top of a long sheet while it scrolls (tapping the dark backdrop also closes)
+  const sheetBar = () => `<div class="sheet-bar"><button type="button" class="sheet-x" data-sheetx aria-label="Close">${icon('cross', 20)}</button></div>`;
+  const wireSheetX = () => $('#sheetPanel [data-sheetx]')?.addEventListener('click', () => $('#sheet').classList.remove('open'));
+  function openSheet(html) { $('#sheetPanel').innerHTML = `${sheetBar()}${html}<button type="button" class="btn" id="jnClose">Close</button>`; $('#sheet').classList.add('open'); wireSheetX(); $('#jnClose').addEventListener('click', () => $('#sheet').classList.remove('open')); }
   function stageSheet(n, skill) {
     const s = data().jr.stretches.find((x) => x.n === n), st = s?.stages.find((x) => x.skill === skill); if (!st) return;
     const K = FEEL.COPY.journey, left = Math.max(0, Math.ceil(st.need - st.hits));
