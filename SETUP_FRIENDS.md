@@ -1,4 +1,4 @@
-# GolfIQ friends: leaderboards and live side games – setup
+# BreakingPar friends: leaderboards and live side games – setup
 
 You do this once (about 10 minutes, on the iPhone in Safari or on a computer). Friends don't set anything up; they join with your invite link.
 
@@ -13,8 +13,8 @@ You do this once (about 10 minutes, on the iPhone in Safari or on a computer). F
 ## A. Create the Firebase project
 
 1. Go to **console.firebase.google.com** and sign in with a Google account.
-2. Tap **Create a project**. Name it something like `golfiq-friends`. Turn Google Analytics **off**, then create it.
-3. **Turn on anonymous sign-in.** Go to **Build → Authentication → Get started → Sign-in method → Anonymous**, switch it on, then **Save**. GolfIQ gives each phone an anonymous ID, so nobody needs an account or a password.
+2. Tap **Create a project**. Name it something like `breakingpar-friends`. Turn Google Analytics **off**, then create it.
+3. **Turn on anonymous sign-in.** Go to **Build → Authentication → Get started → Sign-in method → Anonymous**, switch it on, then **Save**. BreakingPar gives each phone an anonymous ID, so nobody needs an account or a password.
 4. **Create the database.** Go to **Build → Firestore Database → Create database**.
    - Choose **Production mode**.
    - Choose a location near you, e.g. `australia-southeast1` (Sydney).
@@ -51,7 +51,7 @@ service cloud.firestore {
 
 6. **Register the app and copy its config.**
    - Tap the **gear → Project settings → General**. Under **Your apps**, tap the **web icon `</>`**.
-   - Register the app as `GolfIQ`. Don't tick Firebase Hosting.
+   - Register the app as `BreakingPar`. Don't tick Firebase Hosting.
    - Firebase shows a `firebaseConfig = { apiKey: "…", projectId: "…", … }` block. Copy the whole block.
    - The web `apiKey` isn't a secret. It only identifies the project, and the rules above are what protect the data.
 7. **Optional but recommended: lock the key to your app's address.**
@@ -59,16 +59,16 @@ service cloud.firestore {
    - Open the **Browser key**.
    - Under **Application restrictions**, choose **Websites** and add `https://williambrewer1-jpg.github.io/*`. Save.
 
-## B. Connect GolfIQ and make a group
+## B. Connect BreakingPar and make a group
 
-1. In GolfIQ, go to **Settings (gear) → Friends**.
+1. In BreakingPar, go to **Settings (gear) → Friends**.
 2. Paste the config block from step A6, enter a nickname, then tap **Save**. The app should say **Firebase connected**. If it says anonymous sign-in failed, check step A3.
 3. Enter a group name (e.g. "Saturday crew") and tap **Create group**.
 4. Tap **Share invite link** and send it to your friends.
 
 ## C. What friends do
 
-1. Open the invite link in Safari, then tap **Share → Add to Home Screen** and open GolfIQ from the new icon.
+1. Open the invite link in Safari, then tap **Share → Add to Home Screen** and open BreakingPar from the new icon.
 2. **Settings → Friends:** paste the invite link into **Got an invite from a friend?**, pick a nickname, then tap **Join group**.
    - Pasting is needed on iPhone because Safari and the home-screen app keep separate storage, so the link opened in Safari doesn't reach the app.
    - On other phones, opening the link may take them straight to the join screen.
@@ -79,7 +79,7 @@ service cloud.firestore {
 - **Practice → Leaderboard:** the weekly challenge is the same game for everyone in the group (it changes every Monday). Every score you record in Practice is posted with its handicap level. You'll also find the monthly combine board and all-time bests per game there.
 - **Play → start a round → Playing partners & side games:**
   - Add up to three partners with their handicap indexes and tick the games: Stableford, skins, match play / Nassau, best ball.
-  - With **Share live** ticked, friends with GolfIQ can open **Play → Join a friend's round**, tap their name and enter their own scores.
+  - With **Share live** ticked, friends with BreakingPar can open **Play → Join a friend's round**, tap their name and enter their own scores.
   - Everyone's standings update about every 20 seconds, or straight away with **Sync now**.
   - Without a signal, keep scoring; it syncs when you're back online.
 - **Leave a group:** Settings → Friends → Leave. Your posted scores stay on the board.

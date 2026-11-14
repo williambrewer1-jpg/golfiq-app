@@ -145,10 +145,10 @@ export function registerCompete(c) {
     const rr = J().range;
     if (!rr) {
       const cs = rangeCourses();
-      if (!cs.length) return `<div class="card"><h2>Range round</h2><p class="muted">Needs a course where GolfIQ knows each hole's tee and green – from your tracked Garmin rounds, or a downloaded course outline with hole lines.</p></div>`;
+      if (!cs.length) return `<div class="card"><h2>Range round</h2><p class="muted">Needs a course where BreakingPar knows each hole's tee and green – from your tracked Garmin rounds, or a downloaded course outline with hole lines.</p></div>`;
       const sel = c.ui.rr_course && cs.some((x) => x.course_id === c.ui.rr_course) ? c.ui.rr_course : cs[0].course_id;
       const best = J().results.filter((r) => r.game === 'range-course').sort((a, b) => a.score - b.score);
-      return `<div class="card"><h2>Play your course on the range</h2><p class="small">Play a real course shot by shot on the range. GolfIQ calls the distance for each shot from your hole lengths and your own club distances; you hit it with full routine and tap where it finished. Once you're on or around the green, the hole is finished with the strokes you'd expect from there (your strokes-gained model), so the score reads like a real round.</p>
+      return `<div class="card"><h2>Play your course on the range</h2><p class="small">Play a real course shot by shot on the range. BreakingPar calls the distance for each shot from your hole lengths and your own club distances; you hit it with full routine and tap where it finished. Once you're on or around the green, the hole is finished with the strokes you'd expect from there (your strokes-gained model), so the score reads like a real round.</p>
         <form id="rrStart">${select('rr_course', cs.map((x) => [x.course_id, `${x.name} (${x.holes.length} holes)`]), sel, 'Course')}
         <label class="f">Holes</label><select name="which"><option value="all">All known holes</option><option value="front">Front nine</option><option value="back">Back nine</option></select>
         <p><button class="btn">Start range round</button></p></form>
@@ -181,7 +181,7 @@ export function registerCompete(c) {
     if (!CL.ready(cl) || pend) {
       return `<div class="card"><h2>Friends &amp; leaderboards</h2>
         ${pend ? `<p>You've been invited to <b>${esc(pend.groupName || 'a group')}</b>. Pick a nickname to join.</p><form id="frJoinInvite"><label class="f">Nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn">Join group</button></p></form>`
-    : `<p class="small">Leaderboards and live side games need a small shared database. GolfIQ uses your own free Firebase project – about 10 minutes to set up once (steps in SETUP_FRIENDS.md in the app's GitHub repo). Friends don't set anything up: they join from your invite link.</p>
+    : `<p class="small">Leaderboards and live side games need a small shared database. BreakingPar uses your own free Firebase project – about 10 minutes to set up once (steps in SETUP_FRIENDS.md in the app's GitHub repo). Friends don't set anything up: they join from your invite link.</p>
         <form id="frPaste"><label class="f">Got an invite from a friend? Paste the link here</label><input name="link" placeholder="https://…#join=…" autocomplete="off"><p><button class="btn">Use invite</button></p></form>
         <p class="small muted">On iPhone, an invite opened in Safari doesn't reach the app on your home screen (they keep separate storage), so copy the link and paste it here instead.</p>
         <h3>Or set up your own group</h3>
@@ -247,7 +247,7 @@ export function registerCompete(c) {
     });
     $('#frPaste')?.addEventListener('submit', async (e) => {
       e.preventDefault(); const t = String(new FormData(e.target).get('link') || ''), inv = CL.parseInvite(t.slice(t.indexOf('#')));
-      if (!inv) { toast("That doesn't look like a GolfIQ invite link"); return; }
+      if (!inv) { toast("That doesn't look like a BreakingPar invite link"); return; }
       cloud().pending = inv; await S.saveCloud(c.state); c.rerender();
     });
     $('#frJoinInvite')?.addEventListener('submit', async (e) => {
@@ -265,7 +265,7 @@ export function registerCompete(c) {
     });
     $('#frInvite')?.addEventListener('click', async () => {
       const cl = cloud(), link = CL.inviteLink(cl, cl.group, cl.groupName, location.href);
-      try { if (navigator.share) await navigator.share({ title: 'Join my GolfIQ group', text: `Join ${cl.groupName} on GolfIQ for practice leaderboards and side games:`, url: link }); else { await navigator.clipboard.writeText(link); toast('Invite link copied'); } }
+      try { if (navigator.share) await navigator.share({ title: 'Join my BreakingPar group', text: `Join ${cl.groupName} on BreakingPar for practice leaderboards and side games:`, url: link }); else { await navigator.clipboard.writeText(link); toast('Invite link copied'); } }
       catch { /* share sheet closed */ }
     });
     $('#frMembers')?.addEventListener('click', async () => {

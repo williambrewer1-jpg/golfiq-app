@@ -1,4 +1,4 @@
-// Line icons (24x24, stroke). Hand-drawn for GolfIQ; no external icon set.
+// Line icons (24x24, stroke). Hand-drawn for BreakingPar; no external icon set.
 const P = {
   home: '<path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5.5h4V20"/>',
   chart: '<path d="M4 19V5M4 19h16"/><path d="M8 15l3.5-4 3 2.5L19 8"/>',
