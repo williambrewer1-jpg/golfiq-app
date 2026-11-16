@@ -152,6 +152,9 @@ export function countUp(el, from, to, ms = 600, fmt) {
 export const CONFETTI = { count: 70, ms: 1200, gravity: 900, fallback: ['#0b6b47', '#f2cf4a', '#c9a43a', '#f3efe3'] };
 const lum = (c) => { const m = /^#([0-9a-f]{6})$/i.exec(c || ''); if (!m) return null; const n = parseInt(m[1], 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); };
 // green, gold and cream from the current theme's own tokens; cream is whichever of --bg and --ink is the lighter, so it works in light and dark
+// The confetti look the golfer chose in the Locker: 'classic' (green, gold, cream), 'gold' (gold only) or 'flags' (small pennants in the classic colours)
+let LOOK = 'classic';
+export const setLook = (l) => { LOOK = ['classic', 'gold', 'flags'].includes(l) ? l : 'classic'; };
 export function palette() {
   const cs = G.getComputedStyle?.(G.document.documentElement), v = (n) => (cs?.getPropertyValue(n) || '').trim();
   const bg = v('--bg'), ink = v('--ink'), cream = (lum(bg) ?? -1) >= (lum(ink) ?? -1) ? bg : ink;
@@ -165,7 +168,7 @@ export function confetti(canvas, opts = {}) {
   try {
     const dpr = Math.min(2, G.devicePixelRatio || 1), r = canvas.getBoundingClientRect(), w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
     canvas.width = w * dpr; canvas.height = h * dpr; const x = canvas.getContext('2d'); x.scale(dpr, dpr);
-    const pick = palette();
+    const base = palette(), pick = LOOK === 'gold' ? [base[1], base[2], base[1], base[2]] : base, flags = LOOK === 'flags';
     const ms = opts.ms || CONFETTI.ms, n = opts.count || CONFETTI.count, ox = opts.x ?? w / 2, oy = opts.y ?? h * 0.35;
     const ps = Array.from({ length: n }, (_, i) => { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = 260 + Math.random() * 380; return { x: ox, y: oy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, w: 5 + Math.random() * 5, h: 3 + Math.random() * 4, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 12, c: pick[i % pick.length] }; });
     let t0 = null, last = null;
@@ -175,7 +178,7 @@ export function confetti(canvas, opts = {}) {
       x.clearRect(0, 0, w, h);
       if (age >= ms) return;
       x.globalAlpha = Math.max(0, Math.min(1, (ms - age) / 400));                           // fade out over the last 400 ms
-      for (const p of ps) { p.vy += CONFETTI.gravity * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.99; p.rot += p.vr * dt; x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.fillStyle = p.c; x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }
+      for (const p of ps) { p.vy += CONFETTI.gravity * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.99; p.rot += p.vr * dt; x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.fillStyle = p.c; if (flags) { x.fillRect(-1, -p.h - 3, 2, p.h * 2 + 6); x.beginPath(); x.moveTo(1, -p.h - 3); x.lineTo(p.w + 5, -p.h / 2 - 1); x.lineTo(1, 2); x.closePath(); x.fill(); } else x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }
       G.requestAnimationFrame(frame);
     };
     G.requestAnimationFrame(frame);
@@ -210,10 +213,101 @@ export const COPY = {
     hit: (a, b) => `Hit ${a} of ${b}`, noHit: 'Not a hit yet', of: (a, b) => `${a} of ${b}`,
     potential: 'potential',
     note: 'Your potential is a target to play for, not a promise.',
+    points: 'Points', pointsNote: (total, toNext, next) => (next ? `${total.toLocaleString('en-GB')} total · ${toNext.toLocaleString('en-GB')} to ${next}` : `${total.toLocaleString('en-GB')} total · top rank`), pointsFull: 'Daily limit reached',
     league: (pts) => `League +${pts}`,
     leagueFull: 'League: full week',
     leagueTotal: (pts, rank, n) => `${pts} point${pts === 1 ? '' : 's'} · ${['1st', '2nd', '3rd'][rank - 1] || `${rank}th`} of ${n}`,
     leagueFullNote: 'Your first 10 scores of the week count',
+  },
+  // ---- player level, streak freeze and welcome back (retention plan, phase R1)
+  playerLevel: {
+    title: 'Your level', rank: (n) => `Rank ${n}`, points: 'Points', total: (n) => `${n.toLocaleString('en-GB')} points`,
+    toNext: (n, name) => `${n.toLocaleString('en-GB')} points to ${name}`, top: 'Top rank reached',
+    today: (n, cap) => `${n} of ${cap} game points today`, recent: 'Recent points', none: 'Play a game or a round and your points will show here.',
+    tableTitle: 'How points are earned', moment: { kicker: 'New rank', line: (n) => `${n.toLocaleString('en-GB')} points, all from real practice and rounds.`, button: 'Continue' },
+    note: 'Your rank only goes up as you practise and play. It is a practice level, not a handicap. Points are never bought and never taken away for a missed day.',
+    capNote: (cap) => `Games and typed-in scores count for up to ${cap} points a day. Rounds, sessions and tests do not count towards that.`,
+    table: [['game', 'A guided game'], ['quick', 'A score typed in'], ['target', 'Beating your target'], ['tier', 'A new tier in a game'], ['pb', 'A personal best'], ['pressure', 'A pressure finish that holds'],
+      ['daily', 'Today\'s challenge'], ['session', 'A full session'], ['round', 'A round (9 holes count half)'], ['challenge', 'An on-course challenge'], ['test', 'The monthly skills test']],
+    welcomeRow: 'Welcome-back game: double points',
+  },
+  payoff: {
+    predict: (p) => `BreakingPar predicts ${p.predicted}${p.lo === p.hi ? '' : ` (you usually score ${p.lo}–${p.hi} here)`}. Beat it.`,
+    beat: (by) => `You beat the prediction by ${by}.`, level: 'Right on the prediction.', over: (by, within) => `${by} over the prediction${within ? ' — within your usual range.' : '.'}`,
+    made: (p) => `Predicted ${p.predicted}${p.lo === p.hi ? '' : `, usual range ${p.lo}–${p.hi}`}`, points: (n) => `+${n} points`,
+    title: 'Practice payoff', predTitle: 'Your prediction', small: 'One round is a small sample. These are estimates from your own averages.',
+    none: 'Nothing clearly showed up today. One round is a small sample — the trend is what counts.', closest: (t) => `Closest to your usual: ${t}.`,
+    workOn: 'Worth a look', workBtn: (t) => `Play ${t}`, confirmed: (t) => `${t}: now showing up on the course.`, open: 'Open round',
+    homeTitle: 'Practice payoff', sheet: 'Predictions', beaten: (b, t) => `${b} of ${t} beaten`, run: (n) => `${n} in a row`, runNone: 'No run yet',
+    cardTitle: 'Beat the prediction', cardNote: 'Your prediction is your own typical score on the course. Beating it earns points, and missing it costs nothing.',
+    short: (n) => `You need ${n} more rounds with a score before BreakingPar can predict.`,
+  },
+  locker: {
+    title: 'Locker', intro: 'Things you earn by practising and playing. Nothing is bought, and nothing is ever taken away.', use: 'Use', using: 'In use', open: 'Open Locker',
+    kinds: { wallpaper: 'Lock-screen themes', skin: 'App colours', badge: 'Badge style', confetti: 'Confetti' },
+    unlocked: (name) => `Unlocked: ${name}`, tryIt: 'Try it', later: 'Not now', progress: (a, b) => `${a} of ${b}`, count: (a, b) => `${a} of ${b} unlocked`,
+    wpNote: 'More themes are in the Locker.', chosen: (name) => `${name} on`,
+  },
+  kudos: {
+    kinds: { clap: 'Clap', fire: 'Fire', flag: 'Flag' }, give: (k, nick) => `${k} ${nick}'s score`, take: (k) => `Take back your ${k}`, own: (n) => `${n} reaction${n === 1 ? '' : 's'} on your score`,
+    notice: (w, game, score) => `${(w?.who || []).join(' and ')}${w?.others ? ` and ${w.others} other${w.others === 1 ? '' : 's'}` : ''} reacted to your ${game || 'score'}${score !== null && score !== undefined ? ` ${score}` : ''}`,
+    recentTitle: 'Friends\' recent scores', recentNone: 'No scores from your group yet this week.', dismiss: 'Dismiss',
+    unavailable: 'Kudos need updated Firestore rules. The group owner can republish them from Settings → Friends (the rules are there to copy).',
+    rulesNote: (v) => `Rules version ${v}: adds kudos and duels. If your group was set up earlier, paste these rules into Firebase → Firestore Database → Rules and tap Publish, once. Until then kudos stay hidden and everything else works as before.`,
+    failed: (m) => `Could not send that: ${m}`,
+  },
+  duels: {
+    title: 'Duels', intro: 'One game each, the same shots, one attempt each. Challenge a friend in your group.',
+    challenge: 'Challenge', challengeFriend: 'Challenge a friend', send: 'Send challenge', cancel: 'Cancel', friend: 'Friend', game: 'Game', scoring: 'Scoring', time: 'Time to play', stake: 'Stake (optional)', stakeHint: 'e.g. Loser buys the coffees',
+    stakeNote: 'Only a line of text on the screen. No money is involved.', pressure: 'Pressure finish for both of you',
+    modes: { handicap: 'Handicap duel', straight: 'Straight duel' },
+    modeNote: { handicap: 'Each of you is measured against your own target for the game. Whoever beats theirs by more wins, so it is fair at any level.', straight: 'The better raw score wins.' },
+    days: (n) => `${n} days`, left: (n) => (n <= 0 ? 'last day' : n === 1 ? '1 day left' : `${n} days left`),
+    noFriends: 'Nobody else is in your group yet. Share the invite link from Settings → Friends.',
+    limit: 'You already have three open duels. Wait for one to finish.', pair: (n) => `You already have an open duel with ${n}.`, theirLimit: (n) => `${n} already has three open duels.`,
+    sent: (n) => `Challenge sent to ${n}`, shareTitle: 'A BreakingPar duel', shareText: (g) => `I challenge you to a ${g} duel on BreakingPar.`, copied: 'Duel link copied', failed: (m) => `Could not do that: ${m}`,
+    unavailable: 'Duels need updated Firestore rules. The group owner can republish them from Settings → Friends (the rules are there to copy).',
+    loading: 'Loading…', none: 'No duels yet. Tap Challenge on a friend, or here.', record: (t) => `Duels ${t}`, recordLine: (nick, t) => `${nick}: ${t}`, recordsTitle: 'Your record (won–drawn–lost)',
+    incomingTitle: 'Challenges for you', turnTitle: 'Your turn', waitTitle: 'Waiting', doneTitle: 'Finished',
+    challenges: (nick) => `${nick} challenges you`, accept: 'Accept', decline: 'Decline', accepted: 'Accepted. Play whenever you are ready.', declined: 'Declined', play: 'Play your attempt', view: 'Show result',
+    start: 'One attempt only. Once the game starts, quitting uses it up. Start now?', quit: 'Stop this duel? Your one attempt is used up, and the duel goes to your friend.',
+    cannotPlay: 'That duel is not open for you any more.', needOnline: (m) => `A duel needs a connection to start: ${m}`,
+    waitOpen: (nick) => `Waiting for ${nick} to accept`, waitPlay: (nick) => `Waiting for ${nick} to play`, mineSaved: 'Your score is in.', share: 'Send the link again',
+    unsent: 'Your score is saved here. It goes to your friend the next time you open Duels.',
+    scoreRow: 'Score', targetRow: 'Own target', marginRow: 'Beat target by', you: 'You',
+    win: (nick) => `You beat ${nick}`, lose: (nick) => `${nick} takes this one`, draw: (nick) => `A draw with ${nick}`,
+    forfeitWin: (nick) => `${nick} did not play in time. The duel is yours.`, forfeitLose: (nick) => `Time ran out before you played. ${nick} takes it.`,
+    stakeLine: (s) => `Stake: ${s}`, rematch: 'Rematch', rematchSent: (n) => `Rematch sent to ${n}`, waitingNote: (nick, date) => `${nick} has until ${date} to play. The result shows here once they have.`,
+    expired: 'Ended with nobody playing', byForfeit: 'by forfeit', modeShort: { handicap: 'handicap', straight: 'straight' },
+  },
+  boss: {
+    kicker: 'Boss game', target: (s) => `Boss target ${s}`, pips: (h, p) => `${h} of ${p} games at the milestone score`, hit: 'At the milestone score', shortBy: (n) => `${n} short`,
+    beat: (n, s, lower) => `Boss level for ${n === 0 ? 'scratch' : `the ${n}`}: ${s}${lower ? ' or fewer' : '+'}.`,
+    status: (h, need, left) => `${h} of ${need} needed so far, ${left} game${left === 1 ? '' : 's'} to play.`, outOfReach: 'A pass is out of reach this time. Finish the games to see how close you got.',
+    reached: (h, need) => `${h} of 5 at the milestone score. That is ${need} or more, so the boss is passed.`, finished: (h, need) => `${h} of 5 at the milestone score. ${need} are needed.`,
+    finish: 'Finish the boss game', quit: (n) => (n ? 'Stop the boss game? It counts as today\'s attempt, and the games you finished are kept.' : 'Stop the boss game? Nothing is used up if you have not finished a game.'),
+    passedKicker: 'Boss passed', points: (n) => `+${n} points`, nextOpen: (l) => `The road to ${l} is open.`, allDone: 'That was the last stretch on the road.',
+    notYet: 'Not this time', work: 'Worth another look', practise: (name) => `Practise ${name}`, again: 'One attempt a day, so you can try again tomorrow.',
+    start: 'Start the boss game', startNote: (m) => `Five games back to back, about ${m} minutes. Pressure finish is on. Reach the milestone score in four of the five.`,
+    waitToday: 'You have had today\'s attempt. You can try again tomorrow.', last: (d) => `Last attempt ${d}`,
+  },
+  journey: {
+    title: 'Road to scratch', tab: 'Journey', youAt: (i) => `You: ${i}`, course: 'Earned on the course', noIndex: 'Add a handicap index or a few rounds and your starting point moves up the path.',
+    stage: (h, need) => `${h} of ${need}`, stageDone: 'Stage complete', stageLeft: (n) => `${n} more to go`, needOther: 'Your hits so far are all in one game. A hit in another game finishes this stage.',
+    sheetLine: (n) => `Post the score a ${n === 0 ? 'scratch golfer' : `${n}-handicap golfer`} posts, three times, in any of these games.`, mine: 'Your best', target: 'Score to beat', play: 'Play',
+    bossLocked: 'Finish all four stages to open the boss game.', bossReady: 'All four stages are done. The boss game is the last step of this stretch.', bossPassed: 'Passed',
+    note: 'The journey measures your practice level. Your handicap follows when it shows up on the course.',
+    homeTitle: 'Next on your journey', homePlay: 'Play', homeOpen: 'See the path', rewardTitle: 'Journey',
+    stamp: 'Stage complete', done: 'All stretches complete. Keep playing.',
+  },
+  freeze: {
+    label: 'Streak freezes', held: (n) => `${n} freeze${n === 1 ? '' : 's'} held`,
+    saved: (n) => (n > 1 ? `A freeze saved your ${n}-week streak. Earn another by finishing a session.` : 'A freeze saved your streak. Earn another by finishing a session.'),
+    gotIt: 'Got it', note: 'Finish a full session to earn a streak freeze. A freeze covers one missed week, and you can hold two.', frozen: 'Covered by a streak freeze',
+  },
+  welcome: {
+    title: 'Welcome back', line: (game, mins) => `Ease back in with about ${mins} minutes of ${game}.`, goal: (n) => `Beat your usual score of ${n} for double points.`,
+    goalNew: (n) => `Aim for ${n}: the score of a 20 handicap. Double points.`, play: 'Play', back: 'Back in the swing.', target: (n) => `Target ${n} · your usual score`, beat: (n) => `Beat your usual score of ${n}.`,
   },
   actions: { again: 'Play again', next: 'Next game', done: 'Done' },
   tier: (name) => `${name} tier`,

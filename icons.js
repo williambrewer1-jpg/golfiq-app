@@ -1,4 +1,4 @@
-// Line icons (24x24, stroke). Hand-drawn for GolfIQ; no external icon set.
+// Line icons (24x24, stroke). Hand-drawn for BreakingPar; no external icon set.
 const P = {
   home: '<path d="M3.5 11L12 4l8.5 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5.5h4V20"/>',
   chart: '<path d="M4 19V5M4 19h16"/><path d="M8 15l3.5-4 3 2.5L19 8"/>',
@@ -9,6 +9,7 @@ const P = {
   score: '<path d="M9 4L7 20M17 4l-2 16M4.5 9h16M3.5 15h16"/>',
   crosshair: '<circle cx="12" cy="12" r="7"/><path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4"/>',
   tick: '<path d="M5 12.500l4.500 4.500L19 7"/>',
+  clap: '<path d="M8 12.500l3.500-6.500a1.400 1.400 0 012.400 1.400L12 10.500l4 .5a2 2 0 011.600 2.400L16.800 17a5 5 0 01-5.600 3.600L8.500 20a4 4 0 01-3-2.500L4 14l1.600-1.200a1.400 1.400 0 012.200.4z"/><path d="M16 3.500l.8 1.800M19.500 6l-1.600 1M4.500 7.500l1.700.9" opacity=".7"/>',
   cross: '<path d="M6 6l12 12M18 6L6 18"/>',
   flame: '<path d="M12 3c.5 3.200 4.500 5 4.500 9.500a4.500 4.500 0 01-9 0c0-1.700.8-3 1.800-4 .2 1.200.9 1.900 1.700 2.100C11 8.500 11.200 5.500 12 3z"/>',
   sound: '<path d="M4 9.5v5h3.5l4.500 4v-13l-4.500 4z"/><path d="M15.500 9.200a4 4 0 010 5.600"/><path d="M18 6.800a7.500 7.500 0 010 10.400"/>',
@@ -32,6 +33,8 @@ const P = {
   share: '<path d="M12 15V4M8 7.500L12 4l4 3.500"/><path d="M6 11v7a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-7"/>',
   spread: '<circle cx="8" cy="9" r="1.300" fill="currentColor"/><circle cx="13" cy="7" r="1.300" fill="currentColor"/><circle cx="15" cy="13" r="1.300" fill="currentColor"/><circle cx="10" cy="15" r="1.300" fill="currentColor"/><ellipse cx="12" cy="11.500" rx="8.500" ry="7.500"/>',
   chevron: '<path d="M9 5l7 7-7 7"/>',
+  lock: '<rect x="5.500" y="10.500" width="13" height="9.500" rx="2"/><path d="M8.500 10.500V8a3.500 3.500 0 0 1 7 0v2.500"/>',
+  shield: '<path d="M12 3.200l7 2.600v5.700c0 4.200-2.900 7.600-7 9.300-4.100-1.700-7-5.100-7-9.300V5.800z"/><path d="M8.800 12.200l2.200 2.200 4.200-4.400"/>',
 };
 export const icon = (name, size = 22) => `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.700" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || P.chart}</svg>`;
 

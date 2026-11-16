@@ -76,7 +76,7 @@ export function rateValue(key, value) {
 const expPutts = (d, h) => { const m1 = B.makeProb(d, h), lv = d * B.leave30(h) / 30; return 1 + (1 - m1) * (1 + (1 - B.makeProb(lv, h))); };
 
 // ------------------------------------------------------------------ course measures: you, n, extras, in benchmark units (yd, ft, %)
-function measures({ rounds, holes, shots }) {
+export function measures({ rounds, holes, shots }) {
   const out = {}, nR = rounds.length;
   const hs = holes, byRound = (arr) => A.groupBy(arr, (x) => x.round_id);
   // putting
@@ -117,7 +117,7 @@ function measures({ rounds, holes, shots }) {
   out['driving.penalties'] = { n: tee.length, you: penR.length ? mean(penR) : null };   // per 14 tee shots, so rounds with missing tee data compare fairly
   return out;
 }
-const MIN = (key) => (/^approach\.(wedge|mid|long)$/.test(key) ? RATING.min_prox_n : RATING.min_pct_n);
+export const MIN = (key) => (/^approach\.(wedge|mid|long)$/.test(key) ? RATING.min_prox_n : RATING.min_pct_n);
 
 // Modelled strokes a round from driving `tgt` instead of `m.you` yd: every drive that goes further leaves an approach that much shorter, valued as the
 // putts saved (approach proximity at that distance, from the bench.js table, turned into expected putts). Not a published figure: the UI says so.
@@ -127,7 +127,7 @@ export function distanceStrokes(m, tgt, hcp) {
   return (m.per_round || 0) * Math.max(0, putts(from) - putts(Math.max(DRIVING.approach_lo, from - gain)));
 }
 // strokes per round gained by moving from `you` to `tgt` (plan 4.2). Re-uses the levelUp() logic for GIR, up-and-down, three-putts, fairways.
-function strokesFor(key, m, tgt, hcp) {
+export function strokesFor(key, m, tgt, hcp) {
   if (!isNum(m.you) || !isNum(tgt)) return 0;
   switch (key) {
     case 'putting.short': case 'putting.mid': return Math.max(0, tgt - m.you) / 100 * m.per_round;

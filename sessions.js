@@ -52,3 +52,24 @@ export function dailyStreak(daily = {}, today) {
   while (daily[d]) { n++; d = addDays(d, -1); }
   return n;
 }
+
+// ---- welcome back (retention plan 5.2)
+// After WELCOME.days with no practice result, session or round, the golfer is offered one short putting game with their own median as the target
+// (about an even chance), not the skill target. Nobody who has never played is offered it: there is no "away" without a first result.
+export const WELCOME = { days: 14, games: ['putt-369', 'putt-lag', 'putt-streak'], fallback: 'putt-369', fallbackHandicap: 20 };
+const dayNo = (d) => Math.round(Date.parse(`${String(d).slice(0, 10)}T12:00:00`) / DAY);
+const medianOf = (a) => { const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+// welcomeBack({ results, sessions, rounds, today, games, unitM }) → { days, game, target, basis: 'median' | 'bench', played } or null
+export function welcomeBack({ results = [], sessions = [], rounds = [], today, games = [], unitM = 0.9144, tierScores } = {}) {
+  const dates = [...results, ...sessions, ...rounds].map((x) => String(x.date || '').slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (!results.length || !dates.length) return null;
+  const days = dayNo(today) - dayNo(dates.sort().pop());
+  if (days < WELCOME.days) return null;
+  const count = (id) => results.filter((r) => r.game === id && Number.isFinite(r.score)).length;
+  let id = WELCOME.games.reduce((best, g) => (count(g) > count(best) ? g : best), WELCOME.games[0]);
+  const game = games.find((g) => g.id === (count(id) ? id : WELCOME.fallback)); if (!game) return null; id = game.id;
+  if (!count(id)) { const t = tierScores?.(game, unitM)?.find((x) => x.h === WELCOME.fallbackHandicap)?.score; return Number.isFinite(t) ? { days, game: id, target: t, basis: 'bench', played: 0 } : null; }
+  const scores = results.filter((r) => r.game === id && Number.isFinite(r.score)).map((r) => r.score), whole = scores.every(Number.isInteger);
+  let t = medianOf(scores); t = whole ? Math.floor(t) : Math.round(t * 10) / 10; t = Math.max(1, t); if (game.max) t = Math.min(game.max, t);
+  return { days, game: id, target: t, basis: 'median', played: scores.length };
+}

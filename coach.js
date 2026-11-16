@@ -130,21 +130,35 @@ export function roadmap(gameIds, results, games, unitM = 0.9144, hcp = null) {
 export function practiceDates(journal) {
   return [...new Set([...(journal.results || []), ...(journal.sessions || []), ...(journal.wedge?.entries || [])].map((x) => String(x.date || '').slice(0, 10)).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort();
 }
-export function streaks(dates, now = new Date()) {
-  const wk = (d) => B.isoWeek(new Date(`${d}T12:00:00`)), weeks = new Set(dates.map(wk));
-  const back = (n) => { const d = new Date(now.getTime() - n * 7 * DAY); return B.isoWeek(d); };
-  let cur = 0, i = weeks.has(back(0)) ? 0 : 1;                        // this week still counts as "open"
-  while (weeks.has(back(i))) { cur++; i++; }
-  const all = [...weeks].sort(); let best = 0, run = 0, prev = null;
-  for (const w of all) { const [y, n] = w.split('-W').map(Number), idx = y * 53 + n; run = prev !== null && idx === prev + 1 ? run + 1 : 1; best = Math.max(best, run); prev = idx; }
-  const strip = Array.from({ length: 12 }, (_, k) => { const w = back(11 - k); return { week: w, days: dates.filter((d) => wk(d) === w).length }; });
-  return { current: cur, best: Math.max(best, cur), thisWeek: weeks.has(back(0)), strip };
+// ---- streak freeze (retention plan 5.1). Worked out from history every time; nothing is stored.
+// A full guided session (Build my session, every game finished) earns one freeze: at most one a week, at most FREEZE.max_held held.
+// An empty week that has ended spends a freeze instead of breaking the streak, and that week does not add to the count.
+// Histories with no completed sessions never earn a freeze, so they behave exactly as before.
+export const FREEZE = { max_held: 2 };
+export const earnsFreeze = (s) => !!s && s.guided === true && s.complete === true && !/^test/.test(String(s.id || '')) && s.notes !== 'Monthly skills test';
+export function streaks(dates, now = new Date(), { sessions = [] } = {}) {
+  const wk = (d) => B.isoWeek(new Date(`${d}T12:00:00`)), weeks = new Set(dates.map(wk)), earned = new Set((sessions || []).filter(earnsFreeze).map((s) => wk(String(s.date).slice(0, 10))));
+  const back = (n) => B.isoWeek(new Date(now.getTime() - n * 7 * DAY)), thisWk = back(0);
+  let run = 0, best = 0, held = 0, live = []; const frozen = [], saved = {};   // live: freezes inside the streak that is still running
+  if (weeks.size) {
+    const first = [...weeks].sort()[0], d0 = dates.map((d) => String(d).slice(0, 10)).filter((d) => wk(d) === first).sort()[0], m = new Date(`${d0}T12:00:00`);
+    m.setDate(m.getDate() - ((m.getDay() + 6) % 7));                                       // the Monday of the first practice week
+    for (let guard = 0; guard < 2000; guard++, m.setDate(m.getDate() + 7)) {
+      const w = B.isoWeek(m); if (w > thisWk) break;
+      if (weeks.has(w)) { run++; best = Math.max(best, run); if (earned.has(w)) held = Math.min(FREEZE.max_held, held + 1); }
+      else if (w === thisWk) { /* this week is still open */ }
+      else if (held > 0) { held--; frozen.push(w); live.push(w); saved[w] = run; }
+      else { run = 0; live = []; }
+    }
+  }
+  const strip = Array.from({ length: 12 }, (_, k) => { const w = back(11 - k); return { week: w, days: dates.filter((d) => wk(d) === w).length, frozen: frozen.includes(w) }; });
+  return { current: run, best: Math.max(best, run), thisWeek: weeks.has(thisWk), strip, freezes_held: held, frozen_weeks: frozen, frozen_live: live, saved };
 }
 export function badges({ rounds, holes, journal, roadmaps }) {
   const r18 = rounds.filter((r) => r.format === '18').sort((a, b) => dt(a.date) - dt(b.date)), res = journal.results || [];
   const first = (arr, f) => { const x = arr.find(f); return x ? x.date : null; };
   const hs = [...holes].filter((h) => isNum(h.to_par)).sort((a, b) => dt(a.date) - dt(b.date));
-  const st = streaks(practiceDates(journal)), scores = [...res].sort((a, b) => a.date.localeCompare(b.date));
+  const st = streaks(practiceDates(journal), new Date(), { sessions: journal.sessions }), scores = [...res].sort((a, b) => a.date.localeCompare(b.date));
   const lvlScratch = (roadmaps || []).find((g) => g.level !== null && g.level <= 0);
   const B_ = (id, name, desc, earned, progress = null) => ({ id, name, desc, earned, progress });
   return [

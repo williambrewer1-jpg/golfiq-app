@@ -16,7 +16,7 @@ export function registerFriends(c) {
       ${[2, 3, 4].map((i) => `<div class="row"><div><label class="f">Player ${i}</label><input name="p${i}_name" placeholder="Name"></div><div><label class="f">Index</label><input name="p${i}_hi" type="number" step="0.1" inputmode="decimal" placeholder="e.g. 12.4"></div></div>`).join('')}
       <label class="f">Games</label><div class="checks">${SG.FORMATS.map(([k, l]) => `<label><input type="checkbox" name="fmt" value="${k}" ${k === 'stableford' ? 'checked' : ''}> ${l}</label>`).join('')}</div>
       <label class="f">With four players, your partner (best ball and four-ball match)</label><select name="partner"><option value="p2">Player 2</option><option value="p3">Player 3</option><option value="p4">Player 4</option></select>
-      ${cl.group ? `<label class="checkrow"><input type="checkbox" name="live" checked> Share live with ${esc(cl.groupName || 'your group')} – friends with GolfIQ can join and enter their own scores</label>` : '<p class="small muted">To let friends enter their own scores on their phones, set up a group in Settings → Friends.</p>'}
+      ${cl.group ? `<label class="checkrow"><input type="checkbox" name="live" checked> Share live with ${esc(cl.groupName || 'your group')} – friends with BreakingPar can join and enter their own scores</label>` : '<p class="small muted">To let friends enter their own scores on their phones, set up a group in Settings → Friends.</p>'}
       ${note('Allowances follow WHS recommendations: Stableford 95%, best ball 85%, singles match 100% and four-ball match 90% of the difference, skins 100%. Two players: match is you v player 2. Four players: your pair v the other pair.')}</details>`;
   }
   function readStart(f) {

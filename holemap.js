@@ -1,4 +1,4 @@
-// GolfIQ hole map: an SVG drawing of the hole (illustrated from OpenStreetMap outlines, or satellite photos),
+// BreakingPar hole map: an SVG drawing of the hole (illustrated from OpenStreetMap outlines, or satellite photos),
 // turned so you are at the bottom looking up the hole, with your shot pattern and a draggable aim point.
 // Pure geometry + SVG strings; no DOM access, so it is unit-testable.
 import * as A from './analytics.js';

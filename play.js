@@ -1,9 +1,11 @@
-// GolfIQ "Play" page: live distances from the phone's GPS, your shot pattern drawn on the course,
+// BreakingPar "Play" page: live distances from the phone's GPS, your shot pattern drawn on the course,
 // and hole-by-hole score entry (score, putts, fairway, penalties) that saves as a normal round.
 import * as F from './features.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
 import * as CH from './challenges.js';
+import * as PO from './payoff.js';
+import * as FEEL from './feel.js';
 import { registerFriends } from './friends.js';
 
 export function registerPlay(c) {
@@ -38,13 +40,20 @@ export function registerPlay(c) {
     const why = ch.stalled ? 'Your practice is not showing up on the course yet. This is the way to check.' : 'Matches one of your focus areas. Counts as a hit towards your potential if you do it.';
     return `<label class="chal-offer"><input type="checkbox" name="chal" value="${esc(ch.key)}" checked><span><b>Round challenge: ${esc(ch.name)}</b><small>${esc(why)}${ch.kind === 'min' ? ' Scaled down for nine holes.' : ''}</small></span></label>`;
   }
+  // the prediction for the round about to start (payoff.js): the golfer's own typical score on this course, from their own rounds
+  function predictFor(cid, f) {
+    const known = cid && cid !== 'new' ? F.courseHoles(c.DS, cid) : {}, n = Number(f.n) === 9 ? 9 : 18, first = Number(f.first) || 1;
+    const pars = Array.from({ length: n }, (_, i) => known[((first - 1 + i) % 18) + 1]?.par), par = pars.every(A.isNum) ? pars.reduce((a, b) => a + b, 0) : null;
+    return PO.predict({ rounds: c.DS.rounds, course: { rating: c.numOrNull(f.rating), slope: c.numOrNull(f.slope), par }, holes: n });
+  }
+  const predText = (p) => (p ? FEEL.COPY.payoff.predict(p) : '');
   function startCard() {
     const { known, near } = courseOptions(), all = [...known, ...near];
     const closest = all.filter((x) => x.dist_m !== null && x.dist_m < 3000).sort((a, b) => a.dist_m - b.dist_m)[0];
     const sel = c.ui.pl_course && (all.some((x) => x.id === c.ui.pl_course) || c.ui.pl_course === 'new') ? c.ui.pl_course : (closest?.id || known[0]?.id || 'new');
     const last = known.find((x) => x.id === sel)?.row, nb = nearby();
     const opts = [...known.map((x) => [x.id, `${x.name}${x.dist_m !== null ? ` · ${km(x.dist_m)}` : ''}`]), ...near.map((x) => [x.id, `${x.name} · ${km(x.dist_m)}`]), ['new', 'New course…']];
-    return `<div class="card"><h2>Start a round</h2><p class="small">Keep score as you play – strokes, putts, fairways and penalties – with live distances and your shot patterns on the map. It saves as a normal round, so every page of GolfIQ works without a Garmin watch.</p>
+    return `<div class="card"><h2>Start a round</h2><p class="small">Keep score as you play – strokes, putts, fairways and penalties – with live distances and your shot patterns on the map. It saves as a normal round, so every page of BreakingPar works without a Garmin watch.</p>
       <div class="nearby"><div class="rv-h"><b>Courses near you</b><button type="button" class="btn sec sm" id="plNear">${nb ? 'Refresh' : 'Find courses near me'}</button></div>
         <span id="plNearMsg" class="small muted">${nb ? `${nb.list.length} golf courses within 40 km · ${esc(String(nb.at).slice(0, 10))}` : 'Uses your location and OpenStreetMap – works across the UK, Australia and most of the world.'}</span>
         ${near.length || known.some((k) => k.dist_m !== null) ? `<div class="nlist">${all.filter((x) => x.dist_m !== null).sort((a, b) => a.dist_m - b.dist_m).slice(0, 6).map((x) => `<button type="button" class="nrow ${x.id === sel ? 'on' : ''}" data-pickcourse="${esc(x.id)}"><b>${esc(x.name)}</b><span>${km(x.dist_m)}${x.row ? ' · played before' : ''}</span></button>`).join('')}</div>` : ''}</div>
@@ -53,6 +62,7 @@ export function registerPlay(c) {
       <div class="row"><div><label class="f">Tee</label><input name="tee" value="${esc(last?.tee || '')}"></div><div><label class="f">Course rating</label><input name="rating" type="number" step="0.1" inputmode="decimal" value="${last?.course_rating ?? ''}"></div><div><label class="f">Slope</label><input name="slope" type="number" inputmode="numeric" value="${last?.slope ?? ''}"></div></div>
       <div class="row"><div><label class="f">Holes</label><select name="n"><option value="18">18</option><option value="9">9</option></select></div><div><label class="f">Starting hole</label><select name="first"><option>1</option><option>10</option></select></div></div>
       ${FR.startFields()}
+      <p class="small" id="plPred" style="margin:4px 0 8px">${esc(predText(predictFor(sel, { rating: last?.course_rating, slope: last?.slope, n: 18, first: 1 })))}</p>
       ${challengeOffer()}
       <p><button class="btn">Start round</button></p></form>
       ${note('Rating and slope are on the scorecard; they are needed for your handicap and Stableford. Courses near you come from OpenStreetMap, which has names and outlines but not ratings or stroke indexes – add those once from the scorecard. If you also track this round on a Garmin watch, the synced Garmin round replaces this one automatically.')}</div>`;
@@ -85,6 +95,9 @@ export function registerPlay(c) {
     if (ex && !c.state.osm[cid]) { const m = Object.entries(c.state.osm).find(([k, v]) => k.startsWith('osm-') && v?.name && norm(v.name) === norm(ex.course_name)); if (m) c.state.osm[cid] = m[1]; }
     J().draft = { id: `m${Date.now()}`, start: localNow(), course_id: ex || osmPick ? cid : null, course_name: ex ? ex.course_name : osmPick ? osmPick.name : String(f.get('name')).trim(), courseGlobalId: ex && cid.startsWith('garmin-') ? cid.slice(7) : null,
       tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f), challenge: CH.byKey(f.get('chal')) ? f.get('chal') : null };
+    // the prediction is saved when the round starts, so it cannot shift later (plan 10.1)
+    const pr = predictFor(cid, { rating: f.get('rating'), slope: f.get('slope'), n: f.get('n'), first: f.get('first') });
+    if (pr) (J().predictions = J().predictions || []).push({ round_id: `garmin-${J().draft.id}`, predicted: pr.predicted, lo: pr.lo, hi: pr.hi, made_at: new Date().toISOString(), n: pr.holes });
     await saveDraft(); c.rerender();
     if (J().draft.side?.wantLive && c.state.cloud?.group) $('#liveStart')?.click();
     if (osmPick && !c.state.osm[cid]?.features?.length) {
@@ -215,8 +228,8 @@ export function registerPlay(c) {
     const head = `<div class="card playcard"><div class="rv-h"><h2 style="margin:0">Hole ${hole} <span class="small muted">· par ${par}${holeLen ? ` · ${c.d0(holeLen)} ${U}` : ''}</span></h2><span class="small muted">${esc(gpsLine)}</span></div>
       ${seg('pl_pos', [['gps', 'My position'], ['tee', 'From the tee']], 'gps')}`;
     live = null;
-    if (!pos) return head + `<p class="muted">${farAway ? 'You are a long way from this hole and GolfIQ doesn\'t know where its tee is yet.' : mode === 'tee' ? 'No tee position known for this hole yet. It comes from your earlier tracked rounds here, or from the course outline once it has been mapped.' : esc(gpsLine)}</p>${osmHint(d, gpsPos)}</div>`;
-    if (!green) return head + `<p class="muted">GolfIQ doesn't know where this green is yet. It learns green positions from your tracked rounds on a course, or from the downloaded course outline.</p>${osmHint(d, pos)}</div>`;
+    if (!pos) return head + `<p class="muted">${farAway ? 'You are a long way from this hole and BreakingPar doesn\'t know where its tee is yet.' : mode === 'tee' ? 'No tee position known for this hole yet. It comes from your earlier tracked rounds here, or from the course outline once it has been mapped.' : esc(gpsLine)}</p>${osmHint(d, gpsPos)}</div>`;
+    if (!green) return head + `<p class="muted">BreakingPar doesn't know where this green is yet. It learns green positions from your tracked rounds on a course, or from the downloaded course outline.</p>${osmHint(d, pos)}</div>`;
     const dist = A.haversine(pos[0], pos[1], green[0], green[1]), fb = F.greenFrontBack(pos[0], pos[1], green, feats);
     const onTee = usingTee || (ht.tee && A.haversine(pos[0], pos[1], ht.tee[0], ht.tee[1]) < 25);
     const saved = d.aim?.[hole], aim = saved && A.haversine(saved.from[0], saved.from[1], pos[0], pos[1]) <= 25 ? saved.pt : defaultAim(pos, green, ht.line, onTee);
@@ -372,6 +385,8 @@ export function registerPlay(c) {
   function wirePlay() {
     const d = D(), re = async () => { await saveDraft(); c.rerender(); };
     $('#plStart')?.addEventListener('submit', start);
+    const upd = () => { const fm = $('#plStart'), el = $('#plPred'); if (!fm || !el) return; const f = new FormData(fm); el.textContent = predText(predictFor($('[data-sel=pl_course]')?.value, { rating: f.get('rating'), slope: f.get('slope'), n: f.get('n'), first: f.get('first') })); };
+    $('#plStart')?.addEventListener('input', upd); $('#plStart')?.addEventListener('change', upd);
     $('#plNear')?.addEventListener('click', async (e) => { e.target.disabled = true; try { await findNearby($('#plNearMsg')); c.ui.pl_course = null; c.saveUi(); c.rerender(); } catch (err) { $('#plNearMsg').textContent = err.message; e.target.disabled = false; } });
     $$('[data-pickcourse]').forEach((b) => b.addEventListener('click', () => { c.ui.pl_course = b.dataset.pickcourse; c.saveUi(); c.rerender(); }));
     // first visit with location already allowed: look up nearby courses straight away
@@ -402,7 +417,7 @@ export function registerPlay(c) {
         toast(c.state.osm.__live.features.length ? 'Course outlines downloaded' : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
       } catch (err) { $('#plOsmMsg').textContent = `Map service unavailable (${err.message})`; e.target.disabled = false; }
     });
-    $('#plDiscard')?.addEventListener('click', async () => { if (!confirm('Discard this round? The scores entered so far will be lost.')) return; J().draft = null; stopGps(); await saveDraft(); c.rerender(); });
+    $('#plDiscard')?.addEventListener('click', async () => { if (!confirm('Discard this round? The scores entered so far will be lost.')) return; J().predictions = (J().predictions || []).filter((p) => p.round_id !== `garmin-${J().draft?.id}`); J().draft = null; stopGps(); await saveDraft(); c.rerender(); });
     $('#plFinish')?.addEventListener('click', async () => {
       const n = order.filter((x) => d.holes[x].strokes > 0).length;
       if (n < d.n && !confirm(`Only ${n} of ${d.n} holes have a score. Save the round with ${n} holes?`)) return;
@@ -411,6 +426,8 @@ export function registerPlay(c) {
       const rid = `garmin-${d.id}`;
       if (d.side) { J().sideResults = J().sideResults || []; J().sideResults.push({ round_id: rid, date: d.start.slice(0, 10), course: d.course_name, game: FR.gameOf(d, d.side, Object.fromEntries(order.filter((n) => d.holes[n].strokes > 0).map((n) => [n, d.holes[n].strokes]))) }); }
       let msg = 'Round saved';
+      const gross = order.reduce((t, x) => t + (d.holes[x].strokes > 0 ? d.holes[x].strokes : 0), 0), held = order.filter((x) => d.holes[x].strokes > 0).length, pred = (J().predictions || []).find((p) => p.round_id === rid), pres = pred && pred.n === held ? PO.predictionResult({ predicted: pred.predicted, lo: pred.lo, hi: pred.hi }, gross) : null;
+      if (pres?.beat) { msg = `Round saved – ${FEEL.COPY.payoff.beat(pres.by)}`; FEEL.play('win'); }
       if (d.challenge) {
         const o = CH.outcome(d.challenge, order.map((x) => d.holes[x]), d.n), ch = CH.byKey(d.challenge);
         if (o) { J().course_challenges = J().course_challenges || []; J().course_challenges.push({ round_id: rid, date: d.start.slice(0, 10), key: o.key, sub: ch.sub, goal: o.goal, value: o.value, n: o.n, achieved: o.achieved }); msg = `Round saved – ${CH.titleFor(ch, d.n)}: ${o.achieved ? 'done ✓ (counts as a hit)' : 'not this time'}`; }
