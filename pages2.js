@@ -426,11 +426,21 @@ export function registerPages(c) {
       ${hcells.some((h) => h.history.length >= 2) ? plot(hcells.map((h, i) => ({ x: h.history.map((p) => p.date), y: h.history.map((p) => c.cv(p.carry_m)), name: h.length, mode: 'lines+markers', line: { color: COLORS[i % 12] } })), { height: 240, yaxis: { title: { text: `Carry (${U})` } } }) : '<p class="muted small">A trend appears after two sessions.</p>'}
       ${table(W.entries.filter((e) => e.club_id === hist).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30), [['date', 'Date'], ['length', 'Swing'], ['carry_m', U, c.d0], ['id', '', (v) => `<button class="btn sec sm" data-delwg="${esc(v)}">Delete</button>`]], { empty: 'No entries for this club.' })}</div>`;
   }
+  const PR_GROUPS = [
+    { key: 'journey', title: 'Journey', tabs: [['journey', 'Journey']] },
+    { key: 'play', title: 'Play', tabs: [['games', 'Games'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges']] },
+    { key: 'progress', title: 'Progress', tabs: [['progress', 'Potential'], ['focus', 'Level up']] },
+    { key: 'friends', title: 'Friends', tabs: [['board', 'Leaderboard']] },
+    { key: 'more', title: 'More', tabs: [['log', 'Log'], ['notes', 'Coach'], ['thoughts', 'Swing thoughts']] }];
   function pagePractice() {
-    const tab = segVal('pr_tab', 'progress');
+    const tab = segVal('pr_tab', 'journey');
     const body = { journey: () => c.progress.journeyPage(), progress: () => c.progress.page(), focus: () => c.coachingPriorities(), games: practiceGames, board: () => c.compete.pageBoard(), combine: () => c.compete.pageCombine(), range: () => c.compete.pageRange(),
       wedges: practiceWedges, log: practiceLog, notes: coachNotes, thoughts: coachThoughts }[tab] || practiceGames;
-    return `${seg('pr_tab', [['journey', 'Journey'], ['progress', 'Progress'], ['focus', 'Focus'], ['games', 'Games'], ['board', 'Leaderboard'], ['combine', 'Combine'], ['range', 'Range round'], ['wedges', 'Wedges'], ['log', 'Log'], ['notes', 'Coach'], ['thoughts', 'Swing thoughts']], 'progress', 'tabs')}${body()}`;
+    // five groups, not eleven tabs: the page key (pr_tab) is unchanged, so every link into Practice still works
+    const grp = PR_GROUPS.find((g) => g.tabs.some(([k]) => k === tab)) || PR_GROUPS[1];
+    c.ui[`pr_last_${grp.key}`] = tab;     /* remembered for the group button; saved with the next UI change */
+    const top = `<div class="seg tabs prg" id="prGroups">${PR_GROUPS.map((g) => `<button type="button" data-prgroup="${g.key}" class="${g === grp ? 'on' : ''}">${esc(g.title)}</button>`).join('')}</div>`;
+    return `${top}${grp.tabs.length > 1 ? seg('pr_tab', grp.tabs, tab, 'scroll') : ''}${body()}`;
   }
   function wirePlaybook() {
     $('#pbElev')?.addEventListener('click', async (e) => {
@@ -443,6 +453,7 @@ export function registerPages(c) {
     });
   }
   function wirePractice() {
+    $$('[data-prgroup]').forEach((b) => b.addEventListener('click', () => { const g = PR_GROUPS.find((x) => x.key === b.dataset.prgroup), last = c.ui[`pr_last_${g.key}`]; c.ui.pr_tab = g.tabs.some(([k]) => k === last) ? last : g.tabs[0][0]; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
     $('#pgForm')?.addEventListener('submit', async (e) => { e.preventDefault(); const f = new FormData(e.target);
       const res = { id: `r${Date.now()}`, game: $('[data-sel=pg_game]').value, date: f.get('date'), score: Number(f.get('score')), note: f.get('note') || '' };
       c.guided?.afterResult(res); J().results.push(res); const l = c.compete.lvl(res.game, res.score); await saveJ(`Score saved${l ? ` – ${l.label}` : ''}`); c.compete.onScore(res); });
@@ -535,7 +546,7 @@ export function registerPages(c) {
         <form id="aiSet"><label class="f">${P.name} API key</label><input name="key" type="password" autocomplete="off" placeholder="${esc(P.keyHint)}" value="">
         <p class="small muted">${key ? `A key is saved (ending …${esc(key.slice(-4))}). Leave blank to keep it.` : 'No key saved.'}</p>
         <label class="f">Model</label><input name="model" value="${esc(a.models[prov] || P.model)}"><p><button class="btn sec sm">Save</button> ${key ? '<button class="btn sec sm" type="button" id="aiForget">Remove key</button>' : ''}</p></form>
-        ${note(`Your key stays on this phone only (not in backups, sync or the shared database) and is sent only to ${P.name}'s own API. Use costs money on your ${P.name} API account – roughly a few cents a request. Anyone with this phone unlocked could use it, so set a spending limit in the provider's console.`)}</details>
+        ${note(`Your key stays on this phone (never in sync or the shared database; in a backup only when “Include sign-ins and keys” is ticked) and is sent only to ${P.name}'s own API. Use costs money on your ${P.name} API account – roughly a few cents a request. Anyone with this phone unlocked could use it, so set a spending limit in the provider's console.`)}</details>
       ${note('Every request includes your stats, club distances, practice scores, recent notes and swing thoughts. Nothing leaves the phone until you copy it or tap Ask.')}</div>`;
   }
   function coachNotes() {

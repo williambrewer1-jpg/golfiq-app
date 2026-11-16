@@ -34,8 +34,8 @@ with sync_playwright() as p:
         pg.on('pageerror', lambda e: errs.append(str(e))); pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort()); pg.add_init_script(FAKE)
         pg.goto(URL); pg.click('#loadSample'); pg.wait_for_timeout(500)
         # ---- Home
-        pg.evaluate("() => { location.hash = '#home' }"); pg.wait_for_selector('.ch-trend'); pg.wait_for_timeout(300)
-        check(f'[{tag}] home: trend chart is drawn by the app, Plotly is not asked', pg.query_selector('.ch-trend svg') is not None and pg.evaluate("() => window.__plots.length") == 0)
+        pg.evaluate("() => { location.hash = '#home' }"); pg.wait_for_selector('.quick.more'); pg.wait_for_timeout(300)
+        check(f'[{tag}] home: slim page – no charts, Plotly is not asked, and it links to stats', pg.query_selector('.ch-trend') is None and pg.evaluate("() => window.__plots.length") == 0 and pg.query_selector('.quick.more a[data-stats]') is not None)
         check(f'[{tag}] home: no horizontal scroll', no_hscroll(pg)); shot(pg, f'home-{tag}')
         # ---- Scoring: the trend chart
         go(pg, 'scoring'); pg.wait_for_selector('.ch-trend')
@@ -123,7 +123,7 @@ with sync_playwright() as p:
         check(f'[{tag}] no page errors', not errs, str(errs[:3])); ctx.close()
     # ---- reduced motion
     ctx = b.new_context(viewport={'width': 390, 'height': 844}, reduced_motion='reduce'); pg = ctx.new_page()
-    pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort()); pg.add_init_script(FAKE); pg.goto(URL); pg.click('#loadSample'); pg.wait_for_timeout(500); pg.evaluate("() => { location.hash = '#home' }"); pg.wait_for_selector('.ch-trend')
+    pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort()); pg.add_init_script(FAKE); pg.goto(URL); pg.click('#loadSample'); pg.wait_for_timeout(500); go(pg, 'scoring'); pg.wait_for_selector('.ch-trend')
     check('reduced motion: charts do not animate', pg.evaluate("() => getComputedStyle(document.querySelector('.ch')).animationName") == 'none' and pg.evaluate("() => getComputedStyle(document.querySelector('.ch .ln')).animationName") == 'none')
     b.close()
 print('\nFAILED: ' + ', '.join(fails) if fails else '\nall passed'); raise SystemExit(1 if fails else 0)

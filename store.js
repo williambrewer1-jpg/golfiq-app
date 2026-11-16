@@ -105,13 +105,18 @@ export async function importJson(state, json, source) {
 }
 
 // ---------------------------------------------------------------- backup / restore
-export function backupObject(state) {
-  return { golfiq_backup: 1, created_at: now(), origin: 'iphone', bundles: state.bundles, clubsBundle: state.clubsBundle,
+// secrets = true (the default) also saves the three sign-ins a new install would otherwise have to set up again: the Garmin
+// sync token, the AI keys and the Friends connection. Such a file must be kept private; secrets = false leaves them out.
+export function backupObject(state, { secrets = true } = {}) {
+  const b = { golfiq_backup: 1, created_at: now(), origin: 'iphone', bundles: state.bundles, clubsBundle: state.clubsBundle,
     settings: state.settings, corrections: state.corrections, manualShots: state.manualShots, audit: state.audit, journal: state.journal, weather: state.weather,
     sync: { ...state.sync, token: undefined } };
+  if (secrets) { b.has_secrets = true; b.sync = { ...state.sync }; b.cloud = state.cloud || {}; b.ai = state.ai || {}; }
+  return b;
 }
+export const backupHasSecrets = (b) => !!(b && (b.has_secrets || b.sync?.token || b.cloud || b.ai));
 export async function restoreBackup(state, b) {
-  const keepSync = state.sync;
+  const keepSync = state.sync, keepCloud = state.cloud, keepAi = state.ai;     // a backup without sign-ins keeps the ones already on this phone
   await clearAll();
   for (const x of b.bundles || []) { const id = bundleId(x); if (id) await rawPut(id, { ...x, scorecard_id: id }); }
   const rawmeta = {};
@@ -119,7 +124,8 @@ export async function restoreBackup(state, b) {
   await Promise.all([kvSet('clubsBundle', b.clubsBundle || {}), kvSet('settings', { ...DEFAULT_SETTINGS(), ...(b.settings || {}) }),
     kvSet('corrections', b.corrections || []), kvSet('manualShots', b.manualShots || []), kvSet('rawmeta', rawmeta), kvSet('journal', b.journal || {}), kvSet('weather', b.weather || {}),
     kvSet('audit', [...(b.audit || []), { ts: now(), action: 'restore', detail: { origin: b.origin, created_at: b.created_at } }]),
-    kvSet('sync', { ...(b.sync || {}), token: keepSync?.token })]);
+    kvSet('sync', { ...(b.sync || {}), token: b.sync?.token || keepSync?.token }),
+    kvSet('cloud', b.cloud && Object.keys(b.cloud).length ? b.cloud : keepCloud || {}), kvSet('ai', b.ai && Object.keys(b.ai).length ? b.ai : keepAi || {})]);
   Object.assign(state, await loadState());
 }
 
@@ -190,7 +196,7 @@ export async function removeDemo(state) {
 
 // ---------------------------------------------------------------- journal, weather and course-map caches
 export const saveJournal = (state) => kvSet('journal', state.journal);
-// friends (Firebase config, group, sign-in) – kept out of backups like the sync token; terrain heights cache
+// friends (Firebase config, group, sign-in) – saved in a backup only with its sign-ins option, like the sync token; terrain heights cache
 export const saveCloud = (state) => kvSet('cloud', state.cloud);
 // AI coach: chosen provider, model and (optional) your own API key – only on this phone, never in backups or sync
 export const saveAi = (state) => kvSet('ai', state.ai || {});
