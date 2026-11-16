@@ -4,6 +4,7 @@ import * as F from './features.js';
 import * as B from './bench.js';
 import * as CO from './coach.js';
 import * as JR from './journey.js';
+import * as FW from './firstweek.js';
 import * as BS from './boss.js';
 import * as SK from './skills.js';
 import * as GM from './games.js';
@@ -27,8 +28,12 @@ export function registerProgress(c) {
   const pct = (p) => (p === null || p === undefined ? '–' : p >= 0.995 ? '99%+' : p < 0.005 ? '<1%' : `${Math.round(p * 100)}%`);
 
   let memo = { ds: null, j: null, v: null };
+  // The first week starts only when the app has seen no rounds and no practice at all (firstweek.js), so a golfer with data never gets it.
+  function ensureFirstWeek() { if (FW.freshStart({ journal: J(), rounds: c.DS.rounds })) { J().first_week = FW.newFirstWeek(); c.S.saveJournal(c.state); } }
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, (J().results || []).filter((r) => r.duel_won !== undefined).length, J().level_seen, Math.floor(Date.now() / 36e5)]);
+    ensureFirstWeek();
+    const fwk = J().first_week ? [J().first_week.steps?.length, J().first_week.done_at, J().first_week.skipped_at] : null;
+    const key = JSON.stringify([fwk, c.DS.rounds.length, J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, (J().results || []).filter((r) => r.duel_won !== undefined).length, J().level_seen, Math.floor(Date.now() / 36e5)]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -57,13 +62,18 @@ export function registerProgress(c) {
     // player level: points come from history (level.js). A game counts as a hit against the target for its skill, as on the game screen.
     const targets = {}; for (const k of sk.skills) for (const sub of k.subs) for (const gm of sub.games) if (A.isNum(gm.target) && !(gm.id in targets)) targets[gm.id] = gm.target;
     // the road to scratch (journey.js): stage progress comes from results; stage completions feed the points (50 each)
-    const jidx = A.isNum(idx) ? idx : null, jr = JR.journey({ index: jidx, results: res, games: g, unitM: unitM(), bosses: J().journey?.bosses || [] });
+    // the first week (firstweek.js). Once it is finished, a golfer with no index starts the road from their practice level, worked out from the five
+    // first-week results only, so the starting point does not move about as later scores come in.
+    const fw = FW.firstWeek({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM() });
+    const fwRes = fw.done ? fw.steps.map((x) => res.find((r) => r.id === x.result_id)).filter(Boolean) : [];
+    const jidx = A.isNum(idx) ? idx : null, jpl = fw.done && jidx === null ? FW.practiceLevel(SK.skillRatings({ results: fwRes, games: g, unitM: unitM() })) : null;
+    const jr = JR.journey({ index: jidx, practice: jpl, results: res, games: g, unitM: unitM(), bosses: J().journey?.bosses || [] });
     // predictions (payoff.js): saved at the start of a round, else worked out from the rounds before it. Each one beaten is worth points.
     const ph = PO.predictionHistory({ rounds: ds.rounds, predictions: J().predictions || [] }), pr = PO.predictionRun(ph);
     // the locker (locker.js): unlock state is worked out from level, bosses, streak, earned tiers, duels played and saved predictions beaten
     const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, duels: DU.pointsEntries(res), stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
     const lk = LCK.locker({ level: lv, bosses: J().journey?.bosses || [], streaks: st, tiers: tiers.filter((b) => b.earned).map((b) => b.id), duels: res.filter((r) => r.duel).length, predictions: ph.filter((h) => h.beat && h.stored).length });
-    memo = { ds: c.DS, j: key, v: { lk, fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
+    memo = { ds: c.DS, j: key, v: { lk, fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, jpl, fw, ph, pr } };
     return memo.v;
   }
 
@@ -353,6 +363,9 @@ export function registerProgress(c) {
     c.$$('[data-jstage]').forEach((b) => b.addEventListener('click', () => { const [n, k] = b.dataset.jstage.split(':'); stageSheet(Number(n), k); }));
     c.$$('[data-jboss]').forEach((b) => b.addEventListener('click', () => bossSheet(Number(b.dataset.jboss))));
     c.$$('[data-jhome]').forEach((b) => b.addEventListener('click', () => c.guided?.start(b.dataset.jhome)));
+    c.$$('[data-fwplay]').forEach((b) => b.addEventListener('click', () => c.guided?.startStep(Number(b.dataset.fwplay))));
+    c.$$('[data-fwswap]').forEach((b) => b.addEventListener('click', () => c.guided?.startStep(Number(b.dataset.fwswap), { swap: true })));
+    c.$$('[data-fwskip]').forEach((b) => b.addEventListener('click', skipFirstWeek));
     if (!$('#jnPath')) jnScrolled = false; else if (!jnScrolled) { jnScrolled = true; queueMicrotask(() => $('.jn-cur')?.scrollIntoView({ block: 'center' })); /* runs after rerender() has put the old scroll position back */ }
     c.$$('[data-freezeok]').forEach((b) => b.addEventListener('click', () => { freezeShown = null; b.closest('[data-freezeline]')?.remove(); }));
     try { rankMoment(); if (c.compete?.shareRank && (c.DS.rounds.length || (J().results || []).length)) c.compete.shareRank(data().lv.rank.name); } catch (e) { console.error(e); }
@@ -368,7 +381,7 @@ export function registerProgress(c) {
     return `<button type="button" class="jn-node ${cls}" data-jstage="${n}:${st.skill}" style="${ring(st)}" aria-label="${esc(st.title)}, ${esc(st.done ? FEEL.COPY.journey.stageDone : FEEL.COPY.journey.stage(sc(st.hits), st.need))}"><span class="jn-ring"><span class="jn-in">${icon(st.done ? 'tick' : state === 'locked' ? 'lock' : SKILL_ICON[st.skill] || 'target', 22)}</span></span></button>`;
   }
   function stretchHtml(s, cur, K) {
-    if (s.state === 'course') return `<div class="jn-course"><b>${esc(s.title)}</b><span class="small muted">${esc(K.course)}</span></div>`;
+    if (s.state === 'course' || s.state === 'practice') return `<div class="jn-course"><b>${esc(s.title)}</b><span class="small muted">${esc(s.state === 'practice' ? K.practice : K.course)}</span></div>`;
     const bossCls = s.boss.state === 'passed' ? 'done' : s.boss.state === 'ready' ? 'ready' : 'locked';
     const open = s.state === 'open' ? ' jn-cur' : s.state === 'locked' ? ' jn-lock' : '';
     return `<section class="jn-stretch${open}" data-jn="${s.n}"><div class="jn-boss ${bossCls}"><button type="button" class="jn-node boss ${bossCls}" data-jboss="${s.n}" aria-label="${esc(s.title)} boss game"><span class="jn-ring"><span class="jn-in">${icon(s.boss.state === 'passed' ? 'trophy' : s.boss.state === 'locked' ? 'lock' : 'flag', 28)}</span></span></button>
@@ -377,12 +390,15 @@ export function registerProgress(c) {
   }
   function journeyPage() {
     const v = data(), jr = v.jr, K = FEEL.COPY.journey;
-    if (!c.DS.rounds.length && !(J().results || []).length && !A.isNum(v.jidx)) return `<div class="card"><h2>${esc(K.title)}</h2><p class="muted">${esc(K.noIndex)}</p></div>`;
+    if (v.fw.show) return firstWeekPage(v);
+    if (!c.DS.rounds.length && !(J().results || []).length && !A.isNum(v.jidx) && !v.fw.skipped) return `<div class="card"><h2>${esc(K.title)}</h2><p class="muted">${esc(K.noIndex)}</p></div>`;
     const list = [...jr.stretches].reverse();                           // scratch at the top, the first stretch at the bottom: you climb the page
-    const idxTag = A.isNum(v.jidx) ? `<div class="jn-you"><span>${esc(K.youAt(fmt(v.jidx, 1)))}</span></div>` : '';
-    let html = '', placed = !A.isNum(v.jidx);
+    // the marker: the handicap index, or (first-run plan B4) "Practice level 24" when the road starts from the practice level. Never called a handicap.
+    const mark = A.isNum(v.jidx) ? K.youAt(fmt(v.jidx, 1)) : jr.basis === 'practice' ? FEEL.COPY.firstWeek.youAt(Math.round(jr.start)) : null;
+    const idxTag = mark ? `<div class="jn-you"><span>${esc(mark)}</span></div>` : '';
+    let html = '', placed = !mark;
     for (const s of list) {
-      if (!placed && s.state === 'course') { html += idxTag; placed = true; }
+      if (!placed && (s.state === 'course' || s.state === 'practice')) { html += idxTag; placed = true; }
       html += stretchHtml(s, jr.current, K);
     }
     if (!placed) html += idxTag;
@@ -416,15 +432,48 @@ export function registerProgress(c) {
       <h3 style="margin:10px 0 2px">Stages</h3><div class="jn-games">${s.stages.map((st) => `<div class="jn-g"><div><b>${esc(st.title)}</b></div><span class="small ${st.done ? 'good' : 'muted'}">${st.done ? '✓' : esc(K.stage(sc(st.hits), st.need))}</span></div>`).join('')}</div><p class="small muted" style="margin:10px 0 12px">${esc(K.note)}</p>`);
     $$('[data-gpboss]').forEach((b) => b.addEventListener('click', () => { $('#sheet').classList.remove('open'); c.guided?.startBoss(Number(b.dataset.gpboss)); }));
   }
-  // Home: "Next on your journey". Shown once there is a step to take.
+  // ---- the first week (first-run plan part B): five steps in place of the road, and a Home card in place of "Next on your journey"
+  const fwMark = (st) => (st.mark ? `${FEEL.COPY.firstWeek.mark(sc(st.mark.score))}${A.isNum(st.mark.h) ? ` · ${FEEL.COPY.firstWeek.markLevel(st.mark.h)}` : ''}` : '');
+  function firstWeekPage(v) {
+    const K = FEEL.COPY.firstWeek, fw = v.fw, N = fw.steps.length;
+    const step = (st) => {
+      const ic = st.state === 'done' ? icon('tick', 20) : st.state === 'locked' ? icon('lock', 18) : `<b>${st.n}</b>`;
+      const body = st.state === 'done'
+        ? `<div class="small">${esc(fwMark(st))}</div>${st.swapped ? `<div class="small muted">${esc(K.swapped(st.played_name))}</div>` : ''}<p class="fw-act"><button type="button" class="btn sec" data-fwplay="${st.n}">${esc(K.again)}</button></p>`
+        : st.state === 'next'
+        ? `<p class="fw-act"><button type="button" class="btn" data-fwplay="${st.n}">${esc(K.play)}</button></p>${st.alt ? `<p class="fw-act"><button type="button" class="btn sec fw-swap" data-fwswap="${st.n}">${esc(K.swap(st.alt_name))}</button></p>` : ''}`
+        : `<div class="small muted">${esc(K.locked)}</div>`;
+      return `<div class="card fw-step ${st.state}" data-fwstep="${st.n}"><div class="fw-n" aria-hidden="true">${ic}</div><div class="fw-b">
+        <div class="fw-k small muted">${esc(K.step(st.n, N))}</div><h3>${esc(st.title)}</h3><div class="small muted">${esc(st.state === 'done' ? st.played_name : st.name)} · ${esc(K.minutes(st.state === 'done' && st.swapped ? st.alt_minutes : st.minutes))}</div>${body}</div></div>`;
+    };
+    return `<div class="card fw-head"><h2 style="margin:0">${esc(K.title)}</h2><p class="small" style="margin:4px 0 8px">${esc(K.intro)}</p>
+        <div class="bar" role="progressbar" aria-label="${esc(K.count(fw.count, N))}" aria-valuemin="0" aria-valuemax="${N}" aria-valuenow="${fw.count}"><i style="width:${Math.round(fw.progress * 100)}%"></i></div><p class="small muted" style="margin:0">${esc(K.count(fw.count, N))}</p></div>
+      <div class="fw-steps" id="fwSteps">${fw.steps.map(step).join('')}</div>
+      <p class="fw-act"><button type="button" class="btn sec" data-fwskip>${esc(K.skip)}</button></p><p class="small muted jn-note">${esc(FEEL.COPY.journey.note)}</p>`;
+  }
+  // also used on the Home of a golfer with no rounds: the first-week card while it runs, then "Next on your journey" once it is finished
+  function firstWeekHome() {
+    const v = data(), fw = v.fw, K = FEEL.COPY.firstWeek; if (fw.done && !c.DS.rounds.length) return journeyHome();
+    if (!fw.show || !fw.next) return '';
+    const nx = fw.next;
+    return `<div class="card fw-home" id="fwHome"><div class="rv-h"><h2 style="margin:0">${esc(K.homeTitle)}</h2><span class="small muted">${esc(K.count(fw.count, fw.steps.length))}</span></div>
+      <div class="bar"><i style="width:${Math.round(fw.progress * 100)}%"></i></div><p style="margin:6px 0 2px"><b>${esc(K.step(nx.n, fw.steps.length))}: ${esc(nx.title)}</b></p><p class="small muted" style="margin:0 0 8px">${esc(nx.name)} · ${esc(K.minutes(nx.minutes))}</p>
+      <div class="gp-btns two"><button type="button" class="btn" data-fwplay="${nx.n}">${esc(K.play)}</button><a class="btn sec" href="#practice" data-practice="journey">${esc(K.see)}</a></div></div>`;
+  }
+  async function skipFirstWeek() {
+    if (!J().first_week || !confirm(FEEL.COPY.firstWeek.skipAsk)) return;
+    J().first_week = { ...J().first_week, skipped_at: new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10) }; await c.S.saveJournal(c.state); c.rerender();
+  }
+  // Home: "Next on your journey". Shown once there is a step to take. During the first week the first-week card takes its place.
   function journeyHome() {
+    if (data().fw.show) return firstWeekHome();
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
     const nx = data().jr.current?.next, K = FEEL.COPY.journey; if (!nx) return '';
     return `<div class="card jn-home"><div class="rv-h"><h2 style="margin:0">${esc(K.homeTitle)}</h2></div><p style="margin:6px 0 8px"><b>${esc(nx.line)}</b></p>
       <div class="gp-btns two"><button type="button" class="btn" ${nx.game ? `data-jhome="${esc(nx.game)}"` : `data-jboss="${data().jr.current.n}"`}>${esc(nx.game ? K.homePlay : FEEL.COPY.boss.kicker)}</button><a class="btn sec" href="#practice" data-practice="journey">${esc(K.homeOpen)}</a></div></div>`;
   }
   // result screen: the stage line for a result that moved a stage in the open stretch (or null)
-  function advance(rid) { const v = data(); return JR.advance({ index: v.jidx, results: J().results || [], games: games(), unitM: unitM(), bosses: J().journey?.bosses || [] }, rid); }
+  function advance(rid) { const v = data(); return JR.advance({ index: v.jidx, practice: v.jpl, results: J().results || [], games: games(), unitM: unitM(), bosses: J().journey?.bosses || [] }, rid); }
   let jnScrolled = false;
 
   // ---- practice payoff (payoff.js): what practice did for a round, shown on the round card, on Home for a week, and as predictions on Progress
@@ -479,5 +528,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'} ${shield(v.st.freezes_held)}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { goalHome, goalLevelNow, page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, lockerPage, applyLook, look, roundPayoffHtml, homePayoff, predictionsCard, tiles };
+  return { goalHome, goalLevelNow, page, homeCard, data, firstWeekHome, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, lockerPage, applyLook, look, roundPayoffHtml, homePayoff, predictionsCard, tiles };
 }

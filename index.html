@@ -462,6 +462,13 @@ body:has(#obRoot) header,body:has(#obRoot) nav.bottom{display:none}
 /* road to scratch (journey.js) */
 .jn-head{margin-bottom:10px}.jn-path{display:flex;flex-direction:column;gap:6px}.jn-note{margin:12px 2px 0}
 .jn-course{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border:1px dashed var(--line);border-radius:var(--r);color:var(--muted)}.jn-course b{font:600 15px var(--serif);color:var(--ink)}
+/* ---- first week (firstweek.js): five step cards in place of the road */
+.fw-steps{display:grid;gap:10px;margin:0 0 12px}.fw-step{display:flex;gap:12px;align-items:flex-start;margin:0}
+.fw-n{flex:0 0 38px;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;border:2px solid var(--line);color:var(--muted);font:700 17px var(--serif)}
+.fw-step.next{border-color:var(--gold)}.fw-step.next .fw-n{border-color:var(--gold);color:var(--ink)}.fw-step.done .fw-n{background:var(--good);border-color:var(--gold);color:#fff}
+.fw-step.locked{opacity:.75}.fw-b{min-width:0;flex:1}.fw-b h3{margin:0 0 2px;font-family:var(--serif)}.fw-k{text-transform:uppercase;letter-spacing:.05em;font-size:11.5px}
+.fw-act{margin:8px 0 0}.fw-act .btn{max-width:100%;white-space:normal;text-align:left}.fw-swap{font-size:14px}.fw-home .bar{margin:8px 0 2px}
+.fw-stamp{gap:6px}.fw-done .gp-badge svg,.fw-stamp svg{flex:0 0 auto}
 .jn-you{align-self:center;margin:2px 0}.jn-you span{display:inline-block;padding:4px 12px;border-radius:999px;background:var(--head);color:#fff;font:700 13px var(--sans)}
 .jn-stretch{padding:12px 8px 10px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow)}.jn-stretch.jn-cur{border-color:var(--gold)}.jn-stretch.jn-lock{opacity:.78}
 .jn-boss{display:flex;align-items:center;gap:12px;padding:0 4px 8px}.jn-t{font:700 20px var(--serif);color:var(--ink)}

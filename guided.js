@@ -10,10 +10,11 @@ import * as LG from './league.js';
 import * as FEEL from './feel.js';
 import * as LV from './level.js';
 import * as P from './party.js';
+import * as FW from './firstweek.js';
 import { icon, shotArt } from './icons.js';
 
 export function registerGuided(c) {
-  const { esc, fmt, $, $$ } = c;
+  const { esc, fmt, $, $$ } = c, A_ = { isNum: (v) => typeof v === 'number' && Number.isFinite(v) };
   const J = () => c.state.journal;
   const unitM = () => (c.UNIT === 'yd' ? 0.9144 : 1);
   const games = () => [...F.DEFAULT_GAMES, ...(J().games || [])];
@@ -50,15 +51,17 @@ export function registerGuided(c) {
     return Number.isFinite(t) ? Math.round(t * 10) / 10 : null;
   }
   // a welcome-back game is played against the golfer's own median, which the draft carries (retention plan 5.2)
-  const withTarget = (d, inf) => ((d?.welcome_back || d?.boss || d?.duel) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
+  const withTarget = (d, inf) => (d?.first_week ? { ...inf, target: Number.isFinite(d.target) ? d.target : null }        // a first-week step: no target on a first play, the mark on a replay
+    : (d?.welcome_back || d?.boss || d?.duel) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
   const tierChip = (t) => (t ? `<span class="tier ${t.key}">${esc(t.name)}</span>` : '');
 
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
     seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
-    J().game_draft = G.newDraft(g, { unitM: opts.unitM || unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.seed ?? opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target, duel: opts.duel || null });
+    J().game_draft = G.newDraft(g, { unitM: opts.unitM || unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.seed ?? opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target, duel: opts.duel || null, first_week: opts.first_week || null });
     if (opts.party) J().game_draft.party = opts.party;
+    if (opts.first_week && opts.fw_swapped && J().game_draft) J().game_draft.fw_swapped = true;
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.ui.session_gap = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
     scrollTo(0, 0);
@@ -70,6 +73,12 @@ export function registerGuided(c) {
   const curIndex = (d, g, list) => P.turn(d.party, g, list)?.player ?? d.party.log[d.party.log.length - 1] ?? 0;
   const partyInf = (d, pl) => ({ target: d.party.mode === 'handicap' && Number.isFinite(pl.target) ? pl.target : null, skill_h: pl.hcp });
   const pillCls = (pl) => `pc-${P.COLOURS.includes(pl.colour) ? pl.colour : 'muted'}`;
+  // a first-week step (firstweek.js): the first play sets the mark (no target); a replay plays the same game against the mark. Locked steps do not start.
+  async function startStep(n, { swap = false } = {}) {
+    const st = c.progress.data().fw.steps.find((x) => x.n === n); if (!st || st.state === 'locked') return;
+    if (st.state === 'done') return start(st.played, { first_week: n, target: st.mark ? st.mark.score : null });
+    return start(swap && st.alt ? st.alt : st.game, { first_week: n, fw_swapped: !!(swap && st.alt) });
+  }
 
   // ------------------------------------------------------------ one tap: record it at once, answer back on screen, then move on
   // The answer is saved the moment the button is pressed. Only the screen waits (FEEL.feedbackMs, about 450 ms) so the verdict can be read; taps in that
@@ -151,8 +160,13 @@ export function registerGuided(c) {
     const res = G.resultFromDraft(d.party ? P.ownerDraft(d) : d, g, { date: today() });
     if (d.party) { res.party = P.partyRecord(d.party, g, d.unitM, plist); J().partners = P.rememberPartners(J().partners, d.party.players.filter((x) => !x.owner), res.date); }   // guests stay inside the owner's result, on this phone
     afterResult(res); J().results.push(res); J().game_draft = null;
+    // the first play of a first-week step records it (and the fifth one finishes the week); a replay is an ordinary result
+    let fwr = null;
+    if (d.first_week && J().first_week) { const was = (J().first_week.steps || []).some((x) => x.n === d.first_week), wasDone = !!J().first_week.done_at;
+      if (!was) J().first_week = FW.recordStep(J().first_week, { n: d.first_week, game: g.id, swapped: !!d.fw_swapped, result_id: res.id, date: res.date });
+      fwr = { n: d.first_week, mark: !was, finished: !wasDone && !!J().first_week.done_at }; }
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
-    c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
+    c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : d.first_week ? null : Number.isFinite(inf0.target) ? inf0.target : null, fw: fwr, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
     c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) }; if (res.duel) c.compete.duelFinished(res, d.target);       // the duel's final status is worked out on this phone
     // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
     const show = () => { busy = false; c.rerender(); scrollTo(0, 0); };   // the result screen itself announces the score and any new tier
@@ -184,7 +198,7 @@ export function registerGuided(c) {
       : `<button class="gp-b miss" data-gp="0">${X}<span>Miss</span></button><button class="gp-b hit" data-gp="1">${T}<span>${/holed|Holed/.test(step.sub) ? 'Holed' : 'Hit'}</span></button>`;
     const gh = d.ghost && i > 0 ? LG.compareAt(g, a, d.ghost.detail, i) : null;
     const ghostLine = d.ghost ? `<div class="gp-ghost ${gh ? gh.state : 'level'}">${esc(d.ghost.nick)}${gh ? ` had ${sc(gh.ghost)} after ${i} · ${gh.state === 'level' ? 'you are level' : `you are ${gh.state} by ${sc(Math.abs(gh.diff))}`}` : `'s ${sc(d.ghost.score)} to beat`}</div>` : '';
-    const tgt = d.boss && Number.isFinite(d.target) ? FEEL.COPY.boss.target(sc(d.target)) : d.welcome_back && Number.isFinite(d.target) ? FEEL.COPY.welcome.target(sc(d.target)) : inf.target !== undefined && inf.target !== null ? FEEL.COPY.target(sc(inf.target), inf.skill_h, lower) : '';
+    const tgt = d.first_week ? (Number.isFinite(d.target) ? FEEL.COPY.firstWeek.beatMark(sc(d.target), lower) : FEEL.COPY.firstWeek.setMark) : d.boss && Number.isFinite(d.target) ? FEEL.COPY.boss.target(sc(d.target)) : d.welcome_back && Number.isFinite(d.target) ? FEEL.COPY.welcome.target(sc(d.target)) : inf.target !== undefined && inf.target !== null ? FEEL.COPY.target(sc(inf.target), inf.skill_h, lower) : '';
     const streak = G.streakOf(g, list, a, bl), prog = barOf(g, list, a, sc0.score, inf), ban = view.banner && Date.now() - view.banner.t0 < 1450 ? view.banner : null;
     return `<div class="gp gp-full${pr ? ' gp-pr' : ''}${d.boss ? ' gp-boss' : ''}" id="gpRoot"${busy ? ' data-busy="1"' : ''}>
       <div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button>
@@ -271,6 +285,13 @@ export function registerGuided(c) {
 
   function sesButtons(g) {
     if ((J().results || []).find((x) => x.id === c.ui.game_result?.id)?.duel) return `<div class="row"><button class="btn" data-gpdone>Done</button></div>`;       // a duel is one attempt: no "play again"
+    const fr = c.ui.game_result?.fw;
+    if (fr) {                                                   // a first-week step: on to the next step, or the finish screen after the fifth
+      const K = FEEL.COPY.firstWeek, fw = c.progress.data().fw, nx = fw.next;
+      if (fr.finished) return `<div class="row"><button class="btn" data-fwfinish>${esc(K.finish)}</button></div>`;
+      if (fr.mark && fw.show && nx) return `<div class="row">${nx.alt ? `<button class="btn" data-fwhub>${esc(K.next(nx.title))}</button>` : `<button class="btn" data-fwgo="${nx.n}">${esc(K.next(nx.title))}</button>`}<button class="btn sec" data-fwhub>${esc(K.see)}</button></div>`;
+      return `<div class="row"><button class="btn" data-fwgo="${fr.n}">${esc(FEEL.COPY.actions.again)}</button><button class="btn sec" data-fwhub>${esc(FEEL.COPY.actions.done)}</button></div>`;
+    }
     const r = run();
     if (r && r.kind === 'boss' && c.ui.game_result?.session_id === r.id) { const last = r.i + 1 >= r.queue.length, nx = gameOf(r.queue[r.i + 1]);
       return `<div class="row">${last ? `<button class="btn" data-gpsesend>${esc(FEEL.COPY.boss.finish)}</button>` : `<button class="btn" data-gpsesnext>Next: ${esc(nx?.name || '')}</button>`}</div>`; }
@@ -285,21 +306,28 @@ export function registerGuided(c) {
     return L.full ? `<div class="l">${esc(K.leagueFull)}</div><div class="v">+0</div><div class="s">${esc(K.leagueFullNote)}</div>`
       : `<div class="l">League</div><div class="v">+${L.pts}</div><div class="s">${esc(K.leagueTotal(L.total, L.rank, L.n))}</div>`;
   }
+  // the target a result is judged against: the one in force when it started; a first-week step never borrows the skill target (a first play has none)
+  const targetOf = (info0, inf) => (Number.isFinite(info0.target_before) ? info0.target_before : info0.fw ? null : inf.target ?? null);
+  // a first play in the first week always celebrates (the win sound and a stamp); confetti stays for a new tier, as on every other result
+  const fwMarkCelebration = (tierUp) => ({ sound: tierUp ? 'tier' : 'win', confetti: tierUp });
   function resultScreen() {
     const info0 = c.ui.game_result, r = (J().results || []).find((x) => x.id === info0?.id);
     if (!r) { c.ui.game_result = null; return ''; }
     const K = FEEL.COPY, g = gameOf(r.game), u = unitM(), t = tierOf(g, r), inf = info(g.id), lv = c.compete.lvl(g.id, r.score);
     const list = G.steps(g, { seed: r.seed, unitM: u }) || [], pr = r.pressure ? G.pressureOf(g, list, r.detail || [], r.balls) : null, un = u === 1 ? 'm' : 'yd';
-    const lower = g.better === 'lower', target = Number.isFinite(info0.target_before) ? info0.target_before : inf.target ?? null, verdict = G.verdictOf(g, r.score, { target, prevBest: info0.prev_best }), beat = target !== null ? verdict.met : null, lvT = Number.isFinite(info0.level_before) ? info0.level_before : inf.skill_h;
+    const fwr = info0.fw || null, KF = K.firstWeek;
+    const lower = g.better === 'lower', target = targetOf(info0, inf), verdict = G.verdictOf(g, r.score, { target, prevBest: info0.prev_best }), beat = target !== null ? verdict.met : null, lvT = Number.isFinite(info0.level_before) ? info0.level_before : inf.skill_h;
     const led = inf.ledger, potNow = inf.potential, anim = !info0.seen && FEEL.revealMs(100) > 0;
     // the potential counts hits against the skill target, so a welcome-back game (played against the golfer's own median) is judged on that target here
-    const beatP = r.welcome_back || r.boss ? (Number.isFinite(inf.target) ? (lower ? r.score <= inf.target : r.score >= inf.target) : null) : beat;
+    const beatP = r.welcome_back || r.boss || r.first_week ? (Number.isFinite(inf.target) ? (lower ? r.score <= inf.target : r.score >= inf.target) : null) : beat;
     const at = (cls, i) => `class="${cls}${anim ? ' fx-rise' : ''}"${anim ? ` style="--i:${i}"` : ''}`;
-    const short = !verdict.met && verdict.diff > 0 ? (lower ? K.over(sc(verdict.diff)) : K.short(sc(verdict.diff))) : '';
-    const vText = verdict.pb ? K.best : verdict.met ? K.met : short || K.done, vSub = verdict.pb ? (verdict.met ? K.met : short) : '';
+    const short = !verdict.met && verdict.diff > 0 ? (fwr ? (lower ? KF.overMark(sc(verdict.diff)) : KF.shortMark(sc(verdict.diff))) : lower ? K.over(sc(verdict.diff)) : K.short(sc(verdict.diff))) : '';
+    let vText = verdict.pb ? K.best : verdict.met ? K.met : short || K.done, vSub = verdict.pb ? (verdict.met ? K.met : short) : '';
+    if (fwr?.mark) { vText = KF.markSet(sc(r.score)); vSub = KF.markNote; }              // a first play sets the mark: it can never be a miss
     const own = G.isOwn(g);
     const nextT = t?.next ? `Next: <b>${t.next.name}</b> at ${sc(t.next.score)}${lower ? ' or fewer' : '+'}${own ? ` (${t.next.note})` : ''}` : t?.tier ? 'Top tier reached' : own ? `Tiers for this game come from your own scores, and start once you have ${G.OWN.min_scores}.` : '';
-    const badge = t?.tier ? `<span class="gp-badge ${t.tier.key}${anim ? ' fx-stamp' : ''}" id="gpBadge"${anim ? ` style="--d:${FEEL.revealMs(900)}ms"` : ''}>${info0.up ? `New tier: ${esc(t.tier.name)}` : `${esc(t.tier.name)} tier`}</span>` : '';
+    const fwStamp = fwr?.mark ? `<span class="gp-badge gold fw-stamp${anim ? ' fx-stamp' : ''}" id="gpFwStamp"${anim ? ` style="--d:${FEEL.revealMs(900)}ms"` : ''}>${esc(KF.step(fwr.n, FW.STEPS.length))} ${icon('tick', 16)}</span>` : '';
+    const badge = fwStamp + (t?.tier ? `<span class="gp-badge ${t.tier.key}${anim ? ' fx-stamp' : ''}" id="gpBadge"${anim ? ` style="--d:${FEEL.revealMs(900)}ms"` : ''}>${info0.up ? `New tier: ${esc(t.tier.name)}` : `${esc(t.tier.name)} tier`}</span>` : '');
     // rewards: practice streak, potential credit, league points
     const rw = []; let i = 5; const rwAt = (extra = '') => at(`gp-rw${extra}`, i++);
     const lvl = c.progress.data().lv, pts = LV.pointsFor(lvl, r.id), capped = pts === 0 && lvl.today >= LV.DAILY_CAP;
@@ -318,20 +346,21 @@ export function registerGuided(c) {
     }
     if (c.compete.groupOn()) rw.push(`<div class="gp-rw" id="gpRLeague"${info0.league ? '' : ' hidden'}>${info0.league ? leagueChip(info0.league) : ''}</div>`);
     let credit = '';
-    if (led && !beatP) credit = `Aim for ${sc(inf.target)}${lower ? ' or fewer' : '+'} to count towards ${esc(led.title)}.`;
+    if (fwr) credit = '';
+    else if (led && !beatP) credit = `Aim for ${sc(inf.target)}${lower ? ' or fewer' : '+'} to count towards ${esc(led.title)}.`;
     else if (!led && inf.skill && !r.welcome_back) credit = 'This game is not one of your two focus areas right now, so it does not move your potential.';
     const det = [
       g.id === 'range-driver' && r.balls ? `Average distance <b>${sc(r.avg_dist)} ${un}</b> · fairways <b>${r.fairways} of ${r.balls.length}</b> · wide <b>${r.wides}</b>. The score counts a miss as 20 yd less and a wide ball as half.` : '',
       g.id === 'range-speed' && r.balls ? `Your balls: ${r.balls.map((b) => sc(Math.round(G.adjusted(b) * 10) / 10)).join(' · ')} ${un}` : '',
       info0.prev_best !== null && info0.prev_best !== undefined && !verdict.pb ? `Your best before was ${sc(info0.prev_best)}.` : '',
-      r.boss && target !== null ? `${beat ? '✓ ' : ''}${K.boss.beat(r.boss, sc(target), lower)}` : r.welcome_back && target !== null ? `${beat ? '✓ ' : ''}${K.welcome.beat(sc(target))}` : beat !== null ? `${beat ? '✓ You beat' : 'Beat'} the ${lvT}-handicapper: ${sc(target)}${lower ? ' or fewer' : '+'}.` : '',
+      fwr ? (target !== null ? `${beat ? '✓ ' : ''}${KF.beatMarkLine(sc(target), lower)}` : '') : r.boss && target !== null ? `${beat ? '✓ ' : ''}${K.boss.beat(r.boss, sc(target), lower)}` : r.welcome_back && target !== null ? `${beat ? '✓ ' : ''}${K.welcome.beat(sc(target))}` : beat !== null ? `${beat ? '✓ You beat' : 'Beat'} the ${lvT}-handicapper: ${sc(target)}${lower ? ' or fewer' : '+'}.` : '',
       info0.ghost ? `<b>${info0.ghost.state === 'won' ? `You beat ${esc(info0.ghost.nick)}` : info0.ghost.state === 'lost' ? `${esc(info0.ghost.nick)} wins` : `Level with ${esc(info0.ghost.nick)}`}</b> · ${sc(r.score)} to ${sc(info0.ghost.score)}` : '',
       pr ? `${esc(pr.label)}.${pr.hit ? ' Counts as 1.5 hits.' : ''}` : '', credit,
     ].filter(Boolean).map((x) => `<p class="small" style="margin:0 0 6px">${x}</p>`).join('');
     return `<div class="card gp-res gp-rv${r.boss ? ' gp-boss' : ''}" id="gpRoot" data-rid="${esc(r.id)}"${info0.seen ? '' : ' data-reveal="1"'}>
       <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
         <div ${at('gp-rname', 0)}>${esc(g.name)}</div>
-        <div ${at(`gp-rverdict ${verdict.key}`, 1)} id="gpVerdictL">${esc(vText)}</div>${vSub ? `<div ${at('gp-rsub', 1)}>${esc(vSub)}</div>` : ''}${r.welcome_back ? `<div ${at('gp-rsub', 1)}>${esc(K.welcome.back)}</div>` : ''}
+        <div ${at(`gp-rverdict ${fwr?.mark ? 'met' : verdict.key}`, 1)} id="gpVerdictL">${esc(vText)}</div>${vSub ? `<div ${at('gp-rsub', 1)}>${esc(vSub)}</div>` : ''}${r.welcome_back ? `<div ${at('gp-rsub', 1)}>${esc(K.welcome.back)}</div>` : ''}
         <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
         ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
         ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
@@ -345,7 +374,7 @@ export function registerGuided(c) {
     const r = (J().results || []).find((x) => x.id === info0.id); if (!r) return;
     info0.seen = true; root.removeAttribute('data-reveal'); c.saveUi();
     const g = gameOf(r.game), inf = info(g.id), ms = FEEL.revealMs, animated = ms(100) > 0, live = () => $('#gpRoot.gp-rv')?.dataset.rid === r.id, at = (t, f) => later(t, () => { if (live()) f(); });
-    const verdict = G.verdictOf(g, r.score, { target: Number.isFinite(info0.target_before) ? info0.target_before : inf.target ?? null, prevBest: info0.prev_best }), cel = G.celebrationOf({ verdict, tierUp: !!info0.up });
+    const verdict = G.verdictOf(g, r.score, { target: targetOf(info0, inf), prevBest: info0.prev_best }), cel = info0.fw?.mark ? fwMarkCelebration(!!info0.up) : G.celebrationOf({ verdict, tierUp: !!info0.up });
     const num = $('#gpRNum'), to = r.score, nf = (v) => (Number.isInteger(to) ? String(Math.round(v)) : fmt(v, 1));
     const st = $('#gpRStreak'), pot = $('#gpRPot'), pts = $('#gpRPts');
     if (animated) { if (num) num.textContent = nf(0); if (pts) pts.textContent = '+0'; if (st) st.textContent = st.dataset.from; if (pot) pot.textContent = fmt(Number(pot.dataset.from), 1); }
@@ -393,7 +422,7 @@ export function registerGuided(c) {
       <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>
       <p style="margin:0 0 6px"><button class="btn sec" data-gpparty="${esc(g.id)}">${esc(FEEL.COPY.party.button)}</button></p>`;
   }
-  const screenHtml = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.session_gap ? gapScreen() : c.ui.boss_summary ? bossSummary() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
+  const screenHtml = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.fw_finish ? fwFinish() : c.ui.session_gap ? gapScreen() : c.ui.boss_summary ? bossSummary() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
   const screen = screenHtml;
   function render() { const e = $('#gpRoot'); if (!e) { c.rerender(); return; } e.outerHTML = screenHtml(); wire(); }
 
@@ -627,6 +656,33 @@ export function registerGuided(c) {
     later(ms(1800), () => { $('#gpRoot')?.setAttribute('data-revealed', '1'); });
   }
 
+  // ------------------------------------------------------------ the first week is done (first-run plan B4): practice levels, 100 points, the badge, then the road
+  function fwFinish() {
+    const v = c.progress.data(), K = FEEL.COPY.firstWeek; if (!v.fw.done) { c.ui.fw_finish = null; return ''; }
+    const anim = !c.ui.fw_seen && FEEL.revealMs(100) > 0, at = (cls, i) => sumAt(anim, cls, i);
+    const rows = v.sk.skills.map((s, i) => `<div ${at('gp-sumrow', 4 + i)}><div><b>${esc(s.title)}</b>${A_.isNum(s.practice_hcp) ? '' : `<div class="small muted">${esc(K.unratedNote(s.title))}</div>`}</div>
+      <div class="gp-sumscore">${A_.isNum(s.practice_hcp) ? `<b>${Math.round(s.practice_hcp)}</b>` : `<span class="small muted">${esc(K.unrated)}</span>`}</div></div>`).join('');
+    const road = v.jr.basis === 'practice' ? `<p class="small" style="margin:10px 0 0">${esc(K.youAt(Math.round(v.jr.start)))} · ${esc(FEEL.COPY.journey.title)}</p>` : '';
+    return `<div class="card gp-res gp-rv fw-done" id="gpRoot" data-fwdone="1"${c.ui.fw_seen ? '' : ' data-reveal="1"'}>
+      <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
+        <div ${at('gp-rname', 0)}>${esc(K.doneKicker)}</div><div ${at('gp-rverdict met', 1)} id="gpVerdictL">${esc(K.doneTitle)}</div><div ${at('gp-rsub', 2)}>${esc(K.doneLine)}</div>
+        <div class="gp-badgewrap"><span class="gp-badge gold${anim ? ' fx-stamp' : ''}" id="gpFwBadge"${anim ? ` style="--d:${FEEL.revealMs(900)}ms"` : ''}>${icon('trophy', 18)} ${esc(K.badge)}</span></div></div>
+      <div class="gp-rbody"><div class="gp-rewards"><div ${at('gp-rw up', 3)} id="gpFwPts"><div class="l">${esc(FEEL.COPY.rewards.points)}</div><div class="v">${esc(K.points(LV.POINTS.first_week))}</div><div class="s">${esc(FEEL.COPY.rewards.pointsNote(v.lv.points, v.lv.toNext, v.lv.next?.name))}</div></div></div>
+        <h3 style="margin:0 0 4px">${esc(K.levels)}</h3><div class="gp-sumrows">${rows}</div>${road}
+        <p class="small muted" style="margin:10px 0">${esc(K.estimate)}</p>
+        <div ${at('gp-rbtn', 9)}><div class="row"><button class="btn" data-fwroad>${esc(K.openRoad)}</button></div></div></div></div>`;
+  }
+  // once: the win sound and confetti, then the badge lands with the tier sound
+  function fwReveal() {
+    const root = $('#gpRoot[data-fwdone][data-reveal]'); if (!root) return; root.removeAttribute('data-reveal'); c.ui.fw_seen = true; c.saveUi();
+    const ms = FEEL.revealMs, live = () => !!$('#gpRoot[data-fwdone]');
+    later(ms(250), () => { if (live()) { FEEL.play('win'); FEEL.confetti($('#gpConf')); } });
+    later(ms(1100), () => { if (live()) { FEEL.play('tier'); FEEL.pulse($('#gpFwBadge'), 'pop'); } });
+    later(ms(1800), () => { $('#gpRoot')?.setAttribute('data-revealed', '1'); });
+  }
+  const clearScreens = () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.ui.session_gap = null; c.ui.fw_finish = null; };
+  const toJourney = () => { clearScreens(); c.ui.pr_tab = 'journey'; c.saveUi(); if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender(); scrollTo(0, 0); };
+
   // friends' guided scores this week for this game: play the same steps and see who is ahead after each one
   let ghosts = [];
   async function loadGhosts() {
@@ -664,8 +720,12 @@ export function registerGuided(c) {
     $$('[data-gpparty]').forEach((b) => b.addEventListener('click', () => partySetup(b.dataset.gpparty, !!$('#gpPressure')?.checked))); $$('[data-gphand]').forEach((b) => b.addEventListener('click', handedOver));
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
-    $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.ui.session_gap = null; c.saveUi(); c.rerender(); }));
-    loadGhosts(); reveal(); bossReveal(); loadLeague();
+    $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.ui.session_gap = null; c.ui.fw_finish = null; c.saveUi(); c.rerender(); }));
+    loadGhosts(); reveal(); bossReveal(); loadLeague(); fwReveal();
+    $$('[data-fwgo]').forEach((b) => b.addEventListener('click', () => startStep(Number(b.dataset.fwgo))));
+    $$('[data-fwhub]').forEach((b) => b.addEventListener('click', toJourney));
+    $$('[data-fwroad]').forEach((b) => b.addEventListener('click', toJourney));
+    $$('[data-fwfinish]').forEach((b) => b.addEventListener('click', () => { clearScreens(); c.ui.fw_finish = true; c.ui.fw_seen = false; c.saveUi(); c.rerender(); scrollTo(0, 0); }));
     $$('[data-gpboss]').forEach((b) => b.addEventListener('click', () => startBoss(Number(b.dataset.gpboss))));
     $$('[data-gptest]').forEach((b) => b.addEventListener('click', startTest));
     $$('[data-gpses]').forEach((b) => b.addEventListener('click', () => startSession(Number(b.dataset.gpses))));
@@ -675,5 +735,5 @@ export function registerGuided(c) {
     $$('[data-pickgame]').forEach((b) => b.addEventListener('click', () => { c.ui.pg_game = b.dataset.pickgame; c.saveUi(); c.rerender(); $('#gpPlay')?.scrollIntoView({ block: 'start', behavior: FEEL.calm() ? 'auto' : 'smooth' }); }));
     revealGap(); revealSummary(); pulseFlame();
   }
-  return { start, screen, gameCards, launcher, wire, draft, info, duelTarget, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, startBoss, testCard, afterResult, shareInfo };
+  return { start, startStep, screen, gameCards, launcher, wire, draft, info, duelTarget, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, startBoss, testCard, afterResult, shareInfo };
 }

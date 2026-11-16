@@ -173,6 +173,7 @@ export function badges({ rounds, holes, journal, roadmaps }) {
     B_('no3p', 'Lag master', 'A full round with no 3-putts', first(r18, (r) => r.three_putts === 0 && isNum(r.putts_round))),
     B_('nopen', 'Clean card', 'A full round with no penalties', first(r18, (r) => r.penalties === 0)),
     B_('r25', 'Regular', '25 rounds tracked', rounds.length >= 25 ? [...rounds].sort((a, b) => dt(a.date) - dt(b.date))[24].date : null, `${Math.min(rounds.length, 25)}/25`),
+    B_('fw', 'First week', 'Played all five first-week games', journal.first_week?.done_at || null),
     B_('p1', 'First practice score', 'Recorded a practice game', scores[0]?.date || null),
     B_('p25', 'Grinder', '25 practice scores', scores.length >= 25 ? scores[24].date : null, `${Math.min(scores.length, 25)}/25`),
     B_('w4', 'Four-week habit', 'Practised four weeks in a row', st.best >= 4 ? 'yes' : null, `${Math.min(st.best, 4)}/4 weeks`),
