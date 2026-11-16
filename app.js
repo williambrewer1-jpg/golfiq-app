@@ -8,6 +8,8 @@ import { registerGuided } from './guided.js';
 import * as FEEL from './feel.js';
 import * as CHT from './charts.js';
 import * as CH from './challenges.js';
+import * as ONB from './onboarding.js';
+import * as GM from './games.js';
 import * as S from './store.js';
 import { syncFromGitHub, newStateKey } from './sync.js';
 import { TOUR_CSV } from './baseline.js';
@@ -127,7 +129,13 @@ const readFile = (f) => new Promise((res, rej) => { const r = new FileReader(); 
 
 // ------------------------------------------------------------------ data & filters
 const BUILD = { estimateIndex: true };
-function rebuild() { UNIT = state.settings?.units === 'm' ? 'm' : 'yd'; DS = A.buildDataset(state, BUILD); DSDUP = null; FEEL.init(state.settings); }
+function rebuild() { UNIT = state.settings?.units === 'm' ? 'm' : 'yd'; DS = A.buildDataset(state, BUILD); DSDUP = null; FEEL.init(state.settings); markOnboarded(); }
+// A golfer who already has data (rounds, practice, notes, a handicap…) is marked as onboarded without seeing the intro (onboarding.js).
+function markOnboarded() {
+  const p = ONB.markIfHasData({ settings: state.settings, journal: state.journal, rounds: state.bundles }, localToday()); if (!p) return;
+  state.settings.profile = p; S.saveSettings(state, 'onboarded', null, { silent: true }).catch(() => {});
+}
+const localToday = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 function filtered(opts = {}) {
   const f = { ...filters }; if (opts.allFormats) delete f.formats;
   return A.filterDataset(DS, f);
@@ -654,7 +662,8 @@ function pageSettings() {
     <label class="sw"><input type="checkbox" id="feelMotion" ${fl.motion ? 'checked' : ''}><span><b>${FC.motion}</b><small>${FC.motionNote}</small></span></label>
     <p style="margin:6px 0 0"><button type="button" class="btn sec" id="feelTry">${FC.try}</button> <span class="small muted" id="feelTryOut" aria-live="polite"></span></p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${seg('st_tab', [['general', 'General'], ['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'general', 'scroll')}${tab === 'general' ? `${unitsCard}${rangeCard}${feelCard}` : tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
+  const IK = FEEL.COPY.intro, introCard = `<div class="card"><h2>${IK.replay}</h2><p class="small muted" style="margin:0 0 6px">${IK.replayNote}</p><button type="button" class="btn sec" id="introReplay">${IK.replay}</button></div>`;
+  return `${demoBanner()}${links}${seg('st_tab', [['general', 'General'], ['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'general', 'scroll')}${tab === 'general' ? `${unitsCard}${rangeCard}${feelCard}${introCard}` : tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
@@ -693,9 +702,111 @@ function pagePlayHub() {
 }
 const RENDER = { home: pageHome, stats: pageStats, rounds: pageRounds, data: pageData, corrections: () => pageEdit(false), settings: pageSettings, help: pageHelp };
 
+// ------------------------------------------------------------------ the first-run intro (onboarding.js has the rules; this draws and wires it)
+// Shown full screen to a fresh app, or again from Settings → General → Replay the intro. One decision per screen; Skip on every screen.
+let intro = null;                         // { i: screen 0–3, replay, a: answers, err }
+const introOn = () => !!intro || ONB.needsOnboarding({ settings: state.settings, journal: state.journal, rounds: state.bundles });
+const latestHcp = () => [...(state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop()?.handicap_index ?? null;
+function introState(replay = false) {
+  const p = ONB.readProfile(state.settings), h = replay ? latestHcp() : null;
+  return { i: 0, replay, err: '', a: { name: p.name || '', hcpTxt: A.isNum(h) ? String(h < 0 ? `+${-h}` : h) : '', noHcp: !!p.level_choice, level_choice: p.level_choice || null,
+    unit: state.settings.units === 'm' ? 'm' : 'yd', goal: p.goal?.key || null, goalSet: !!p.goal, months: p.goal?.months || ONB.DEFAULT_MONTHS, per_week: p.per_week || ONB.DEFAULT_PER_WEEK } };
+}
+const introHcp = (a) => (a.noHcp ? null : ONB.parseHandicap(a.hcpTxt));
+const introGoal = (a) => a.goal || ONB.preselectGoal(ONB.startLevel({ level_choice: a.noHcp ? a.level_choice : null }, introHcp(a))?.level);
+function introHtml() {
+  if (!intro) intro = introState();
+  const K = FEEL.COPY.intro, { i, a } = intro, n = ONB.INTRO_SCREENS;
+  const opt = (attr, v, label, on) => `<button type="button" class="ob-opt${on ? ' on' : ''}" data-${attr}="${esc(v)}" aria-pressed="${on}">${esc(label)}</button>`;
+  const segB = (attr, list, cur, label) => `<div class="seg ob-seg" role="group" aria-label="${esc(label)}">${list.map(([v, l]) => `<button type="button" data-${attr}="${esc(v)}" class="${String(v) === String(cur) ? 'on' : ''}" aria-pressed="${String(v) === String(cur)}">${esc(l)}</button>`).join('')}</div>`;
+  const top = `<div class="ob-top">${i > 0 ? `<button type="button" class="ob-ic" data-obback aria-label="${K.back}">${icon('back', 22)}</button>` : '<span class="ob-ic ob-blank"></span>'}
+    <div class="ob-dots" role="img" aria-label="${esc(K.step(i + 1, n))}">${Array.from({ length: n }, (_, k) => `<i class="${k < i ? 'done' : k === i ? 'now' : ''}"></i>`).join('')}</div>
+    <button type="button" class="ob-skip" data-obskip>${K.skip}</button></div>`;
+  let head = '', body = '';
+  if (i === 0) {
+    const W = K.welcome, demo = !(intro.replay && ONB.hasData({ settings: state.settings, journal: state.journal, rounds: state.bundles }));
+    head = `<div class="ob-brand">${W.brand}</div><p class="ob-tag">${W.tag}</p>
+      <ul class="ob-lines">${W.lines.map((t, k) => `<li class="fx-rise" style="--i:${k + 1}">${icon(['target', 'bars', 'flag'][k], 22)}<span>${t}</span></li>`).join('')}</ul>`;
+    body = `<button type="button" class="btn ob-go" data-obnext>${W.start}</button>
+      <p class="ob-links"><button type="button" class="ob-link" data-obgarmin>${W.garmin}</button>${demo ? `<button type="button" class="ob-link" id="loadSample" data-obdemo>${W.demo}</button>` : ''}</p>`;
+  } else if (i === 1) {
+    const T = K.about;
+    head = `<h1 class="ob-h">${T.title}</h1>`;
+    body = `<label class="f" for="obName">${T.name}</label><input id="obName" maxlength="${ONB.NAME_MAX}" autocomplete="given-name" autocapitalize="words" value="${esc(a.name)}"><p class="ob-hint">${T.nameHint}</p>
+      ${a.noHcp ? `<p class="ob-q">${T.levelQ}</p><div class="ob-opts">${ONB.LEVEL_CHOICES.map((x) => opt('oblevel', x.key, T.levels[x.key], a.level_choice === x.key)).join('')}</div><p class="ob-hint">${T.levelNote}</p>
+        <button type="button" class="ob-link dark" data-obhave>${T.have}</button>`
+      : `<label class="f" for="obHcp">${T.hcp}</label><input id="obHcp" inputmode="decimal" autocomplete="off" placeholder="e.g. 18.4" value="${esc(a.hcpTxt)}"${intro.err ? ' aria-invalid="true" aria-describedby="obErr"' : ''}>
+        ${intro.err ? `<p class="ob-err" id="obErr" role="alert">${esc(intro.err)}</p>` : `<p class="ob-hint">${T.hcpHint}</p>`}<button type="button" class="ob-link dark" data-obnone>${T.none}</button>`}
+      <p class="ob-q">${T.unit}</p>${segB('obunit', [['yd', T.yd], ['m', T.m]], a.unit, T.unit)}
+      <button type="button" class="btn ob-go" data-obnext>${K.next}</button>`;
+  } else if (i === 2) {
+    const T = K.goal, g = introGoal(a);
+    head = `<h1 class="ob-h">${T.title}</h1>${a.goal ? '' : `<p class="ob-tag">${T.picked}</p>`}`;
+    body = `<div class="ob-opts">${ONB.GOALS.map((x) => opt('obgoal', x.key, T.goals[x.key], g === x.key)).join('')}</div>
+      ${g === 'enjoy' ? '' : `<p class="ob-q">${T.when}</p>${segB('obmonths', ONB.GOAL_MONTHS.map((m) => [m, T.months(m)]), a.months, T.when)}`}
+      <p class="ob-q">${T.often}</p>${segB('obweek', ONB.PER_WEEK.map((w) => [w, T.perWeek(w)]), a.per_week, T.often)}
+      <button type="button" class="btn ob-go" data-obnext>${K.next}</button>`;
+  } else {
+    const T = K.ready;
+    head = `<div class="ob-art">${icon('putt', 64)}</div><h1 class="ob-h">${T.title}</h1><p class="ob-tag">${esc(T.line(GM.minutesFor(ONB.FIRST_GAME)))}</p><p class="ob-sub">${T.sub}</p>`;
+    body = `<button type="button" class="btn ob-go" data-obplay>${T.play}</button><button type="button" class="btn sec ob-go" data-oblook>${T.look}</button>`;
+  }
+  return `<div id="obRoot" class="ob" data-screen="${i}">${top}<div class="ob-main fx-slide-next">${head}</div><div class="ob-sheet fx-slide-next">${body}</div></div>`;
+}
+function introRender(dir = 0) { $('#main').innerHTML = introHtml(); wireIntro(); if (dir) FEEL.play('step'); }
+function wireIntro() {
+  const root = $('#obRoot'); if (!root) return;
+  const a = intro.a, K = FEEL.COPY.intro;
+  $('#obName')?.addEventListener('input', (e) => { a.name = e.target.value; });
+  $('#obHcp')?.addEventListener('input', (e) => { a.hcpTxt = e.target.value; if (!a.goalSet) a.goal = null; });
+  root.addEventListener('click', async (e) => {
+    const b = e.target.closest('button'); if (!b) return; const d = b.dataset;
+    if (!('obdemo' in d || 'obgarmin' in d || 'obskip' in d)) FEEL.unlock();     // audio starts on a tap that makes a sound; leaving the intro makes none
+    if ('obnext' in d) {
+      if (intro.i === 1 && !a.noHcp && String(a.hcpTxt).trim() && ONB.parseHandicap(a.hcpTxt) === null) { intro.err = K.about.bad; introRender(); $('#obHcp')?.focus(); return; }
+      intro.err = ''; if (intro.i === 1 && !a.goalSet) a.goal = null;             // the goal is picked again for the level given, until the golfer chooses one
+      intro.i = Math.min(ONB.INTRO_SCREENS - 1, intro.i + 1); introRender(1); scrollTo(0, 0);
+    } else if ('obback' in d) { intro.err = ''; intro.i = Math.max(0, intro.i - 1); introRender(-1); }
+    else if ('obnone' in d) { a.noHcp = true; intro.err = ''; introRender(); }
+    else if ('obhave' in d) { a.noHcp = false; introRender(); }
+    else if ('oblevel' in d) { a.level_choice = d.oblevel; FEEL.play('tap'); introRender(); }
+    else if ('obunit' in d) { a.unit = d.obunit; FEEL.play('tap'); introRender(); }
+    else if ('obgoal' in d) { a.goal = d.obgoal; a.goalSet = true; FEEL.play('tap'); introRender(); }
+    else if ('obmonths' in d) { a.months = Number(d.obmonths); FEEL.play('tap'); introRender(); }
+    else if ('obweek' in d) { a.per_week = Number(d.obweek); FEEL.play('tap'); introRender(); }
+    else if ('obskip' in d) await introDone('skip');
+    else if ('obgarmin' in d) await introDone('garmin');
+    else if ('obdemo' in d) await introDone('demo');
+    else if ('obplay' in d) await introDone('play');
+    else if ('oblook' in d) await introDone('home');
+  });
+}
+// How the intro ends. Skip saves only the date (and on a replay changes nothing). The Garmin and demo links mark the intro done and nothing else.
+async function introDone(how) {
+  const st = state.settings, today = localToday(), was = ONB.readProfile(st), replay = intro?.replay, a = intro?.a;
+  intro = null;
+  if (how === 'skip' || how === 'garmin' || how === 'demo') {
+    if (!was.onboarded_at) { st.profile = { ...(st.profile || {}), ...ONB.skipProfile(today) }; await S.saveSettings(state, 'onboarding', how, null); }
+    if (how === 'demo') { await loadSample(); return; }
+    if (how === 'garmin') { location.hash = '#data'; if (location.hash === '#data') render(); return; }
+    if (replay) { location.hash = '#settings'; render(); return; }
+    location.hash = '#home'; render(); return;
+  }
+  const hcp = introHcp(a), p = ONB.buildProfile({ name: a.name, hcp, level_choice: a.noHcp ? a.level_choice : null, goal: introGoal(a), months: a.months, per_week: a.per_week }, today);
+  if (was.onboarded_at) p.onboarded_at = was.onboarded_at;
+  if (was.goal && was.goal.key === p.goal.key && was.goal.months === p.goal.months && was.goal.set_at) p.goal.set_at = was.goal.set_at;     // an unchanged goal keeps its start date
+  if (hcp !== null && hcp !== latestHcp()) st.handicaps = ONB.withHandicap(st.handicaps, ONB.handicapEntry(hcp, today));
+  st.profile = p; st.units = a.unit;
+  await S.saveSettings(state, 'onboarding', how, { goal: p.goal.key, per_week: p.per_week });
+  rebuild();
+  if (how === 'play') { await GUIDED.start(ONB.FIRST_GAME); return; }
+  location.hash = '#home'; render();
+}
+
 // ------------------------------------------------------------------ render + events
 function render() {
   refreshPalette();
+  if (introOn()) { plots = []; SUBWIRE = []; CHT.resetCharts(); renderGen++; introRender(); return; }
   let page = (location.hash.slice(1) || 'home').split('?')[0];
   if (MOVED[page]) { const [to, set, hook] = MOVED[page]; Object.assign(ui, set || {}); hook?.(); saveUi(); history.replaceState(null, '', `#${to}`); page = to; }
   const key = RENDER[page] ? page : 'home';
@@ -859,6 +970,7 @@ function wireSettings() {
     const next = () => { if (!document.body.contains(out) || i >= names.length) { if (document.body.contains(out)) out.textContent = ''; return; } const n = names[i++]; out.textContent = FC2.names[n] || n; FEEL.play(n); setTimeout(next, FEEL.lengthOf(n) * 1000 + 450); };
     next();
   });
+  $('#introReplay')?.addEventListener('click', () => { intro = introState(true); scrollTo(0, 0); render(); });
   $('#rangeAdj')?.addEventListener('change', async (e) => {
     const v = Math.max(0, Math.min(B.DRIVER_TEST.adj_max, Math.round(Number(e.target.value) || 0)));
     st.range_ball_adj = v; await S.saveSettings(state, 'set_range_adj', null, { range_ball_adj: v }); done(v ? `Range ball adjustment ${v}%` : 'Range ball adjustment off');

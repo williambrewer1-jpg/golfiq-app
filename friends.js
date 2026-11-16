@@ -1,6 +1,7 @@
 // Side games with friends during a round (Play page): partners on your phone, or live across phones through the group.
 import * as SG from './sidegames.js';
 import * as CL from './cloud.js';
+import { readProfile } from './onboarding.js';
 
 export function registerFriends(c) {
   const { A, S, $, $$, esc, fmt, note, toast } = c;
@@ -12,7 +13,7 @@ export function registerFriends(c) {
   function startFields() {
     const cl = cloud(), hi = myIndex();
     return `<details class="sgset"><summary>Playing partners &amp; side games</summary>
-      <div class="row"><div><label class="f">Your handicap index</label><input name="my_hi" type="number" step="0.1" inputmode="decimal" value="${hi ?? ''}"></div><div><label class="f">Your name</label><input name="my_name" value="${esc(cl.nick || 'Me')}"></div></div>
+      <div class="row"><div><label class="f">Your handicap index</label><input name="my_hi" type="number" step="0.1" inputmode="decimal" value="${hi ?? ''}"></div><div><label class="f">Your name</label><input name="my_name" value="${esc(cl.nick || readProfile(c.state.settings).name || 'Me')}"></div></div>
       ${[2, 3, 4].map((i) => `<div class="row"><div><label class="f">Player ${i}</label><input name="p${i}_name" placeholder="Name"></div><div><label class="f">Index</label><input name="p${i}_hi" type="number" step="0.1" inputmode="decimal" placeholder="e.g. 12.4"></div></div>`).join('')}
       <label class="f">Games</label><div class="checks">${SG.FORMATS.map(([k, l]) => `<label><input type="checkbox" name="fmt" value="${k}" ${k === 'stableford' ? 'checked' : ''}> ${l}</label>`).join('')}</div>
       <label class="f">With four players, your partner (best ball and four-ball match)</label><select name="partner"><option value="p2">Player 2</option><option value="p3">Player 3</option><option value="p4">Player 4</option></select>

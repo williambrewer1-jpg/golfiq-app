@@ -10,6 +10,7 @@ import * as KU from './kudos.js';
 import * as DU from './duels.js';
 import * as G from './games.js';
 import * as FEEL from './feel.js';
+import { readProfile } from './onboarding.js';
 import { icon } from './icons.js';
 
 export function registerCompete(c) {
@@ -434,13 +435,13 @@ export function registerCompete(c) {
     const cl = cloud(), pend = cl.pending;
     if (!CL.ready(cl) || pend) {
       return `<div class="card"><h2>Friends &amp; leaderboards</h2>
-        ${pend ? `<p>You've been invited to <b>${esc(pend.groupName || 'a group')}</b>. Pick a nickname to join.</p><form id="frJoinInvite"><label class="f">Nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn">Join group</button></p></form>`
+        ${pend ? `<p>You've been invited to <b>${esc(pend.groupName || 'a group')}</b>. Pick a nickname to join.</p><form id="frJoinInvite"><label class="f">Nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || readProfile(c.state.settings).name || '')}"><p><button class="btn">Join group</button></p></form>`
     : `<p class="small">Leaderboards and live side games need a small shared database. BreakingPar uses your own free Firebase project – about 10 minutes to set up once (steps in SETUP_FRIENDS.md in the app's GitHub repo). Friends don't set anything up: they join from your invite link.</p>
         <form id="frPaste"><label class="f">Got an invite from a friend? Paste the link here</label><input name="link" placeholder="https://…#join=…" autocomplete="off"><p><button class="btn">Use invite</button></p></form>
         <p class="small muted">On iPhone, an invite opened in Safari doesn't reach the app on your home screen (they keep separate storage), so copy the link and paste it here instead.</p>
         <h3>Or set up your own group</h3>
         <form id="frSetup"><label class="f">Paste your Firebase web config (the <code>firebaseConfig = {…}</code> block)</label><textarea name="cfg" rows="6" placeholder="apiKey: &quot;…&quot;, projectId: &quot;…&quot;"></textarea>
-        <label class="f">Your nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn">Save</button></p></form>
+        <label class="f">Your nickname</label><input name="nick" required maxlength="30" value="${esc(cl.nick || readProfile(c.state.settings).name || '')}"><p><button class="btn">Save</button></p></form>
         <details><summary>Firestore security rules to paste</summary><p class="small muted" style="margin:0 0 6px">${esc(FEEL.COPY.kudos.rulesNote(CL.RULES_VERSION))}</p><textarea readonly rows="14">${esc(CL.RULES)}</textarea></details>`}
         ${note('Only game scores, your nickname, the group name and live side-game scorecards are stored there. Your rounds, shots and everything else stay on this phone.')}</div>`;
     }
@@ -449,7 +450,7 @@ export function registerCompete(c) {
         <details><summary>Leave or switch group</summary><p><button class="btn sec sm" id="frLeave">Leave this group on this phone</button></p></details>`
     : `<form id="frCreate"><label class="f">New group name</label><input name="name" required maxlength="40" placeholder="e.g. Saturday crew"><p><button class="btn">Create group</button></p></form>
         <form id="frJoin"><label class="f">…or join with a code</label><input name="code" required><p><button class="btn sec">Join</button></p></form>`}
-      <details><summary>Firebase settings</summary><form id="frNick"><label class="f">Nickname</label><input name="nick" maxlength="30" value="${esc(cl.nick || '')}"><p><button class="btn sec sm">Save nickname</button></p></form>
+      <details><summary>Firebase settings</summary><form id="frNick"><label class="f">Nickname</label><input name="nick" maxlength="30" value="${esc(cl.nick || readProfile(c.state.settings).name || '')}"><p><button class="btn sec sm">Save nickname</button></p></form>
       <p><button class="btn sec sm" id="frForget">Forget Firebase on this phone</button></p><p class="small muted" style="margin:8px 0 6px">${esc(FEEL.COPY.kudos.rulesNote(CL.RULES_VERSION))}</p><textarea readonly rows="10">${esc(CL.RULES)}</textarea></details></div>`;
   }
   function parseCfg(t) {
