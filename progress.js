@@ -9,6 +9,9 @@ import * as SK from './skills.js';
 import * as GM from './games.js';
 import * as LV from './level.js';
 import * as PO from './payoff.js';
+import * as DU from './duels.js';
+import * as LCK from './locker.js';
+import * as WP from './wallpaper.js';
 import * as FEEL from './feel.js';
 import { icon } from './icons.js';
 
@@ -24,7 +27,7 @@ export function registerProgress(c) {
 
   let memo = { ds: null, j: null, v: null };
   function data() {
-    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, J().level_seen, Math.floor(Date.now() / 36e5)]);
+    const key = JSON.stringify([J().results?.length, J().sessions?.length, J().course_challenges?.length, J().wedge?.entries?.length, J().notes?.length, c.UNIT, J().focus?.pinned, J().skills_tests?.length, J().journey?.bosses?.length, J().predictions?.length, (J().results || []).filter((r) => r.duel_won !== undefined).length, J().level_seen, Math.floor(Date.now() / 36e5)]);
     if (memo.ds === c.DS && memo.j === key) return memo.v;
     const ds = c.DS, r18 = ds.rounds.filter((r) => r.format === '18');
     const fs = r18.length >= 8 ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), c.UNIT) : [];
@@ -56,15 +59,17 @@ export function registerProgress(c) {
     const jidx = A.isNum(idx) ? idx : null, jr = JR.journey({ index: jidx, results: res, games: g, unitM: unitM(), bosses: J().journey?.bosses || [] });
     // predictions (payoff.js): saved at the start of a round, else worked out from the rounds before it. Each one beaten is worth points.
     const ph = PO.predictionHistory({ rounds: ds.rounds, predictions: J().predictions || [] }), pr = PO.predictionRun(ph);
-    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
-    memo = { ds: c.DS, j: key, v: { fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
+    // the locker (locker.js): unlock state is worked out from level, bosses, streak, earned tiers, duels played and saved predictions beaten
+    const lv = LV.playerLevel({ journal: J(), rounds: ds.rounds, games: g, unitM: unitM(), targets, floor: J().level_seen || 0, duels: DU.pointsEntries(res), stages: jr.completions, predictions: ph.filter((h) => h.beat && h.stored).map((h) => ({ date: h.date, rid: h.round_id })) });
+    const lk = LCK.locker({ level: lv, bosses: J().journey?.bosses || [], streaks: st, tiers: tiers.filter((b) => b.earned).map((b) => b.id), duels: res.filter((r) => r.duel).length, predictions: ph.filter((h) => h.beat && h.stored).length });
+    memo = { ds: c.DS, j: key, v: { lk, fs, sk, plan, savings, fc, ms, ms6, short, long, st, goals, bd, bd_total, lv, jr, jidx, ph, pr } };
     return memo.v;
   }
 
   // ---------------------------------------------------------------- sections
   function forecastCard(v) {
     const fc = v.fc;
-    if (!fc.ok) return `<div class="card prog-hero"><h2>Your potential in 6 months</h2><p class="muted">Play ${fc.need} more round${fc.need === 1 ? '' : 's'} with a score differential (18 holes, or 9 holes once you have an index) and GolfIQ will show where your handicap can get to.</p></div>`;
+    if (!fc.ok) return `<div class="card prog-hero"><h2>Your potential in 6 months</h2><p class="muted">Play ${fc.need} more round${fc.need === 1 ? '' : 's'} with a score differential (18 holes, or 9 holes once you have an index) and BreakingPar will show where your handicap can get to.</p></div>`;
     const hist = c.DS.rounds.filter((r) => A.isNum(r.index_after) && r.date && Date.parse(r.date) > Date.now() - 365 * 864e5);
     const d0 = new Date(), dAt = (m) => new Date(d0.getTime() + m * 30.4 * 864e5).toISOString().slice(0, 10);
     const tr = [
@@ -110,8 +115,26 @@ export function registerProgress(c) {
       <p class="small muted" style="margin:0">${has ? `From ${s.n} ${NOUN[s.full_key]}. ` : ''}${A.isNum(s.practice_hcp) ? `Practice level ${hc(s.practice_hcp)}. ` : ''}${esc(s.how)}</p>
       ${!ahead && s.games.length ? `<div class="lvl-g">${s.games.map(gameBtn).join('')}</div>` : ''}</div>`;
   }
+  // a skill handicap that has dropped since the tiles were last drawn counts down and pulses once, the next time they are on screen (plan 5.3).
+  // What was last shown is kept per device, as the whole number the tile shows, so a small change that does not move the number is not a drop.
+  const drops = {}, SEEN_KEY = 'golfiq-skill-seen'; let seenMem = null;
+  function noteSeen(sk) {
+    if (!seenMem) { try { seenMem = JSON.parse(localStorage.getItem(SEEN_KEY)) || {}; } catch { seenMem = {}; } }
+    let changed = false;
+    for (const s of sk.skills) { if (!s.rated || !A.isNum(s.hcp)) continue; const now = Math.round(s.hcp), was = seenMem[s.key];
+      if (Number.isFinite(was) && now < was) drops[s.key] = was; if (was !== now) { seenMem[s.key] = now; changed = true; } }
+    if (changed) { try { localStorage.setItem(SEEN_KEY, JSON.stringify(seenMem)); } catch { /* storage full or blocked: the tiles just will not count down */ } }
+  }
+  function tiles() {
+    for (const key of Object.keys(drops)) {
+      const tile = c.$(`[data-skill="${key}"]`), num = tile?.querySelector('.st-hcp'); if (!tile || !num) continue;
+      const to = Number(num.textContent), from = drops[key]; delete drops[key];
+      if (Number.isFinite(to) && from > to) { FEEL.countUp(num, from, to, FEEL.revealMs(800)); FEEL.pulse(tile, 'pop'); }
+    }
+  }
   function levelUpCard(v = data(), { link = false } = {}) {
     const sk = v.sk; if (!sk) return '';
+    noteSeen(sk);
     const anyRated = sk.skills.some((s) => s.rated), open = sk.skills.find((s) => s.key === c.ui.lv_skill), pinned = J().focus?.pinned || [];
     if (!anyRated && !(J().results || []).length) return `<div class="card"><h2>Level up</h2><p class="muted">Play ${Math.max(1, SK.RATING.min_rounds - sk.rounds)} more 18-hole round${SK.RATING.min_rounds - sk.rounds === 1 ? '' : 's'} with a scorecard and each skill (putting, short game, approach, driving) gets its own handicap, with games to improve it.</p></div>`;
     const tile = (s) => `<button class="skill-tile ${s.focus ? 'focus' : ''} ${open === s ? 'open' : ''}" data-skill="${s.key}" aria-expanded="${open === s}">
@@ -130,6 +153,7 @@ export function registerProgress(c) {
       ${note(`Your last ${sk.rounds} 18-hole rounds against Shot Scope data (putting make %, approach proximity, up-and-down %, ${esc(CO.STANDARD_SOURCE[0].split('(')[1].replace(')', ''))}; sources: ${[...B.SOURCES, CO.STANDARD_SOURCE].map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t.split(' (')[0])}</a>`).join(', ')}). Chip proximity, tee penalties and the Landing zone and Imaginary fairways games have no published standard, so their levels are assumptions worked out from the tables above (marked "assumed"). Proximity compares your median finish with the published averages. Practice level comes from your last 5 game scores and is shown separately, because practice is easier than the course. Strokes are what reaching the next level would save per round; skills overlap a little, so treat the total as a target.`)}</div>`;
   }
   function wire() {
+    tiles();
     c.$$('[data-skill]').forEach((b) => b.addEventListener('click', () => { c.ui.lv_skill = c.ui.lv_skill === b.dataset.skill ? null : b.dataset.skill; c.saveUi(); c.rerender(); }));
     c.$$('[data-pin]').forEach((b) => b.addEventListener('click', async () => {
       const j = J(), cur = j.focus?.pinned || [], k = b.dataset.pin; j.focus = { ...(j.focus || {}), pinned: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k].slice(-2) };
@@ -203,9 +227,10 @@ export function registerProgress(c) {
     const v = data(); return `<div class="lvrow">${chip(v)}</div>${freezeCard(v)}`;
   }
   const ptsRow = (k) => { const x = LV.POINTS[k], extra = ['target', 'tier', 'pb', 'pressure', 'daily'].includes(k); return `<tr><td>${esc(FEEL.COPY.playerLevel.table.find((r) => r[0] === k)[1])}</td><td><b>${extra ? '+' : ''}${x}</b></td></tr>`; };
+  function openLocker(e) { e?.preventDefault?.(); c.ui.st_tab = 'locker'; c.saveUi(); $('#sheet')?.classList.remove('open'); if (location.hash === '#settings') c.rerender(); else location.hash = '#settings'; }
   function levelSheet() {
     const v = data(), l = v.lv, K = FEEL.COPY.playerLevel, lines = l.ledger.slice(0, LV.LEDGER_LINES);
-    $('#sheetPanel').innerHTML = `<div class="lvs-h"><span class="lvring big" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span><div><h2 style="margin:0">${esc(l.rank.name)}</h2><div class="small muted">${esc(K.rank(l.rank.n))} of ${LV.RANKS.length} · ${esc(K.total(l.points))}</div></div></div>
+    $('#sheetPanel').innerHTML = `${sheetBar()}<div class="lvs-h"><span class="lvring big" style="--p:${l.progress.toFixed(3)}"><b>${l.rank.n}</b></span><div><h2 style="margin:0">${esc(l.rank.name)}</h2><div class="small muted">${esc(K.rank(l.rank.n))} of ${LV.RANKS.length} · ${esc(K.total(l.points))}</div></div></div>
       <p class="small" style="margin:10px 0 2px">${esc(l.next ? K.toNext(l.toNext, l.next.name) : K.top)}</p><div class="bar"><i style="width:${Math.round(l.progress * 100)}%"></i></div>
       <p class="small muted" style="margin:6px 0 0">${esc(K.today(Math.min(l.today, LV.DAILY_CAP), LV.DAILY_CAP))}</p>
       <h3 style="margin:14px 0 4px">${esc(K.recent)}</h3>
@@ -213,8 +238,8 @@ export function registerProgress(c) {
       <h3 style="margin:14px 0 4px">${esc(K.tableTitle)}</h3>
       <div class="tbl"><table><tbody>${K.table.map((r) => ptsRow(r[0])).join('')}<tr><td>${esc(K.welcomeRow)}</td><td><b>×${LV.POINTS.welcome_back}</b></td></tr></tbody></table></div>
       <p class="small muted" style="margin:8px 0 0">${esc(K.capNote(LV.DAILY_CAP))}</p><p class="small muted" style="margin:6px 0 12px">${esc(K.note)}</p>
-      <button type="button" class="btn" id="lvClose">Close</button>`;
-    $('#sheet').classList.add('open'); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open'));
+      <button type="button" class="btn sec" data-lklink>${esc(FEEL.COPY.locker.open)}</button> <button type="button" class="btn" id="lvClose">Close</button>`;
+    $('#sheet').classList.add('open'); wireSheetX(); $('#lvClose')?.addEventListener('click', () => $('#sheet').classList.remove('open')); $('#sheetPanel [data-lklink]')?.addEventListener('click', openLocker);
   }
   // The rank-up moment: a full-width card with the new rank stamped in. Shown once per rank (J().level_seen). The first time the feature runs, the rank the golfer
   // already has is taken as the starting point rather than celebrated. Never shown over a game in play; after a game it waits for the result screen to finish.
@@ -235,12 +260,70 @@ export function registerProgress(c) {
     if (root) setTimeout(show, FEEL.revealMs(2400)); else show();
   }
   // runs after every page draw (app.js): the rank chips open the sheet, the freeze line can be dismissed, the rank moment may appear, the rank is shared with friends
+  // ---- locker (locker.js): the chosen look is applied after every page draw; unlocks announce themselves once
+  const look = () => LCK.resolveLook(c.state.settings?.look, data().lk);
+  function applyLook() {
+    try {
+      if (!document.getElementById('skinCss')) { const el = document.createElement('style'); el.id = 'skinCss'; el.textContent = LCK.skinCss(); document.head.appendChild(el); }
+      const l = look(), r = document.documentElement;
+      if (l.skin === LCK.DEFAULTS.skin) r.removeAttribute('data-skin'); else r.dataset.skin = l.skin;
+      const head = getComputedStyle(r).getPropertyValue('--head').trim(), tc = document.querySelector('meta[name="theme-color"]'); if (head && tc && tc.content !== head) tc.content = head;   // the status bar follows the app colours
+      if (l.badge === LCK.DEFAULTS.badge) r.removeAttribute('data-badge'); else r.dataset.badge = l.badge;
+      FEEL.setLook(l.confetti);
+    } catch { /* no data yet: the free defaults stay */ }
+  }
+  async function useItem(id) {
+    const [kind, key] = id.split(':'), it = data().lk.items.find((x) => x.id === id); if (!it || !it.unlocked) return;
+    const st = c.state.settings; st.look = { ...(st.look || {}), [kind]: key };
+    if (kind === 'wallpaper') { c.ui.wp_theme = key; c.saveUi(); }
+    await c.S.saveSettings(c.state, 'set_look', null, { look: st.look }); applyLook(); FEEL.play('good');
+  }
+  function preview(it) {
+    if (it.kind === 'skin') { const t = it.key === 'clubhouse' ? { bg: '#f3efe3', head: '#0a3d2b', accent: '#0b5a3e', gold: '#c9a43a' } : LCK.SKINS[it.key].light; return `<span class="lk-prev lk-skin" style="background:${t.bg}"><i style="background:${t.head}"></i><i style="background:${t.accent}"></i><i style="background:${t.gold}"></i></span>`; }
+    if (it.kind === 'wallpaper') { const t = WP.THEMES[it.key]; return `<span class="lk-prev" style="background:linear-gradient(${t.top},${t.bottom})"><i class="lk-wl" style="background:${t.line}"></i></span>`; }
+    if (it.kind === 'badge') return `<span class="lk-prev"><span class="gp-badge gold" data-badge="${it.key}">Gold</span></span>`;
+    return `<span class="lk-prev lk-cf ${it.key}"><i></i><i></i><i></i><i></i><i></i></span>`;
+  }
+  function lockerPage() {
+    const v = data(), K = FEEL.COPY.locker, now = look(), n = v.lk.items.filter((i) => i.unlocked).length;
+    const card = (it) => {
+      const on = now[it.kind] === it.key, pr = it.progress;
+      return `<div class="lk-item${it.unlocked ? '' : ' off'}${on ? ' use' : ''}" data-lkitem="${esc(it.id)}">${preview(it)}<b>${esc(it.name)}</b>
+        ${it.unlocked ? `<button type="button" class="btn ${on ? 'sec' : ''}" data-lkuse="${esc(it.id)}" ${on ? 'disabled' : ''}>${esc(on ? K.using : K.use)}</button>`
+          : `<span class="small muted">${icon('lock', 14)} ${esc(it.how)}</span>${pr ? `<div class="bar"><i style="width:${Math.round(100 * pr.have / Math.max(1, pr.need))}%"></i></div><span class="small muted">${esc(K.progress(Math.round(pr.have), pr.need))}</span>` : ''}`}</div>`;
+    };
+    return `<div class="card"><h2>${esc(K.title)}</h2><p class="small" style="margin:0 0 4px">${esc(K.intro)}</p><p class="small muted" style="margin:0">${esc(K.count(n, v.lk.items.length))}</p></div>
+      ${LCK.KINDS.map(([k]) => `<div class="card"><h3 style="margin:0 0 8px">${esc(K.kinds[k])}</h3><div class="lk-grid">${v.lk.items.filter((i) => i.kind === k).map(card).join('')}</div></div>`).join('')}`;
+  }
+  // "Unlocked: Claret" with a Try it button. Shown once per item (J().locker_seen). The first time, what is already unlocked is the starting point, not a surprise.
+  function unlockNote() {
+    if (!(c.DS.rounds.length || (J().results || []).length) || J().game_draft || $('#lkNote')) return;
+    const lk = data().lk, seen = J().locker_seen;
+    if (!Array.isArray(seen)) { J().locker_seen = [...lk.unlocked]; c.S.saveJournal(c.state); return; }
+    const fr = LCK.fresh(lk, seen); if (!fr.length) return;
+    const root = $('#gpRoot.gp-rv'), K = FEEL.COPY.locker, show = () => {
+      if ($('#lkNote') || J().game_draft) return;
+      if ($('#lvMoment')) { setTimeout(show, 800); return; }                       // the rank moment goes first
+      J().locker_seen = [...new Set([...(J().locker_seen || []), ...fr.map((i) => i.id)])]; c.S.saveJournal(c.state);
+      const d = document.createElement('div'); d.id = 'lkNote'; d.className = 'lknote'; d.setAttribute('role', 'status');
+      d.innerHTML = `<span><b>${esc(K.unlocked(fr[0].name))}</b>${fr.length > 1 ? ` <span class="small muted">+${fr.length - 1}</span>` : ''}</span><button type="button" class="btn" id="lkTry">${esc(K.tryIt)}</button><button type="button" class="btn sec" id="lkX">${esc(K.later)}</button>`;
+      document.body.appendChild(d); FEEL.play('good');
+      const gone = () => { d.remove(); removeEventListener('hashchange', gone); }; addEventListener('hashchange', gone); setTimeout(gone, 12000);   // it leaves with the page (the item stays in the Locker)
+      d.querySelector('#lkX').addEventListener('click', () => d.remove());
+      d.querySelector('#lkTry').addEventListener('click', async () => { d.remove(); await useItem(fr[0].id); c.done(K.chosen(fr[0].name)); });
+    };
+    if (root) setTimeout(show, FEEL.revealMs(3200)); else show();
+  }
+
   function afterRender() {
+    applyLook(); unlockNote();
     c.$$('[data-level]').forEach((b) => b.addEventListener('click', levelSheet));
+    c.$$('[data-lkuse]').forEach((b) => b.addEventListener('click', async () => { await useItem(b.dataset.lkuse); c.done(FEEL.COPY.locker.chosen(data().lk.items.find((x) => x.id === b.dataset.lkuse).name)); }));
+    c.$$('[data-lklink]').forEach((b) => b.addEventListener('click', openLocker));
     c.$$('[data-jstage]').forEach((b) => b.addEventListener('click', () => { const [n, k] = b.dataset.jstage.split(':'); stageSheet(Number(n), k); }));
     c.$$('[data-jboss]').forEach((b) => b.addEventListener('click', () => bossSheet(Number(b.dataset.jboss))));
     c.$$('[data-jhome]').forEach((b) => b.addEventListener('click', () => c.guided?.start(b.dataset.jhome)));
-    if (!$('#jnPath')) jnScrolled = false; else if (!jnScrolled) { jnScrolled = true; $('.jn-cur')?.scrollIntoView({ block: 'center' }); }
+    if (!$('#jnPath')) jnScrolled = false; else if (!jnScrolled) { jnScrolled = true; queueMicrotask(() => $('.jn-cur')?.scrollIntoView({ block: 'center' })); /* runs after rerender() has put the old scroll position back */ }
     c.$$('[data-freezeok]').forEach((b) => b.addEventListener('click', () => { freezeShown = null; b.closest('[data-freezeline]')?.remove(); }));
     try { rankMoment(); if (c.compete?.shareRank && (c.DS.rounds.length || (J().results || []).length)) c.compete.shareRank(data().lv.rank.name); } catch (e) { console.error(e); }
   }
@@ -277,7 +360,10 @@ export function registerProgress(c) {
     return `<div class="card jn-head"><h2 style="margin:0">${esc(K.title)}</h2><p class="small" style="margin:4px 0 0">${nx ? esc(nx.line) : esc(K.done)}</p></div>
       <div class="jn-path" id="jnPath">${html}</div><p class="small muted jn-note">${esc(K.note)}</p>`;
   }
-  function openSheet(html) { $('#sheetPanel').innerHTML = `${html}<button type="button" class="btn" id="jnClose">Close</button>`; $('#sheet').classList.add('open'); $('#jnClose').addEventListener('click', () => $('#sheet').classList.remove('open')); }
+  // a close button that stays at the top of a long sheet while it scrolls (tapping the dark backdrop also closes)
+  const sheetBar = () => `<div class="sheet-bar"><button type="button" class="sheet-x" data-sheetx aria-label="Close">${icon('cross', 20)}</button></div>`;
+  const wireSheetX = () => $('#sheetPanel [data-sheetx]')?.addEventListener('click', () => $('#sheet').classList.remove('open'));
+  function openSheet(html) { $('#sheetPanel').innerHTML = `${sheetBar()}${html}<button type="button" class="btn" id="jnClose">Close</button>`; $('#sheet').classList.add('open'); wireSheetX(); $('#jnClose').addEventListener('click', () => $('#sheet').classList.remove('open')); }
   function stageSheet(n, skill) {
     const s = data().jr.stretches.find((x) => x.n === n), st = s?.stages.find((x) => x.skill === skill); if (!st) return;
     const K = FEEL.COPY.journey, left = Math.max(0, Math.ceil(st.need - st.hits));
@@ -363,5 +449,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'} ${shield(v.st.freezes_held)}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, roundPayoffHtml, homePayoff, predictionsCard };
+  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, lockerPage, applyLook, look, roundPayoffHtml, homePayoff, predictionsCard, tiles };
 }

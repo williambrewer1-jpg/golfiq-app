@@ -1,4 +1,4 @@
-// GolfIQ "Play" page: live distances from the phone's GPS, your shot pattern drawn on the course,
+// BreakingPar "Play" page: live distances from the phone's GPS, your shot pattern drawn on the course,
 // and hole-by-hole score entry (score, putts, fairway, penalties) that saves as a normal round.
 import * as F from './features.js';
 import * as HM from './holemap.js';
@@ -53,7 +53,7 @@ export function registerPlay(c) {
     const sel = c.ui.pl_course && (all.some((x) => x.id === c.ui.pl_course) || c.ui.pl_course === 'new') ? c.ui.pl_course : (closest?.id || known[0]?.id || 'new');
     const last = known.find((x) => x.id === sel)?.row, nb = nearby();
     const opts = [...known.map((x) => [x.id, `${x.name}${x.dist_m !== null ? ` · ${km(x.dist_m)}` : ''}`]), ...near.map((x) => [x.id, `${x.name} · ${km(x.dist_m)}`]), ['new', 'New course…']];
-    return `<div class="card"><h2>Start a round</h2><p class="small">Keep score as you play – strokes, putts, fairways and penalties – with live distances and your shot patterns on the map. It saves as a normal round, so every page of GolfIQ works without a Garmin watch.</p>
+    return `<div class="card"><h2>Start a round</h2><p class="small">Keep score as you play – strokes, putts, fairways and penalties – with live distances and your shot patterns on the map. It saves as a normal round, so every page of BreakingPar works without a Garmin watch.</p>
       <div class="nearby"><div class="rv-h"><b>Courses near you</b><button type="button" class="btn sec sm" id="plNear">${nb ? 'Refresh' : 'Find courses near me'}</button></div>
         <span id="plNearMsg" class="small muted">${nb ? `${nb.list.length} golf courses within 40 km · ${esc(String(nb.at).slice(0, 10))}` : 'Uses your location and OpenStreetMap – works across the UK, Australia and most of the world.'}</span>
         ${near.length || known.some((k) => k.dist_m !== null) ? `<div class="nlist">${all.filter((x) => x.dist_m !== null).sort((a, b) => a.dist_m - b.dist_m).slice(0, 6).map((x) => `<button type="button" class="nrow ${x.id === sel ? 'on' : ''}" data-pickcourse="${esc(x.id)}"><b>${esc(x.name)}</b><span>${km(x.dist_m)}${x.row ? ' · played before' : ''}</span></button>`).join('')}</div>` : ''}</div>
@@ -228,8 +228,8 @@ export function registerPlay(c) {
     const head = `<div class="card playcard"><div class="rv-h"><h2 style="margin:0">Hole ${hole} <span class="small muted">· par ${par}${holeLen ? ` · ${c.d0(holeLen)} ${U}` : ''}</span></h2><span class="small muted">${esc(gpsLine)}</span></div>
       ${seg('pl_pos', [['gps', 'My position'], ['tee', 'From the tee']], 'gps')}`;
     live = null;
-    if (!pos) return head + `<p class="muted">${farAway ? 'You are a long way from this hole and GolfIQ doesn\'t know where its tee is yet.' : mode === 'tee' ? 'No tee position known for this hole yet. It comes from your earlier tracked rounds here, or from the course outline once it has been mapped.' : esc(gpsLine)}</p>${osmHint(d, gpsPos)}</div>`;
-    if (!green) return head + `<p class="muted">GolfIQ doesn't know where this green is yet. It learns green positions from your tracked rounds on a course, or from the downloaded course outline.</p>${osmHint(d, pos)}</div>`;
+    if (!pos) return head + `<p class="muted">${farAway ? 'You are a long way from this hole and BreakingPar doesn\'t know where its tee is yet.' : mode === 'tee' ? 'No tee position known for this hole yet. It comes from your earlier tracked rounds here, or from the course outline once it has been mapped.' : esc(gpsLine)}</p>${osmHint(d, gpsPos)}</div>`;
+    if (!green) return head + `<p class="muted">BreakingPar doesn't know where this green is yet. It learns green positions from your tracked rounds on a course, or from the downloaded course outline.</p>${osmHint(d, pos)}</div>`;
     const dist = A.haversine(pos[0], pos[1], green[0], green[1]), fb = F.greenFrontBack(pos[0], pos[1], green, feats);
     const onTee = usingTee || (ht.tee && A.haversine(pos[0], pos[1], ht.tee[0], ht.tee[1]) < 25);
     const saved = d.aim?.[hole], aim = saved && A.haversine(saved.from[0], saved.from[1], pos[0], pos[1]) <= 25 ? saved.pt : defaultAim(pos, green, ht.line, onTee);

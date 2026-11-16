@@ -1,4 +1,4 @@
-// GolfIQ pages: caddie, post-round review, handicap, conditions, before/after, playbook, personal bests,
+// BreakingPar pages: caddie, post-round review, handicap, conditions, before/after, playbook, personal bests,
 // practice (games, log, wedge matrix), coach hub (priorities, notes from Claude, swing thoughts), share card, course maps.
 import * as F from './features.js';
 import * as B from './bench.js';
@@ -61,10 +61,15 @@ export function registerPages(c) {
       .sort((a, b) => (Math.max(...Object.values(b.vals).filter(Boolean), 0)) - (Math.max(...Object.values(a.vals).filter(Boolean), 0))).slice(0, 4);
     return { clubs, wedges: segVal('wp_wedges', 'on') === 'on' && rows.length ? { lengths: W.lengths, rows } : null };
   }
+  // only the themes the golfer has unlocked are offered (locker.js); the rest are in Settings → Locker
+  const wpAll = () => c.progress?.data?.().lk?.items.filter((i) => i.kind === 'wallpaper') || [];
+  const wpThemes = () => { const a = wpAll().filter((i) => i.unlocked); return (a.length ? a : [{ key: 'green', name: 'Augusta green' }, { key: 'night', name: 'Night' }, { key: 'cream', name: 'Cream' }]).map((i) => [i.key, i.name]); };
+  const wpDefault = () => c.progress?.look?.().wallpaper || 'green';
+  const wpMore = () => (wpAll().some((i) => !i.unlocked) ? `<p class="small muted" style="margin:4px 0 0">More themes are in <a href="#settings" data-lklink>Settings → Locker</a>.</p>` : '');
   function wallpaperCard() {
     return `<div class="card" id="wpCard"><h2>Lock-screen yardages</h2>
       <p class="small">Your current distances as an iPhone lock screen, so a glance at your phone gives you the number. Uses the distances above (GPS or yours) and your wedge matrix.</p>
-      ${seg('wp_theme', [['green', 'Augusta green'], ['night', 'Night'], ['cream', 'Cream']], 'green')}
+      ${seg('wp_theme', wpThemes(), wpDefault())}${wpMore()}
       ${seg('wp_wedges', [['on', 'With wedge matrix'], ['off', 'Clubs only']], 'on')}
       <div class="wpprev"><canvas id="wpCanvas" aria-label="Lock screen preview"></canvas><div class="wpclock"><span>Saturday 14 November</span><b>9:41</b></div></div>
       <p><button class="btn" id="wpSave">Save to Photos</button> <span id="wpMsg" class="small"></span></p>
@@ -73,7 +78,7 @@ export function registerPages(c) {
   function drawWallpaper() {
     const cv = $('#wpCanvas'); if (!cv) return null;
     const { w, h } = WP.phoneSize(), d = wallpaperData();
-    return WP.draw(cv, { w, h, ...d, unit: c.UNIT, date: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }), theme: segVal('wp_theme', 'green') });
+    return WP.draw(cv, { w, h, ...d, unit: c.UNIT, date: new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }), theme: wpThemes().some(([k]) => k === segVal('wp_theme', wpDefault())) ? segVal('wp_theme', wpDefault()) : 'green' });
   }
   function wireCaddie() {
     if ($('#wpCanvas')) { try { drawWallpaper(); } catch (e) { $('#wpMsg').textContent = e.message; } }
@@ -168,14 +173,14 @@ export function registerPages(c) {
       { kind: 'dots', tone: 'muted', opacity: 0.55, pts: withD.map((x, k) => ({ x: ms(x.date), y: x.differential_for_index, hot: k >= off0 && counting.has(k - off0) })) },
       { kind: 'line', tone: 'accent', scrub: true, markers: 2.5, label: 'Index', pts: pts.map((x) => ({ x: ms(x.date), y: x.index_after, t: x.date, d: x.differential_for_index })) },
       ...(official.length ? [{ kind: 'step', tone: 'gold', label: 'Official', pts: official.map((h) => ({ x: ms(h.date), y: h.handicap_index })) }] : [])];
-    const est = r.filter((x) => String(x.hi_source || '').startsWith('GolfIQ')).length, prov = r.filter((x) => String(x.differential_source || '').startsWith('provisional')).length;
-    return `<div class="kpis">${kpi('GolfIQ index', cur)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : 'add in Settings'}</div></div>
-      ${kpi('Differentials used', withD.length, null, true, 0)}${A.isNum(cur) && off ? kpi('GolfIQ − official', cur - off.handicap_index, null, false, 1) : ''}</div>
+    const est = r.filter((x) => String(x.hi_source || '').startsWith('BreakingPar')).length, prov = r.filter((x) => String(x.differential_source || '').startsWith('provisional')).length;
+    return `<div class="kpis">${kpi('BreakingPar index', cur)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : 'add in Settings'}</div></div>
+      ${kpi('Differentials used', withD.length, null, true, 0)}${A.isNum(cur) && off ? kpi('BreakingPar − official', cur - off.handicap_index, null, false, 1) : ''}</div>
       ${withD.length < 3 ? '<div class="warn">An index needs at least 3 scored rounds.</div>' : ''}
       <div class="card"><h2>Index over time</h2><p class="small muted" style="margin:0 0 4px">Line = your index. Dots = round differentials; gold dots count towards the index. Dashed = official index you entered.</p>${c.CHT.line({ series, xKind: 'date', height: 170, aria: 'Handicap index over time with round differentials', reads: (q) => `${q.t} · index ${fmt(q.y)}${A.isNum(q.d) ? ` · round differential ${fmt(q.d)}` : ''}`, caption: 'Press and drag across the chart to see each round.' })}
       ${note('WHS method: average of your lowest 8 of the last 20 score differentials (fewer rounds use the WHS small-sample table). 9-hole rounds count the WHS way: the nine you played plus your expected score for the other nine, based on your index at the time (0.52 × index + 1.2, the published approximation of the WHS table). Not applied: playing-conditions adjustment, soft/hard caps and exceptional-score reductions – so expect small differences from your official index.')}</div>
       <div class="card"><h2>Last ${last20.length} differentials</h2>${table([...last20].map((x, i) => ({ ...x, counts: counting.has(i) })).reverse(), [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['differential_for_index', 'Diff', n1], ['counts', 'Counts', (v) => (v ? '●' : '')], ['index_after', 'Index after', n1], ['hi_source', 'Handicap used', (v) => `<span class="small">${esc(v || 'none')}</span>`]])}
-      ${note(`● = one of the lowest that make up the index. ${est} round(s) had no official index entered, so GolfIQ used its own estimate from your earlier rounds to reconstruct Stableford.${prov ? ` ${prov} early round(s) use a provisional differential (par+5 cap) because no handicap or stroke index was available yet.` : ''}`)}</div>`;
+      ${note(`● = one of the lowest that make up the index. ${est} round(s) had no official index entered, so BreakingPar used its own estimate from your earlier rounds to reconstruct Stableford.${prov ? ` ${prov} early round(s) use a provisional differential (par+5 cap) because no handicap or stroke index was available yet.` : ''}`)}</div>`;
   }
 
   // ================================================================ 4. Conditions (weather)
@@ -349,8 +354,8 @@ export function registerPages(c) {
     const n = hh.length, per = Math.ceil(n / 2) || 1, bw = Math.min(100, 936 / per - 8);
     hh.forEach((h, i) => { const x = 72 + (i % per) * (bw + 8), y = 1030 + Math.floor(i / per) * 128; g.fillStyle = A.isNum(h.to_par) ? col(h.to_par) : '#555'; g.beginPath(); g.roundRect(x, y, bw, 92, 14); g.fill();
       g.fillStyle = 'rgba(255,255,255,.75)'; font(20, 600); g.fillText(String(h.hole), x + 10, y + 26); g.fillStyle = '#fff'; font(42, 700); const t = String(h.strokes); g.fillText(t, x + (bw - g.measureText(t).width) / 2, y + 72); });
-    g.fillStyle = 'rgba(255,255,255,.5)'; font(26, 600); g.fillText('GolfIQ', 72, 1310); font(24, 500); let lx = 1008; for (const [lab, tp] of [['worse', 3], ['double', 2], ['bogey', 1], ['par', 0], ['birdie', -1]]) { g.fillStyle = 'rgba(255,255,255,.6)'; const wd = g.measureText(lab).width; lx -= wd; g.fillText(lab, lx, 1310); lx -= 30; g.fillStyle = col(tp); g.beginPath(); g.roundRect(lx, 1291, 20, 20, 5); g.fill(); lx -= 22; }
-    const blob = await new Promise((res) => cv.toBlob(res, 'image/png')), file = new File([blob], `golfiq-${r.date}.png`, { type: 'image/png' });
+    g.fillStyle = 'rgba(255,255,255,.5)'; font(26, 600); g.fillText('BreakingPar', 72, 1310); font(24, 500); let lx = 1008; for (const [lab, tp] of [['worse', 3], ['double', 2], ['bogey', 1], ['par', 0], ['birdie', -1]]) { g.fillStyle = 'rgba(255,255,255,.6)'; const wd = g.measureText(lab).width; lx -= wd; g.fillText(lab, lx, 1310); lx -= 30; g.fillStyle = col(tp); g.beginPath(); g.roundRect(lx, 1291, 20, 20, 5); g.fill(); lx -= 22; }
+    const blob = await new Promise((res) => cv.toBlob(res, 'image/png')), file = new File([blob], `breakingpar-${r.date}.png`, { type: 'image/png' });
     if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: r.label }); return; } catch (e) { if (e.name === 'AbortError') return; } }
     const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
   }
@@ -362,13 +367,15 @@ export function registerPages(c) {
     const cats = [...new Set(entry.map((x) => x.cat))], uM = c.UNIT === 'yd' ? 0.9144 : 1, L = (s) => c.compete.lvlText(c.compete.lvl(g.id, s));
     const bench = B.hasLevel(g.id) ? `<p class="small muted" style="margin:6px 0">Handicap benchmarks: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 hcp ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 hcp ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
     if (c.guided?.screen()) return c.guided.screen();
-    const launch = c.guided ? c.guided.testCard() + c.guided.sessionCard() + c.guided.dailyCard() + c.guided.launcher(g) : '';
-    return `<div class="card"><h2>Play a game</h2>${select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game')}
-      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}${launch}
+    const picker = select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game');
+    const shortcuts = c.guided ? c.guided.testCard() + c.guided.sessionCard() + c.guided.dailyCard() : '';
+    const gridCard = c.guided ? `<div class="card"><h2>Games</h2>${c.guided.gameCards(entry, g.id)}<details class="gp-pick"><summary class="small">Pick from a list</summary>${picker}</details></div>` : '';
+    return `${shortcuts}${gridCard}<div class="card" id="gpPlay"><h2>${c.guided ? esc(g.name) : 'Play a game'}</h2>${c.guided ? '' : picker}
+      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}${c.guided ? c.guided.launcher(g) : ''}
       <details id="pgQuick"><summary><b>Quick entry</b> <span class="small muted">type in a score you already played</span></summary><form id="pgForm" style="margin-top:8px">
       <div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}" required></div><div><label class="f">Score (${esc(F.unitOf(g, c.UNIT) || '')})</label><input name="score" type="number" inputmode="decimal" step="any" ${g.max ? `max="${g.max}"` : ''} min="0" required></div></div>
       <label class="f">Note (optional)</label><input name="note" style="width:100%" placeholder="conditions, feel, club used…"><p><button class="btn">Save score</button></p></form></details></div>
-      <div class="card"><h2>${esc(g.name)}</h2>${g.n ? `<div class="kpis">${kpi('Best', g.best, null, true, 0)}${B.hasLevel(g.id) ? `<div class="kpi"><div class="l">Best = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.best)?.label || '–')}</div></div><div class="kpi"><div class="l">Last 5 = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.avg5)?.label || '–')}</div></div>` : ''}${kpi('Last 5 average', g.avg5, A.isNum(g.prev5) ? g.avg5 - g.prev5 : null, g.better !== 'lower')}${kpi('Played', g.n, null, true, 0)}</div>
+      <div class="card"><h2>${esc(g.name)} · your scores</h2>${g.n ? `<div class="kpis">${kpi('Best', g.best, null, true, 0)}${B.hasLevel(g.id) ? `<div class="kpi"><div class="l">Best = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.best)?.label || '–')}</div></div><div class="kpi"><div class="l">Last 5 = level</div><div class="v sm">${esc(c.compete.lvl(g.id, g.avg5)?.label || '–')}</div></div>` : ''}${kpi('Last 5 average', g.avg5, A.isNum(g.prev5) ? g.avg5 - g.prev5 : null, g.better !== 'lower')}${kpi('Played', g.n, null, true, 0)}</div>
         ${g.n >= 2 ? plot([{ x: g.results.map((r) => r.date), y: g.results.map((r) => r.score), mode: 'lines+markers', line: { color: c.P.accent, width: 2.5 }, marker: { size: 7 } }], { height: 220, yaxis: { title: { text: F.unitOf(g, c.UNIT) || 'score' }, ...(g.better === 'lower' ? { autorange: 'reversed' } : {}) } }) : ''}
         ${table([...g.results].reverse().slice(0, 15), [['date', 'Date'], ['score', 'Score', (v) => fmt(v, Number.isInteger(v) ? 0 : 1) + (g.max ? ` / ${g.max}` : '')], ...(B.hasLevel(g.id) ? [['score', 'Level', (v) => L(v)]] : []), ['note', 'Note'], ['id', '', (v) => `<button class="btn sec sm" data-delres="${esc(v)}">Delete</button>`]])}` : '<p class="muted">No scores yet for this game.</p>'}</div>
       <div class="card"><h2>All games</h2>${table(games, [['cat', 'Type'], ['name', 'Game'], ['n', 'Played', n0], ['best', 'Best', (v) => fmt(v, 0)], ['avg5', 'Last 5', n1], ['trend', 'Trend', vcol]])}
@@ -458,7 +465,7 @@ export function registerPages(c) {
     const ds = c.DS, U = c.UNIT, r18 = ds.rounds.filter((r) => r.format === '18'), last = r18.slice(-10), k = Object.fromEntries(A.kpiTable(r18, 5).map((x) => [x.metric, x]));
     const f1 = (v, d = 1) => (A.isNum(v) ? v.toFixed(d) : '–'), L = [];
     const idx = r18.length ? r18[r18.length - 1] : null;
-    L.push(`# My golf data (from GolfIQ, ${today()})`, '', `Rounds stored: ${ds.rounds.length} (${r18.length} full 18-hole). Handicap index used: ${f1(idx?.hi)} (${idx?.hi_source || 'none'}); GolfIQ-calculated index: ${f1(idx?.index_after)}.`, '');
+    L.push(`# My golf data (from BreakingPar, ${today()})`, '', `Rounds stored: ${ds.rounds.length} (${r18.length} full 18-hole). Handicap index used: ${f1(idx?.hi)} (${idx?.hi_source || 'none'}); BreakingPar-calculated index: ${f1(idx?.index_after)}.`, '');
     L.push('## Last 5 rounds vs earlier rounds', ...['gross', 'stableford_round', 'differential', 'gir_pct', 'fw_pct', 'putts_round', 'three_putt_pct', 'penalties'].map((m) => `- ${k[m].label}: ${f1(k[m].recent)} (earlier ${f1(k[m].baseline)})`), '');
     L.push('## Recent rounds', ...last.reverse().map((r) => `- ${r.date} ${r.course_name}: ${r.gross} (${r.to_par > 0 ? '+' : ''}${r.to_par}), ${f1(r.stableford_round, 0)} pts, GIR ${f1(r.gir_pct, 0)}%, FW ${f1(r.fw_pct, 0)}%, ${f1(r.putts_round, 0)} putts, ${f1(r.penalties, 0)} pen`), '');
     const fs = r18.length ? A.findings(A.filterDataset(ds, { formats: ['18'], lastN: 20 }), U) : [];
@@ -472,7 +479,7 @@ export function registerPages(c) {
     if (J().thoughts.filter(Boolean).length) L.push('## My current swing thoughts', ...J().thoughts.filter(Boolean).map((x) => `- ${x}`), '');
     const notes = [...J().notes].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
     if (notes.length) L.push('## Your last coaching notes to me', ...notes.map((n) => `- ${n.date} ${n.title}: ${n.feedback}${n.feels?.length ? ` Feels: ${n.feels.join('; ')}.` : ''}${n.drills?.length ? ` Drills: ${n.drills.map((d) => d.name).join(', ')}.` : ''}`), '');
-    L.push('## How to reply', 'You are my golf coach. After your advice, finish with a note I can paste into GolfIQ, as one JSON object in a code block, in exactly this shape (2–4 feels, 1–4 drills, today\'s date unless I say otherwise):', '', '```json', F.COACH_FORMAT, '```');
+    L.push('## How to reply', 'You are my golf coach. After your advice, finish with a note I can paste into BreakingPar, as one JSON object in a code block, in exactly this shape (2–4 feels, 1–4 drills, today\'s date unless I say otherwise):', '', '```json', F.COACH_FORMAT, '```');
     return L.join('\n');
   }
   const gameName = (id) => allGames().find((g) => g.id === id)?.name || id;

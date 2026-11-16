@@ -1,8 +1,14 @@
-# GolfIQ friends: leaderboards and live side games – setup
+# BreakingPar friends: leaderboards and live side games – setup
 
 You do this once (about 10 minutes, on the iPhone in Safari or on a computer). Friends don't set anything up; they join with your invite link.
 
 **What gets shared:** game scores (with a handicap level), your nickname, the group name and live side-game scorecards (names, handicap indexes, hole scores). For guided games it also shares the tier you reached, whether you beat your own target, whether you used a pressure finish, and the result of each step (hit or miss, or strokes) so friends can play against your score. **What stays on your phone:** rounds, shots, Garmin data, coach notes and everything else.
+
+> **Rules update (kudos and duels): do this once if you set up your group before.**
+> Kudos (Clap, Fire and Flag on a friend's score) and duels use two new Firestore paths, `kudos` and `duels`. Both are in the rules below, so you only have to update the rules once.
+> **What to do:** open **console.firebase.google.com → your project → Firestore Database → Rules**, replace everything with the rules below (or copy them from **BreakingPar → Settings → Friends**), and tap **Publish**. That's all.
+> **Until you do:** nothing breaks. Scores, the league, ghosts and live side games work as before. Kudos and duels stay hidden, and the Leaderboard shows one line saying the group owner should republish the rules. Friends don't need to do anything.
+> **What the new paths hold:** a kudos document is a score id, who gave it, which of the three reactions, a time and the score's week (at most 8 fields); a duel document is the challenge and each player's score (at most 20 fields). No round data, locations or contact details. A kudos document's id must be the score id plus the giver's id, which is what keeps it to one reaction each. Duel scores are hidden from the other player by the app until they have played; that is a courtesy, not security: the document can be read by every member of the group, and everyone in your private group is trusted.
 
 **Weekly league and ghosts need no new setup.** They read the same `scores` documents the leaderboards already use, so there are no new Firestore paths and **the security rules below are unchanged**. If you set up your group before this update, you do not need to touch Firebase. A score document now has up to 17 fields (the rules allow 20), and the league is worked out on each phone from the week's scores. It resets every ISO week (Monday).
 
@@ -13,8 +19,8 @@ You do this once (about 10 minutes, on the iPhone in Safari or on a computer). F
 ## A. Create the Firebase project
 
 1. Go to **console.firebase.google.com** and sign in with a Google account.
-2. Tap **Create a project**. Name it something like `golfiq-friends`. Turn Google Analytics **off**, then create it.
-3. **Turn on anonymous sign-in.** Go to **Build → Authentication → Get started → Sign-in method → Anonymous**, switch it on, then **Save**. GolfIQ gives each phone an anonymous ID, so nobody needs an account or a password.
+2. Tap **Create a project**. Name it something like `breakingpar-friends`. Turn Google Analytics **off**, then create it.
+3. **Turn on anonymous sign-in.** Go to **Build → Authentication → Get started → Sign-in method → Anonymous**, switch it on, then **Save**. BreakingPar gives each phone an anonymous ID, so nobody needs an account or a password.
 4. **Create the database.** Go to **Build → Firestore Database → Create database**.
    - Choose **Production mode**.
    - Choose a location near you, e.g. `australia-southeast1` (Sydney).
@@ -44,6 +50,17 @@ service cloud.firestore {
         allow read, create, update: if member(g);
         allow delete: if member(g) && resource.data.owner == request.auth.uid;
       }
+      match /kudos/{id} {
+        allow read: if member(g);
+        allow create: if member(g) && request.resource.data.from_uid == request.auth.uid && id == request.resource.data.score_id + '_' + request.auth.uid && request.resource.data.size() <= 8;
+        allow delete: if member(g) && resource.data.from_uid == request.auth.uid;
+      }
+      match /duels/{id} {
+        allow read: if member(g);
+        allow create: if member(g) && request.resource.data.from_uid == request.auth.uid && request.resource.data.size() <= 20;
+        allow update: if member(g) && (resource.data.from_uid == request.auth.uid || resource.data.to_uid == request.auth.uid);
+        allow delete: if member(g) && resource.data.from_uid == request.auth.uid;
+      }
     }
   }
 }
@@ -51,7 +68,7 @@ service cloud.firestore {
 
 6. **Register the app and copy its config.**
    - Tap the **gear → Project settings → General**. Under **Your apps**, tap the **web icon `</>`**.
-   - Register the app as `GolfIQ`. Don't tick Firebase Hosting.
+   - Register the app as `BreakingPar`. Don't tick Firebase Hosting.
    - Firebase shows a `firebaseConfig = { apiKey: "…", projectId: "…", … }` block. Copy the whole block.
    - The web `apiKey` isn't a secret. It only identifies the project, and the rules above are what protect the data.
 7. **Optional but recommended: lock the key to your app's address.**
@@ -59,16 +76,16 @@ service cloud.firestore {
    - Open the **Browser key**.
    - Under **Application restrictions**, choose **Websites** and add `https://williambrewer1-jpg.github.io/*`. Save.
 
-## B. Connect GolfIQ and make a group
+## B. Connect BreakingPar and make a group
 
-1. In GolfIQ, go to **Settings (gear) → Friends**.
+1. In BreakingPar, go to **Settings (gear) → Friends**.
 2. Paste the config block from step A6, enter a nickname, then tap **Save**. The app should say **Firebase connected**. If it says anonymous sign-in failed, check step A3.
 3. Enter a group name (e.g. "Saturday crew") and tap **Create group**.
 4. Tap **Share invite link** and send it to your friends.
 
 ## C. What friends do
 
-1. Open the invite link in Safari, then tap **Share → Add to Home Screen** and open GolfIQ from the new icon.
+1. Open the invite link in Safari, then tap **Share → Add to Home Screen** and open BreakingPar from the new icon.
 2. **Settings → Friends:** paste the invite link into **Got an invite from a friend?**, pick a nickname, then tap **Join group**.
    - Pasting is needed on iPhone because Safari and the home-screen app keep separate storage, so the link opened in Safari doesn't reach the app.
    - On other phones, opening the link may take them straight to the join screen.
@@ -77,9 +94,10 @@ service cloud.firestore {
 ## D. Using it
 
 - **Practice → Leaderboard:** the weekly challenge is the same game for everyone in the group (it changes every Monday). Every score you record in Practice is posted with its handicap level. You'll also find the monthly combine board and all-time bests per game there.
+- **Practice → Leaderboard → Duels:** challenge a friend in your group to one game each (same shots, one attempt each). Pick the game, **Handicap duel** (each of you is measured against your own target, so it is fair at any level) or **Straight duel**, 3, 7 or 14 days to play, and an optional stake (just text, no money). Share the link it offers, or they see it on Home next time they open BreakingPar. You can have three open duels, and one with each friend. If the time runs out and only one of you has played, that player wins; if neither did, it ends quietly. The rules for duels are the same ones as for kudos (see the update note at the top): no new rules change in this update.
 - **Play → start a round → Playing partners & side games:**
   - Add up to three partners with their handicap indexes and tick the games: Stableford, skins, match play / Nassau, best ball.
-  - With **Share live** ticked, friends with GolfIQ can open **Play → Join a friend's round**, tap their name and enter their own scores.
+  - With **Share live** ticked, friends with BreakingPar can open **Play → Join a friend's round**, tap their name and enter their own scores.
   - Everyone's standings update about every 20 seconds, or straight away with **Sync now**.
   - Without a signal, keep scoring; it syncs when you're back online.
 - **Leave a group:** Settings → Friends → Leave. Your posted scores stay on the board.

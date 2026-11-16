@@ -1,6 +1,8 @@
 """Browser test for sessions and the daily challenge (phase 5). Run: python3 tests/e2e_sessions.py"""
 import http.server, threading, functools, sys, os, re
 from playwright.sync_api import sync_playwright
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from play_helpers import go_next
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a, **k): pass
@@ -25,7 +27,7 @@ with sync_playwright() as p:
     pg.goto(URL); pg.wait_for_selector('#loadSample'); pg.click('#loadSample'); pg.wait_for_timeout(1500)
     pg.goto(URL + '#home'); pg.reload(); pg.wait_for_selector('.gp-daily')
     home = pg.inner_text('.gp-daily')
-    check("Home shows today's challenge with a Play button and a streak", "Today's challenge" in home and 'streak' in home and pg.query_selector('.gp-daily [data-gpdaily]') is not None, home)
+    check("Home shows today's challenge with a Play button and the streak in weeks", "Today's challenge" in home and re.search(r'no streak yet|weeks? in a row', pg.get_attribute('.gp-daily #gpDFlame', 'aria-label')) is not None and 'day' not in home.lower().replace('today', '') and pg.query_selector('.gp-daily [data-gpdaily]') is not None, home)
     check('challenge shows a target', 'Target' in home, home)
     gid = pg.get_attribute('.gp-daily', 'data-daily')
     pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games'}))"); pg.goto(URL + '#practice'); pg.reload(); pg.wait_for_selector('[data-gpses]')
@@ -36,7 +38,7 @@ with sync_playwright() as p:
     d = pg.evaluate("() => { const j = window.__golfiq.state.journal, t = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10); const id = (j.daily || {})[t]; const r = j.results.find(x => x.id === id); return { id, game: r && r.game, ch: r && r.challenge }; }")
     check('finishing the daily challenge records it', d['id'] and d['game'] == gid and d['ch'] == 'daily', d)
     pg.click('[data-gpdone]'); pg.wait_for_selector('.gp-daily')
-    check('card says done today and streak is 1', 'done today' in pg.inner_text('.gp-daily') and '1-day streak' in pg.inner_text('.gp-daily'), pg.inner_text('.gp-daily'))
+    check('card says done today, with a tick, and the streak is 1 week', 'done today' in pg.inner_text('.gp-daily') and pg.get_attribute('.gp-daily #gpDFlame', 'aria-label') == '1 week in a row' and pg.query_selector('.gp-daily.done .gp-dtick svg') is not None, pg.inner_text('.gp-daily'))
     check('Play button is gone once done', pg.query_selector('.gp-daily [data-gpdaily]') is None)
     # sessions
     n0 = pg.evaluate("() => window.__golfiq.state.journal.sessions.length")
@@ -44,11 +46,11 @@ with sync_playwright() as p:
     ran = []
     for i in range(3):
         ran.append(pg.evaluate("() => window.__golfiq.state.journal.game_draft.game")); play_out(pg)
-        if i < 2: check(f'game {i + 1}: result offers the next game in the session', pg.query_selector('[data-gpsesnext]') is not None and f'game {i + 1} of 3' in pg.inner_text('.gp-res'), pg.inner_text('.gp-res')[-120:]); pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
+        if i < 2: check(f'game {i + 1}: result offers the next game in the session', pg.query_selector('[data-gpsesnext]') is not None and f'game {i + 1} of 3' in pg.inner_text('.gp-res'), pg.inner_text('.gp-res')[-120:]); go_next(pg)
     check('a 45-minute session runs three different games', len(set(ran)) == 3, ran)
     check('the last result offers Finish session', pg.query_selector('[data-gpsesend]') is not None)
     pg.click('[data-gpsesend]'); pg.wait_for_selector('text=Session done')
-    sm = pg.inner_text('.gp-res'); check('summary shows scores, targets hit, potential and streak', 'Session done' in sm and 'targets hit' in sm and 'streak' in sm.lower() and 'Potential' in sm, sm)
+    sm = pg.inner_text('.gp-res'); check('summary shows scores, targets hit, potential and streak', 'Session done' in sm and 'targets hit' in sm and 'streak' in sm.lower() and 'potential' in sm.lower(), sm)
     s = pg.evaluate("() => { const j = window.__golfiq.state.journal, s = j.sessions[j.sessions.length - 1]; return { n: j.sessions.length, results: s.results.length, ok: s.results.every(id => j.results.find(r => r.id === id && r.session_id === s.id)), run: j.session_run, guided: s.guided, min: s.minutes }; }")
     check('a session is logged with a session_id on each result', s['n'] == n0 + 1 and s['results'] == 3 and s['ok'] and s['run'] is None and s['guided'], s)
     pg.screenshot(path='/tmp/session_summary.png')
@@ -57,7 +59,7 @@ with sync_playwright() as p:
     check('the session shows in the practice log', True)
     # 30-minute session, quit part-way: finished games are kept, no half session
     pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games'}))"); pg.reload(); pg.wait_for_selector('[data-gpses]')
-    pg.click('[data-gpses="30"]'); pg.wait_for_selector('#gpRoot .gp-prompt'); play_out(pg); pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
+    pg.click('[data-gpses="30"]'); pg.wait_for_selector('#gpRoot .gp-prompt'); play_out(pg); go_next(pg)
     pg.once('dialog', lambda d: d.accept()); pg.click('[data-gpquit]'); pg.wait_for_timeout(400)
     q = pg.evaluate("() => { const j = window.__golfiq.state.journal; return { run: j.session_run, draft: j.game_draft }; }")
     check('quitting mid-session clears the draft and the session', q['run'] is None and q['draft'] is None, q)

@@ -152,6 +152,9 @@ export function countUp(el, from, to, ms = 600, fmt) {
 export const CONFETTI = { count: 70, ms: 1200, gravity: 900, fallback: ['#0b6b47', '#f2cf4a', '#c9a43a', '#f3efe3'] };
 const lum = (c) => { const m = /^#([0-9a-f]{6})$/i.exec(c || ''); if (!m) return null; const n = parseInt(m[1], 16); return 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255); };
 // green, gold and cream from the current theme's own tokens; cream is whichever of --bg and --ink is the lighter, so it works in light and dark
+// The confetti look the golfer chose in the Locker: 'classic' (green, gold, cream), 'gold' (gold only) or 'flags' (small pennants in the classic colours)
+let LOOK = 'classic';
+export const setLook = (l) => { LOOK = ['classic', 'gold', 'flags'].includes(l) ? l : 'classic'; };
 export function palette() {
   const cs = G.getComputedStyle?.(G.document.documentElement), v = (n) => (cs?.getPropertyValue(n) || '').trim();
   const bg = v('--bg'), ink = v('--ink'), cream = (lum(bg) ?? -1) >= (lum(ink) ?? -1) ? bg : ink;
@@ -165,7 +168,7 @@ export function confetti(canvas, opts = {}) {
   try {
     const dpr = Math.min(2, G.devicePixelRatio || 1), r = canvas.getBoundingClientRect(), w = Math.max(1, Math.round(r.width)), h = Math.max(1, Math.round(r.height));
     canvas.width = w * dpr; canvas.height = h * dpr; const x = canvas.getContext('2d'); x.scale(dpr, dpr);
-    const pick = palette();
+    const base = palette(), pick = LOOK === 'gold' ? [base[1], base[2], base[1], base[2]] : base, flags = LOOK === 'flags';
     const ms = opts.ms || CONFETTI.ms, n = opts.count || CONFETTI.count, ox = opts.x ?? w / 2, oy = opts.y ?? h * 0.35;
     const ps = Array.from({ length: n }, (_, i) => { const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = 260 + Math.random() * 380; return { x: ox, y: oy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, w: 5 + Math.random() * 5, h: 3 + Math.random() * 4, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 12, c: pick[i % pick.length] }; });
     let t0 = null, last = null;
@@ -175,7 +178,7 @@ export function confetti(canvas, opts = {}) {
       x.clearRect(0, 0, w, h);
       if (age >= ms) return;
       x.globalAlpha = Math.max(0, Math.min(1, (ms - age) / 400));                           // fade out over the last 400 ms
-      for (const p of ps) { p.vy += CONFETTI.gravity * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.99; p.rot += p.vr * dt; x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.fillStyle = p.c; x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }
+      for (const p of ps) { p.vy += CONFETTI.gravity * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.99; p.rot += p.vr * dt; x.save(); x.translate(p.x, p.y); x.rotate(p.rot); x.fillStyle = p.c; if (flags) { x.fillRect(-1, -p.h - 3, 2, p.h * 2 + 6); x.beginPath(); x.moveTo(1, -p.h - 3); x.lineTo(p.w + 5, -p.h / 2 - 1); x.lineTo(1, 2); x.closePath(); x.fill(); } else x.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); x.restore(); }
       G.requestAnimationFrame(frame);
     };
     G.requestAnimationFrame(frame);
@@ -239,6 +242,44 @@ export const COPY = {
     cardTitle: 'Beat the prediction', cardNote: 'Your prediction is your own typical score on the course. Beating it earns points, and missing it costs nothing.',
     short: (n) => `You need ${n} more rounds with a score before BreakingPar can predict.`,
   },
+  locker: {
+    title: 'Locker', intro: 'Things you earn by practising and playing. Nothing is bought, and nothing is ever taken away.', use: 'Use', using: 'In use', open: 'Open Locker',
+    kinds: { wallpaper: 'Lock-screen themes', skin: 'App colours', badge: 'Badge style', confetti: 'Confetti' },
+    unlocked: (name) => `Unlocked: ${name}`, tryIt: 'Try it', later: 'Not now', progress: (a, b) => `${a} of ${b}`, count: (a, b) => `${a} of ${b} unlocked`,
+    wpNote: 'More themes are in the Locker.', chosen: (name) => `${name} on`,
+  },
+  kudos: {
+    kinds: { clap: 'Clap', fire: 'Fire', flag: 'Flag' }, give: (k, nick) => `${k} ${nick}'s score`, take: (k) => `Take back your ${k}`, own: (n) => `${n} reaction${n === 1 ? '' : 's'} on your score`,
+    notice: (w, game, score) => `${(w?.who || []).join(' and ')}${w?.others ? ` and ${w.others} other${w.others === 1 ? '' : 's'}` : ''} reacted to your ${game || 'score'}${score !== null && score !== undefined ? ` ${score}` : ''}`,
+    recentTitle: 'Friends\' recent scores', recentNone: 'No scores from your group yet this week.', dismiss: 'Dismiss',
+    unavailable: 'Kudos need updated Firestore rules. The group owner can republish them from Settings → Friends (the rules are there to copy).',
+    rulesNote: (v) => `Rules version ${v}: adds kudos and duels. If your group was set up earlier, paste these rules into Firebase → Firestore Database → Rules and tap Publish, once. Until then kudos stay hidden and everything else works as before.`,
+    failed: (m) => `Could not send that: ${m}`,
+  },
+  duels: {
+    title: 'Duels', intro: 'One game each, the same shots, one attempt each. Challenge a friend in your group.',
+    challenge: 'Challenge', challengeFriend: 'Challenge a friend', send: 'Send challenge', cancel: 'Cancel', friend: 'Friend', game: 'Game', scoring: 'Scoring', time: 'Time to play', stake: 'Stake (optional)', stakeHint: 'e.g. Loser buys the coffees',
+    stakeNote: 'Only a line of text on the screen. No money is involved.', pressure: 'Pressure finish for both of you',
+    modes: { handicap: 'Handicap duel', straight: 'Straight duel' },
+    modeNote: { handicap: 'Each of you is measured against your own target for the game. Whoever beats theirs by more wins, so it is fair at any level.', straight: 'The better raw score wins.' },
+    days: (n) => `${n} days`, left: (n) => (n <= 0 ? 'last day' : n === 1 ? '1 day left' : `${n} days left`),
+    noFriends: 'Nobody else is in your group yet. Share the invite link from Settings → Friends.',
+    limit: 'You already have three open duels. Wait for one to finish.', pair: (n) => `You already have an open duel with ${n}.`, theirLimit: (n) => `${n} already has three open duels.`,
+    sent: (n) => `Challenge sent to ${n}`, shareTitle: 'A BreakingPar duel', shareText: (g) => `I challenge you to a ${g} duel on BreakingPar.`, copied: 'Duel link copied', failed: (m) => `Could not do that: ${m}`,
+    unavailable: 'Duels need updated Firestore rules. The group owner can republish them from Settings → Friends (the rules are there to copy).',
+    loading: 'Loading…', none: 'No duels yet. Tap Challenge on a friend, or here.', record: (t) => `Duels ${t}`, recordLine: (nick, t) => `${nick}: ${t}`, recordsTitle: 'Your record (won–drawn–lost)',
+    incomingTitle: 'Challenges for you', turnTitle: 'Your turn', waitTitle: 'Waiting', doneTitle: 'Finished',
+    challenges: (nick) => `${nick} challenges you`, accept: 'Accept', decline: 'Decline', accepted: 'Accepted. Play whenever you are ready.', declined: 'Declined', play: 'Play your attempt', view: 'Show result',
+    start: 'One attempt only. Once the game starts, quitting uses it up. Start now?', quit: 'Stop this duel? Your one attempt is used up, and the duel goes to your friend.',
+    cannotPlay: 'That duel is not open for you any more.', needOnline: (m) => `A duel needs a connection to start: ${m}`,
+    waitOpen: (nick) => `Waiting for ${nick} to accept`, waitPlay: (nick) => `Waiting for ${nick} to play`, mineSaved: 'Your score is in.', share: 'Send the link again',
+    unsent: 'Your score is saved here. It goes to your friend the next time you open Duels.',
+    scoreRow: 'Score', targetRow: 'Own target', marginRow: 'Beat target by', you: 'You',
+    win: (nick) => `You beat ${nick}`, lose: (nick) => `${nick} takes this one`, draw: (nick) => `A draw with ${nick}`,
+    forfeitWin: (nick) => `${nick} did not play in time. The duel is yours.`, forfeitLose: (nick) => `Time ran out before you played. ${nick} takes it.`,
+    stakeLine: (s) => `Stake: ${s}`, rematch: 'Rematch', rematchSent: (n) => `Rematch sent to ${n}`, waitingNote: (nick, date) => `${nick} has until ${date} to play. The result shows here once they have.`,
+    expired: 'Ended with nobody playing', byForfeit: 'by forfeit', modeShort: { handicap: 'handicap', straight: 'straight' },
+  },
   boss: {
     kicker: 'Boss game', target: (s) => `Boss target ${s}`, pips: (h, p) => `${h} of ${p} games at the milestone score`, hit: 'At the milestone score', shortBy: (n) => `${n} short`,
     beat: (n, s, lower) => `Boss level for ${n === 0 ? 'scratch' : `the ${n}`}: ${s}${lower ? ' or fewer' : '+'}.`,
@@ -272,6 +313,9 @@ export const COPY = {
   tier: (name) => `${name} tier`,
   next: 'Up next',
   progress: (i, n) => `${i} of ${n} done`,
+  daily: { title: "Today's challenge", streak: (n) => (n ? `${n} ${n === 1 ? 'week' : 'weeks'} in a row` : 'no streak yet'), play: "Play today's challenge", doneTag: 'Done', doneLine: 'done today' },
+  session: { name: 'Session', test: 'Skills test', start: (name) => `Start ${name}`, finish: 'Finish session', finishTest: 'Finish test', done: 'Session done', testDone: 'Skills test done', hit: 'targets hit', first: 'This is your first test, so there is nothing to compare with yet.',
+    better: (n, t) => `${n} of ${t} ${t === 1 ? 'skill' : 'skills'} better than last test`, rated: (n) => `${n} ${n === 1 ? 'skill' : 'skills'} rated`, potential: 'Potential now' },
   sound: { on: 'Sound on', off: 'Sound off' },
   settings: {
     title: 'Sound and motion',

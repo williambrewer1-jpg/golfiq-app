@@ -1,4 +1,4 @@
-// GolfIQ for iPhone — UI. All data lives in this browser's on-device storage (store.js).
+// BreakingPar for iPhone — UI. All data lives in this browser's on-device storage (store.js).
 import * as A from './analytics.js';
 import * as F from './features.js';
 import * as B from './bench.js';
@@ -27,6 +27,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fmt = (v, d = 1, u = '') => (A.isNum(v) ? (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(d)) + u : '–');
 const sgn = (v, d = 2) => (A.isNum(v) ? (v > 0 ? '+' : '') + v.toFixed(d) : '–');
 const note = (t) => `<p class="note">ⓘ ${t}</p>`;
+// 2026-11-24 → 24 Nov 26 (shorter and easier to scan than an ISO date)
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dshort = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1].slice(2)}` : esc(d ?? '–'); };
 function toast(t, ms = 3500) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => { e.style.display = 'none'; }, ms); }
 function table(rows, cols, opts = {}) {
   if (!rows?.length) return `<p class="muted small">${opts.empty || 'No data'}</p>`;
@@ -92,13 +95,13 @@ function loadPlotly() {
   if (!plotlyP) plotlyP = new Promise((res, rej) => { const s = document.createElement('script'); s.src = PLOTLY_URL; s.onload = res; s.onerror = () => { plotlyP = null; s.remove(); rej(new Error('Plotly could not load')); }; document.head.appendChild(s); });
   return plotlyP;
 }
-const plotNote = (list, html) => { for (const [id] of list) { const e = document.getElementById(id); if (e) e.innerHTML = html; } };
+const plotNote = (list, html, off = false) => { for (const [id] of list) { const e = document.getElementById(id); if (e) { e.classList.toggle('off', off); e.innerHTML = html; } } };
 function drawPlots() {
   if (!plots.length) return;
   const list = plots, gen = renderGen;
   if (window.Plotly) { paintPlots(list); return; }
   plotNote(list, '<p class="muted small">Loading chart…</p>');
-  loadPlotly().then(() => { if (gen === renderGen) paintPlots(list); }).catch(() => { if (gen === renderGen) plotNote(list, '<p class="muted small">Charts load when online the first time.</p>'); });
+  loadPlotly().then(() => { if (gen === renderGen) paintPlots(list); }).catch(() => { if (gen === renderGen) plotNote(list, '<p class="muted small">Charts load when online the first time.</p>', true); });
 }
 // every Plotly chart is locked (no drag-zoom, no double-tap, no scroll-zoom); only the course map keeps its own pan and zoom
 function paintPlots(list) {
@@ -161,7 +164,7 @@ function demoBanner() {
   const real = state.bundles.length - n;
   return `<div class="warn"><b>Demo data is loaded:</b> ${n} synthetic rounds${real ? ` are mixed in with your ${real} Garmin rounds` : ''}, plus demo clubs and a demo handicap history. <br><button class="btn" data-removedemo>Remove demo data</button><br><span class="small">Keeps your Garmin rounds, your own edits and your cloud-sync settings.</span></div>`;
 }
-const emptyMsg = () => `<div class="card"><h2>Welcome to GolfIQ</h2><p>Your golf, measured. Everything you add stays on this phone.</p>
+const emptyMsg = () => `<div class="card"><h2>Welcome to BreakingPar</h2><p>Your golf, measured. Everything you add stays on this phone.</p>
   <p><a class="btn" href="#play">Play a round &amp; keep score</a></p>
   <p class="small">Have a Garmin watch? Bring in your full shot history on the <a href="#data">Data</a> page (automatic sync or a one-tap export) – setup steps are under <a href="#help">Help</a>.</p>
   <p><button class="btn sec" id="loadSample">Explore with demo data</button></p></div>`;
@@ -197,7 +200,7 @@ function holeChart(ha) {
 }
 // ------------------------------------------------------------------ pages
 const PAGES = {
-  home: ['GolfIQ', 'home'], stats: ['Stats', 'chart'], rounds: ['Rounds', 'list'],
+  home: ['BreakingPar', 'home'], stats: ['Stats', 'chart'], rounds: ['Rounds', 'list'],
   data: ['Data & sync', 'cloud'], corrections: ['Corrections log', 'pencil'], settings: ['Settings', 'gear'], help: ['Help & setup', 'help'],
 };
 const NAV = [['home', 'Home'], ['play', 'Play'], ['rounds', 'Rounds'], ['stats', 'Stats'], ['practice', 'Practice']];
@@ -240,13 +243,15 @@ function pageHome() {
   return `${demoBanner()}
   ${d ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(d.course_name)} · hole ${d.hole}</b><em>Continue ›</em></a>`
     : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
-  <div class="kpis">${kpi('GolfIQ index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
+  <div class="kpis">${kpi('BreakingPar index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
   ${PROG.levelRow()}
+  ${COMP ? COMP.kuHome() : ''}
+  ${COMP ? COMP.duHome() : ''}
   ${PROG.homeCard()}
   ${PROG.journeyHome()}
   ${PROG.homePayoff()}
   ${GUIDED.homeCard()}
-  ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
+  ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${dshort(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
   ${r18.length ? `<div class="card"><h2>Form <span class="small muted">last 5 rounds vs earlier</span></h2><div class="kpis">${t('stableford_round')}${t('differential')}${t('gir_pct', 0, '%')}${t('fw_pct', 0, '%')}${t('putts_round')}${t('penalties')}</div>
@@ -504,7 +509,7 @@ function pageRounds() {
   const cmp = ra && rb ? ms.map((m) => ({ m: A.METRICS[m]?.[0] || m, a: ra[m], b: rb[m], d: A.isNum(ra[m]) && A.isNum(rb[m]) ? rb[m] - ra[m] : null })) : [];
   const ha = ds.holes.filter((h) => h.round_id === a), hb = ds.holes.filter((h) => h.round_id === b);
   const short = (x) => `${x.date} · ${x.course_name || ''} (${x.gross ?? '–'})`;
-  return `${filterSummary(ds)}<div class="card"><h2>Round history <span class="small muted">(tap a round)</span></h2>${table(r, [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['fw_pct', 'FW', p0], ['putts_round', 'Putts', n0], ['penalties', 'Pen', n0], ['chain_coverage', 'Shot chain', (v) => fmt(v * 100, 0, '%')]], { click: true, id: 'roundsTbl' })}</div>
+  return `${filterSummary(ds)}<div class="card"><h2>Round history <span class="small muted">(tap a round)</span></h2>${table(r, [['date', 'Date', dshort], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['course_name', 'Course'], ['format', 'Holes'], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['fw_pct', 'FW', p0], ['putts_round', 'Putts', n0], ['penalties', 'Pen', n0], ['chain_coverage', 'Shot chain', (v) => fmt(v * 100, 0, '%')]], { click: true, id: 'roundsTbl' })}</div>
   <div class="card"><h2>Compare two rounds</h2>${select('cmp_a', r.map((x) => [x.round_id, short(x)]), a, 'Round A')}${select('cmp_b', r.map((x) => [x.round_id, short(x)]), b, 'Round B')}
   ${table(cmp, [['m', 'Metric'], ['a', 'A', n1], ['b', 'B', n1], ['d', 'B − A', (v) => sgn(v, 1)]])}
   <h3>To par by hole</h3>${compareHoles(ha, hb)}
@@ -544,7 +549,7 @@ function pageData() {
   return `${demoBanner()}<div class="card"><h2>Cloud sync</h2>${sc.owner ? `<p class="small">Repo <b>${esc(sc.owner)}/${esc(sc.repo)}</b> · last sync ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleString() : 'never')}</p>` : '<p class="small">Not set up – see Settings → Cloud sync and Help.</p>'}
   ${job ? `<div class="${job.status === 'ok' ? 'ok' : 'warn'}">Garmin sync job: <b>${esc(job.status)}</b> at ${esc(job.finished_at || '?')}${job.message ? `<br>${esc(job.message)}` : ''}</div>` : ''}
   <button class="btn" id="syncNow" ${sc.owner ? '' : 'disabled'}>Sync now</button><span id="syncMsg" class="small"></span></div>
-  <div class="card"><h2>Import a file</h2><p class="small">Garmin export from the bookmarklet, raw round JSON, or a desktop GolfIQ export. Re-importing is safe: unchanged rounds are skipped, nothing is duplicated.</p>
+  <div class="card"><h2>Import a file</h2><p class="small">Garmin export from the bookmarklet, raw round JSON, or a desktop BreakingPar export. Re-importing is safe: unchanged rounds are skipped, nothing is duplicated.</p>
   <input type="file" id="impFile" accept=".json,application/json" multiple><div id="impMsg" class="small"></div><p class="small"><a href="#help">How to export from Garmin on this phone →</a></p></div>
   <div class="card"><h2>Import history</h2>${table(log.slice(0, 12), [['ts', 'When', (v) => esc(new Date(v).toLocaleString())], ['source', 'Source'], ['new', 'New', n0], ['updated', 'Upd', n0], ['unchanged', 'Same', n0], ['failed', 'Failed', n0]], { empty: 'No imports yet.' })}
   ${log.some((l) => l.errors?.length) ? `<details><summary>Errors</summary><pre class="small" style="white-space:pre-wrap">${esc(log.flatMap((l) => l.errors || []).slice(0, 30).join('\n'))}</pre></details>` : ''}</div>
@@ -608,7 +613,7 @@ function pageEdit(embed = false) {
 }
 
 function pageSettings() {
-  const tab = segVal('st_tab', 'clubs'), st = state.settings;
+  const tab = segVal('st_tab', 'general'), st = state.settings;
   let body = '';
   if (tab === 'clubs') {
     const clubs = DS.clubs;
@@ -617,7 +622,7 @@ function pageSettings() {
       <div class="row"><div><label class="f">Target carry ${UNIT}</label><input name="target_carry_m" type="number" value="${inputVal(c.target_carry_m, 0)}"></div><div><label class="f">Your total ${UNIT} <span class="muted">(Play → Caddie: use it instead of GPS)</span></label><input name="target_total_m" type="number" value="${inputVal(c.target_total_m, 0)}"></div><div><label class="f">Order</label><input name="sort_order" type="number" value="${c.sort_order ?? ''}"></div></div>
       <label><input type="checkbox" name="active" ${c.active === 0 ? '' : 'checked'}> In bag</label></div>`).join('')}<p><button class="btn">Save clubs</button></p></form>
       <h3>Add a club</h3><form id="addClub" class="row"><div><input name="name" placeholder="Name"></div><div><select name="category">${['driver', 'wood', 'hybrid', 'iron', 'wedge', 'putter', 'other'].map((x) => `<option>${x}</option>`).join('')}</select></div><div><button class="btn">Add</button></div></form>
-      ${note('Garmin exports a club type, not your label – rename to match your bag. Targets are your own numbers; GolfIQ never measures carry. To fix one shot\'s club use Rounds → a round → Edit → Shots.')}`;
+      ${note('Garmin exports a club type, not your label – rename to match your bag. Targets are your own numbers; BreakingPar never measures carry. To fix one shot\'s club use Rounds → a round → Edit → Shots.')}`;
   } else if (tab === 'courses') {
     const courses = Object.entries(DS.base.courses), cid = segVal('st_course', courses[0]?.[0]);
     const tees = Object.values(DS.base.tees).filter((t) => t.course_id === cid);
@@ -649,17 +654,17 @@ function pageSettings() {
     <label class="sw"><input type="checkbox" id="feelMotion" ${fl.motion ? 'checked' : ''}><span><b>${FC.motion}</b><small>${FC.motionNote}</small></span></label>
     <p style="margin:6px 0 0"><button type="button" class="btn sec" id="feelTry">${FC.try}</button> <span class="small muted" id="feelTryOut" aria-live="polite"></span></p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${unitsCard}${rangeCard}${feelCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : `<div class="card">${body}</div>`}`;
+  return `${demoBanner()}${links}${seg('st_tab', [['general', 'General'], ['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'general', 'scroll')}${tab === 'general' ? `${unitsCard}${rangeCard}${feelCard}` : tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
-  return `<div class="card"><h2>Share GolfIQ</h2><p class="small">Send the app to a friend. They get their own empty copy – your rounds stay on your phone and they never see them. Without a Garmin watch they can keep score on the Play page; with one they can follow the same setup you did.</p>
+  return `<div class="card"><h2>Share BreakingPar</h2><p class="small">Send the app to a friend. They get their own empty copy – your rounds stay on your phone and they never see them. Without a Garmin watch they can keep score on the Play page; with one they can follow the same setup you did.</p>
   <button class="btn" id="shareApp">${icon('share', 18)} Share the app</button></div>
-  <div class="card"><h2>1 · Keep it on your home screen</h2><p>In Safari tap Share → <b>Add to Home Screen</b> and always open GolfIQ from that icon. Home-screen apps keep their data (Safari can clear site data for pages you don't visit). Save a backup (Data page) to iCloud Drive now and then.</p></div>
+  <div class="card"><h2>1 · Keep it on your home screen</h2><p>In Safari tap Share → <b>Add to Home Screen</b> and always open BreakingPar from that icon. Home-screen apps keep their data (Safari can clear site data for pages you don't visit). Save a backup (Data page) to iCloud Drive now and then.</p></div>
   <div class="card"><h2>2 · Get your Garmin data in</h2><h3>Option A – automatic cloud sync (recommended)</h3><p class="small">A scheduled GitHub job logs in to Garmin with your credentials (stored as encrypted GitHub secrets, not in this app), downloads new rounds to your private repo, and this app pulls them with <b>Sync now</b>. Full steps: <code>iphone/SETUP_IPHONE.md</code>.</p>
-  <h3>Option B – export bookmarklet (no setup)</h3><ol class="small"><li>Tap <b>Copy bookmarklet</b> below.</li><li>In Safari, bookmark any page (Share → Add Bookmark), name it <b>GolfIQ export</b>.</li><li>Open Bookmarks → Edit → tap <b>GolfIQ export</b> → replace the address with the copied text → Done.</li><li>Sign in at <b>connect.garmin.com</b> in Safari (use “Request Desktop Website” if it pushes you to the app), then open Bookmarks → <b>GolfIQ export</b>.</li><li>Choose how many recent rounds (blank = all), wait, tap <b>Save file</b> → Save to Files.</li><li>Come back here → Data → <b>Import a file</b>.</li></ol>
+  <h3>Option B – export bookmarklet (no setup)</h3><ol class="small"><li>Tap <b>Copy bookmarklet</b> below.</li><li>In Safari, bookmark any page (Share → Add Bookmark), name it <b>BreakingPar export</b>.</li><li>Open Bookmarks → Edit → tap <b>BreakingPar export</b> → replace the address with the copied text → Done.</li><li>Sign in at <b>connect.garmin.com</b> in Safari (use “Request Desktop Website” if it pushes you to the app), then open Bookmarks → <b>BreakingPar export</b>.</li><li>Choose how many recent rounds (blank = all), wait, tap <b>Save file</b> → Save to Files.</li><li>Come back here → Data → <b>Import a file</b>.</li></ol>
   <button class="btn" id="copyBm">Copy bookmarklet</button><details><summary class="small">What the bookmarklet does (readable source)</summary><p class="small">Runs only on connect.garmin.com in your signed-in session; reads your scorecards, shots and club list from Garmin's own golf endpoints; builds one JSON file and offers it to save. It sends nothing anywhere else and never sees your password.</p><textarea rows="12" readonly>${esc(BOOKMARKLET_SRC)}</textarea></details></div>
-  <div class="card"><h2>Coaching with Claude</h2><p class="small">Practice → Coach notes → <b>Copy briefing for Claude</b> puts your stats, club distances, wedge matrix, practice scores and recent notes on the clipboard. Paste it into a chat with Claude along with your question. Claude's reply ends with a note in GolfIQ's format – copy the reply, then tap <b>Paste note from Claude</b> and the dated feedback, feels and drills are saved in the app.</p>
+  <div class="card"><h2>Coaching with Claude</h2><p class="small">Practice → Coach notes → <b>Copy briefing for Claude</b> puts your stats, club distances, wedge matrix, practice scores and recent notes on the clipboard. Paste it into a chat with Claude along with your question. Claude's reply ends with a note in BreakingPar's format – copy the reply, then tap <b>Paste note from Claude</b> and the dated feedback, feels and drills are saved in the app.</p>
   <p class="small">Practice → Games, Wedges and Log are for the range; Practice → Swing thoughts holds up to five cues. Your bag (distances, dispersion, wedge matrix) is under Stats → Bag.</p></div>
   <div class="card"><h2>3 · First-time tidy-up</h2><ol class="small"><li>Settings → Clubs: rename to your bag, set categories and optional targets.</li><li>Settings → Handicap: add your index (and past values for accurate historic Stableford).</li><li>Settings → Courses: fill missing rating/slope/stroke index (see Data → completeness).</li></ol></div>
   <div class="card"><h2>How numbers are calculated</h2><ul class="small"><li><b>Distances</b> are GPS total (start → finish), never carry.</li><li><b>Stableford</b> is reconstructed: WHS course handicap = HI × Slope/113 + (CR − Par); playing handicap 95%; strokes by stroke index.</li><li><b>Differential</b> = 113/Slope × (adjusted gross − CR), net double bogey cap.</li><li><b>GIR</b> = strokes − putts ≤ par − 2. Rounds showing 2 putts on every hole are treated as unrecorded until confirmed.</li><li><b>Strokes gained</b> only on holes with a complete shot chain; default baseline is your own average; PGA Tour is reference only.</li><li><b>Coaching</b> targets are the level you already reach in your best 25% of rounds.</li><li>Small samples are flagged: clubs need 8 stock shots (20 = reliable), dispersion 10 (20 for 90%).</li></ul><p class="small muted">Full methodology: docs/METHODOLOGY.md in the project.</p></div>`;
@@ -710,7 +715,7 @@ function render() {
   try { html = (!DS.rounds.length && !['data', 'settings', 'help', 'corrections', ...EXTRA.noData].includes(key)) ? emptyMsg() : RENDER[key](); }
   catch (e) { console.error(e); html = `<div class="err">Something went wrong on this page: ${esc(e.message)}</div>`; }
   $('#main').innerHTML = html;
-  drawPlots(); CHT.wireCharts($('#main')); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm(); PROG?.afterRender();
+  drawPlots(); CHT.wireCharts($('#main')); wire(key); EXTRA.wire[key]?.(); [...new Set(SUBWIRE)].filter((k) => k !== key).forEach((k) => EXTRA.wire[k]?.()); EXTRA.wireOsm(); PROG?.afterRender(); COMP?.afterRender?.();
   $$('[data-share]').forEach((b) => b.addEventListener('click', () => EXTRA.shareRound(b.dataset.share)));
   $$('.seg.scroll, .seg.tabs').forEach((g) => { const b = $('button.on', g); if (b) g.scrollLeft = b.offsetLeft - (g.clientWidth - b.offsetWidth) / 2; });
 }
@@ -741,7 +746,7 @@ function wire(page) {
   $$('[data-openround]').forEach((a) => a.addEventListener('click', () => { ui.rd_open = a.dataset.openround; ui.rd_tab = a.dataset.tab || 'card'; saveUi(); }));
   $$('[data-stats]').forEach((a) => a.addEventListener('click', () => { ui.sx_tab = a.dataset.stats; saveUi(); }));
   $$('[data-practice]').forEach((a) => a.addEventListener('click', () => { ui.pr_tab = a.dataset.practice; saveUi(); }));
-  GUIDED?.wire();
+  GUIDED?.wire(); PROG?.tiles();
   on('#syncNow', 'click', async () => {
     const m = $('#syncMsg'); m.textContent = ' Syncing…';
     try { const r = await syncFromGitHub(state, (t) => { m.textContent = ' ' + t; }); rebuild(); toast(`Sync: ${r.new} new, ${r.updated} updated, ${r.unchanged} unchanged${r.failed ? `, ${r.failed} failed` : ''}${r.notesAdded ? `, ${r.notesAdded} coach note(s)` : ''}`); rerender(); }
@@ -754,17 +759,17 @@ function wire(page) {
       for (const f of e.target.files) {
         try {
           const json = JSON.parse(await readFile(f));
-          if (S.classify(json) === 'backup') { if (confirm(`"${f.name}" is a full GolfIQ backup. Replace ALL data on this phone with it?`)) { await S.restoreBackup(state, json); toast('Backup restored'); } continue; }
+          if (S.classify(json) === 'backup') { if (confirm(`"${f.name}" is a full BreakingPar backup. Replace ALL data on this phone with it?`)) { await S.restoreBackup(state, json); toast('Backup restored'); } continue; }
           const r = await S.importJson(state, json, `file: ${f.name}`); for (const k in tot) tot[k] += r[k] || 0;
           if (json.failures?.length) toast(`${json.failures.length} rounds had problems in the Garmin export – see Import history`);
         } catch (err) { m.textContent = `${f.name}: ${err.message}`; }
       }
       rebuild(); toast(`Imported: ${tot.new} new, ${tot.updated} updated, ${tot.unchanged} unchanged, ${tot.failed} failed`); rerender();
     });
-    on('#bkSave', 'click', () => saveFile(`golfiq-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S.backupObject(state))));
+    on('#bkSave', 'click', () => saveFile(`breakingpar-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S.backupObject(state))));
     on('#bkLoad', 'change', async (e) => {
       const f = e.target.files[0]; if (!f) return;
-      try { const json = JSON.parse(await readFile(f)); if (S.classify(json) !== 'backup') throw new Error('Not a GolfIQ backup');
+      try { const json = JSON.parse(await readFile(f)); if (S.classify(json) !== 'backup') throw new Error('Not a BreakingPar backup');
         if (!confirm('Replace ALL data on this phone with this backup?')) return; await S.restoreBackup(state, json); rebuild(); toast('Restored'); rerender(); }
       catch (err) { toast(err.message); }
     });
@@ -773,12 +778,12 @@ function wire(page) {
       if (!confirm('Really delete everything?')) return;
       const { owner, repo, branch, path, token } = state.sync || {}; await S.clearAll(); state = await S.loadState(); state.sync = { owner, repo, branch, path, token }; await S.saveSync(state); rebuild(); render();
     });
-    navigator.storage?.persisted?.().then((p) => { const e = $('#persist'); if (e) e.textContent = p ? 'Storage is marked persistent.' : 'Tip: open GolfIQ from the home-screen icon so iOS keeps the data.'; });
+    navigator.storage?.persisted?.().then((p) => { const e = $('#persist'); if (e) e.textContent = p ? 'Storage is marked persistent.' : 'Tip: open BreakingPar from the home-screen icon so iOS keeps the data.'; });
   }
   if (page === 'corrections' || (page === 'rounds' && ui.rd_open && segVal('rd_tab', 'card') === 'edit')) wireEdit();
   if (page === 'settings') wireSettings();
   if (page === 'help') on('#shareApp', 'click', async () => {
-    const url = location.href.split('#')[0], data = { title: 'GolfIQ', text: 'GolfIQ – golf stats, live distances and score keeping. Open in Safari, then Share → Add to Home Screen.', url };
+    const url = location.href.split('#')[0], data = { title: 'BreakingPar', text: 'BreakingPar – golf stats, live distances and score keeping. Open in Safari, then Share → Add to Home Screen.', url };
     if (navigator.share) { try { await navigator.share(data); return; } catch (e) { if (e.name === 'AbortError') return; } }
     try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { prompt('Copy this link:', url); }
   });
@@ -924,7 +929,7 @@ $('#backBtn').addEventListener('click', () => { const k = (location.hash.slice(1
 // bottom bar: Play opens the live round, Rounds goes back to the list (like tapping a tab bar twice on iOS)
 $('#nav').addEventListener('click', (e) => { const h = e.target.closest('a')?.getAttribute('href'); if (h === '#play') ui.pl_tab = 'round'; if (h === '#rounds') ui.rd_open = null; saveUi(); if (h === location.hash) render(); });
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#sheet').classList.remove('open'); });
-addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); return; } scrollTo(0, 0); render(); });
+addEventListener('hashchange', () => { $('#sheet').classList.remove('open'); if (COMP?.handleInvite()) { render(); return; } scrollTo(0, 0); render(); });
 (async () => {
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, P, CHT, css,

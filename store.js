@@ -101,7 +101,7 @@ export async function importJson(state, json, source) {
   if (kind === 'bundles') return mergeBundles(state, json, source);
   if (kind === 'bundle') return mergeBundles(state, [json], source);
   if (kind === 'clubs') { await setClubsBundle(state, json); return { new: 0, updated: 0, unchanged: 0, failed: 0, errors: [], clubs: true }; }
-  throw new Error('Not a Garmin/GolfIQ JSON file');
+  throw new Error('Not a Garmin/BreakingPar JSON file');
 }
 
 // ---------------------------------------------------------------- backup / restore

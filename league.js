@@ -24,7 +24,7 @@ export function league(scores) {
   scores.forEach((s, i) => { if (!s.uid) return; if (!by.has(s.uid)) by.set(s.uid, []); by.get(s.uid).push({ ...s, _i: i }); });
   const rows = [...by].map(([uid, list]) => {
     const used = list.sort((a, b) => String(a.date).localeCompare(String(b.date)) || a._i - b._i).slice(0, LEAGUE.cap);
-    return { uid, nick: used[used.length - 1].nick || 'Golfer', points: used.reduce((t, s) => t + points(s), 0), plays: used.length, hits: used.filter((s) => s.hit === true).length, pressure: used.filter((s) => s.pressure === true).length };
+    return { uid, score_id: used[used.length - 1].id || null, nick: used[used.length - 1].nick || 'Golfer', points: used.reduce((t, s) => t + points(s), 0), plays: used.length, hits: used.filter((s) => s.hit === true).length, pressure: used.filter((s) => s.pressure === true).length };
   });
   rows.sort((a, b) => b.points - a.points || b.hits - a.hits || a.nick.localeCompare(b.nick));
   let rank = 0;

@@ -53,7 +53,7 @@ async function call(cfg, method, url, body) {
   const r = await fetchFn(url, { method, headers: { Authorization: `Bearer ${a.idToken}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   if (r.status === 404 && method === 'GET') return null;
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(r.status === 403 ? 'Not allowed – check the Firestore rules, or rejoin the group.' : `Firebase: ${j?.error?.message || r.status}`);
+  if (!r.ok) { const e = new Error(r.status === 403 ? 'Not allowed – check the Firestore rules, or rejoin the group.' : `Firebase: ${j?.error?.message || r.status}`); e.status = r.status; throw e; }
   return j;
 }
 export async function getDoc(cfg, path) { const j = await call(cfg, 'GET', `${base(cfg)}/${path}`); return j ? docOut(j) : null; }
@@ -99,6 +99,19 @@ export function board(scores, better = 'higher') {
   return [...best.values()].sort((x, y) => (better === 'lower' ? x.score - y.score : y.score - x.score) || x.date.localeCompare(y.date));
 }
 
+// ------------------------------------------------------------------ kudos (kudos.js): one document per person per score; read by ISO week like the scores
+export const kudosWhere = (cfg, code, week) => queryEq(cfg, `groups/${code}`, 'kudos', 'week', week);
+export const giveKudos = (cfg, code, doc) => setDoc(cfg, `groups/${code}/kudos/${doc.score_id}_${doc.from_uid}`, doc);
+export const takeKudos = (cfg, code, scoreId, uid) => deleteDoc(cfg, `groups/${code}/kudos/${scoreId}_${uid}`);
+
+// ------------------------------------------------------------------ duels (duels.js): one document per duel, groups/{g}/duels/{id}
+// The group's duels are read in one go (a group is a handful of friends). If the rules are the old ones the read is refused (403): the app hides duels.
+export const listDuels = (cfg, code) => listDocs(cfg, `groups/${code}/duels`);
+export const createDuel = async (cfg, code, doc) => { const id = newCode(8); await setDoc(cfg, `groups/${code}/duels/${id}`, doc); return id; };
+// write only the named fields of a duel ({ a: {...} } or { status, winner }), so two phones never overwrite each other's attempt
+export const patchDuel = (cfg, code, id, patch) => setDoc(cfg, `groups/${code}/duels/${id}`, patch, Object.keys(patch));
+export const removeDuel = (cfg, code, id) => deleteDoc(cfg, `groups/${code}/duels/${id}`);
+
 // ------------------------------------------------------------------ live side games
 export async function createLive(cfg, code, game) { const id = newCode(6); const a = await signIn(cfg); await setDoc(cfg, `groups/${code}/live/${id}`, { ...game, owner: a.uid, updated: new Date().toISOString() }); return id; }
 export const getLive = (cfg, code, id) => getDoc(cfg, `groups/${code}/live/${id}`);
@@ -118,6 +131,8 @@ export function parseInvite(hash) {
   const m = /join=([A-Za-z0-9+/=]+)/.exec(hash || ''); if (!m) return null;
   try { const j = JSON.parse(decodeURIComponent(escape(atob(m[1])))); return j.k && j.p && j.g ? { apiKey: j.k, projectId: j.p, group: j.g, groupName: j.n || '' } : null; } catch { return null; }
 }
+// RULES_VERSION goes up whenever the rules change, so Settings and SETUP_FRIENDS.md can say what changed. 2 = kudos and duels paths added.
+export const RULES_VERSION = 2;
 export const RULES = `rules_version = '2';
 service cloud.firestore {
   match /databases/{db}/documents {
@@ -140,6 +155,17 @@ service cloud.firestore {
       match /live/{id} {
         allow read, create, update: if member(g);
         allow delete: if member(g) && resource.data.owner == request.auth.uid;
+      }
+      match /kudos/{id} {
+        allow read: if member(g);
+        allow create: if member(g) && request.resource.data.from_uid == request.auth.uid && id == request.resource.data.score_id + '_' + request.auth.uid && request.resource.data.size() <= 8;
+        allow delete: if member(g) && resource.data.from_uid == request.auth.uid;
+      }
+      match /duels/{id} {
+        allow read: if member(g);
+        allow create: if member(g) && request.resource.data.from_uid == request.auth.uid && request.resource.data.size() <= 20;
+        allow update: if member(g) && (resource.data.from_uid == request.auth.uid || resource.data.to_uid == request.auth.uid);
+        allow delete: if member(g) && resource.data.from_uid == request.auth.uid;
       }
     }
   }

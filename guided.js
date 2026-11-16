@@ -39,16 +39,25 @@ export function registerGuided(c) {
     const led = v.plan.ledger.find((x) => x.game === id) || null;
     return { ...(hit || {}), ledger: led, potential: v.fc.ok ? v.fc.potential : null };
   }
+  // A duel is measured against the golfer's own target for the game (duels.js margin): the target for their next handicap step in that skill, as on the game screen.
+  // Distances differ between metres and yards, so if the duel was set in the other unit the same handicap level is looked up in the duel's unit. With no skill level yet, the golfer's
+  // index is used, and failing that DUEL_LEVEL (a named default: an average club golfer).
+  const DUEL_LEVEL = 18;
+  function duelTarget(id, uM) {
+    const inf = info(id); if (Number.isFinite(inf.target) && Math.abs(uM - unitM()) < 1e-9) return inf.target;
+    const v = c.progress.data(), h = Number.isFinite(inf.skill_h) ? inf.skill_h : Number.isFinite(v.jidx) ? v.jidx : DUEL_LEVEL, t = B.expectedFor(id, h, uM);
+    return Number.isFinite(t) ? Math.round(t * 10) / 10 : null;
+  }
   // a welcome-back game is played against the golfer's own median, which the draft carries (retention plan 5.2)
-  const withTarget = (d, inf) => ((d?.welcome_back || d?.boss) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
+  const withTarget = (d, inf) => ((d?.welcome_back || d?.boss || d?.duel) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
   const tierChip = (t) => (t ? `<span class="tier ${t.key}">${esc(t.name)}</span>` : '');
 
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
     seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
-    J().game_draft = G.newDraft(g, { unitM: unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target });
-    c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.saveUi(); await save();
+    J().game_draft = G.newDraft(g, { unitM: opts.unitM || unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.seed ?? opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target, duel: opts.duel || null });
+    c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.ui.session_gap = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
     scrollTo(0, 0);
   }
@@ -119,7 +128,7 @@ export function registerGuided(c) {
     const ball = { d: Math.round(dist), r: result, a: d.premium ? 0 : d.adj || 0 };
     await answer(G.ballValue(ball, d.unitM), ball, btn);
   }
-  async function quit() { if (busy) return; if (!confirm(run()?.kind === 'boss' ? FEEL.COPY.boss.quit(run().results.length) : run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
+  async function quit() { if (busy) return; if (!confirm(draft0()?.duel ? FEEL.COPY.duels.quit : run()?.kind === 'boss' ? FEEL.COPY.boss.quit(run().results.length) : run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
   // a saved result's tier: benchmark games use the handicap table, own-history games judge it against the scores before it
   const tierOf = (g, r) => (G.isOwn(g) ? G.tierFor(g, r.score, unitM(), G.scoresBefore(g, J().results || [], r.id)) : G.tierFor(g, r.score, unitM()));
   async function finish(opts = {}) {
@@ -127,9 +136,9 @@ export function registerGuided(c) {
     const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
     c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
-    c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) };
+    c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) }; if (res.duel) c.compete.duelFinished(res, d.target);       // the duel's final status is worked out on this phone
     // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
-    const show = () => { busy = false; c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0); };
+    const show = () => { busy = false; c.rerender(); scrollTo(0, 0); };   // the result screen itself announces the score and any new tier
     if (opts.delay > 0) later(opts.delay, show); else show();
   }
 
@@ -171,6 +180,7 @@ export function registerGuided(c) {
         <div class="gp-foot"><button class="btn sec" data-gpundo ${i ? '' : 'disabled'}>Undo</button></div></div></div>`;
   }
   function sesButtons(g) {
+    if ((J().results || []).find((x) => x.id === c.ui.game_result?.id)?.duel) return `<div class="row"><button class="btn" data-gpdone>Done</button></div>`;       // a duel is one attempt: no "play again"
     const r = run();
     if (r && r.kind === 'boss' && c.ui.game_result?.session_id === r.id) { const last = r.i + 1 >= r.queue.length, nx = gameOf(r.queue[r.i + 1]);
       return `<div class="row">${last ? `<button class="btn" data-gpsesend>${esc(FEEL.COPY.boss.finish)}</button>` : `<button class="btn" data-gpsesnext>Next: ${esc(nx?.name || '')}</button>`}</div>`; }
@@ -235,7 +245,7 @@ export function registerGuided(c) {
         <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
         ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
         ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
-      <div class="gp-rbody">${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
+      <div class="gp-rbody">${c.compete.duelPanel(r.id)}${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
         <div ${at('gp-rbtn', i)}>${sesButtons(g)}</div>
         ${det ? `<div class="gp-rdet">${det}</div>` : ''}</div></div>`;
   }
@@ -252,8 +262,7 @@ export function registerGuided(c) {
     const pulse = (el, kind) => { el?.classList.remove('fx-rise'); FEEL.pulse(el, kind); };      // the rise has finished by now; one animation at a time
     at(ms(180), () => num && FEEL.countUp(num, 0, to, ms(700), nf));
     at(ms(900), () => {
-      FEEL.play(cel.sound);
-      if (cel.confetti) FEEL.confetti($('#gpConf'));
+      if (!r.duel) { FEEL.play(cel.sound); if (cel.confetti) FEEL.confetti($('#gpConf')); }          // a duel's sound comes with the head-to-head (compete.js)
       if (pts && Number(pts.dataset.to) > 0) { FEEL.countUp(pts, 0, Number(pts.dataset.to), ms(700), (v) => `+${Math.round(v)}`); pulse($('#gpRPtsBox'), 'pop'); }
       if (cel.sound !== 'finish') pulse($('#gpVerdictL'), 'pop');
       if (st && Number(st.dataset.to) > Number(st.dataset.from)) { FEEL.countUp(st, Number(st.dataset.from), Number(st.dataset.to), ms(500)); pulse($('#gpRStreakBox'), 'flame'); }
@@ -293,9 +302,28 @@ export function registerGuided(c) {
       ${c.compete.groupOn() ? `<div id="gpGhost" data-ghostgame="${esc(g.id)}"></div>` : ''}
       <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>`;
   }
-  const screen = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.boss_summary ? bossSummary() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
-  function render() { const e = $('#gpRoot'); if (!e) { c.rerender(); return; } const html = draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.boss_summary ? bossSummary() : c.ui.test_summary ? testSummary() : summaryScreen(); e.outerHTML = html; wire(); }
+  const screenHtml = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.session_gap ? gapScreen() : c.ui.boss_summary ? bossSummary() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
+  const screen = screenHtml;
+  function render() { const e = $('#gpRoot'); if (!e) { c.rerender(); return; } e.outerHTML = screenHtml(); wire(); }
 
+  // ------------------------------------------------------------ the games list: a card per game, with a gold ring for the way to the next tier (plan 5.3)
+  const catIcon = (g) => (g.cat === 'Putting' ? 'putt' : g.cat === 'Chipping' ? 'flag' : g.cat === 'Range' ? 'club' : 'target');
+  const upNextId = () => c.progress.data().plan.ledger.map((x) => x.game).find((x) => canGuide(x)) || null;     // the weakest focus-area game, when there is one
+  function gameCards(entry, sel) {
+    const up = upNextId(), u = unitM(), R = 21, C = 2 * Math.PI * R;
+    const card = (g) => {
+      const tp = G.tierProgress(g, J().results || [], u), lower = g.better === 'lower', best = tp.best;
+      const nxt = tp.next ? `Next: ${esc(tp.next.name)} at ${sc(tp.next.score)}${lower ? ' or fewer' : '+'}` : tp.tier ? 'Top tier' : tp.own && tp.need > 0 ? `Play ${tp.need} more for tiers` : '';
+      const pct = Math.round(tp.p * 100);
+      return `<button type="button" class="gp-card${g.id === sel ? ' sel' : ''}" data-pickgame="${esc(g.id)}" aria-pressed="${g.id === sel}">
+        <span class="gp-ctop"><span class="gp-ring"><svg class="r" viewBox="0 0 48 48" aria-hidden="true"><circle class="t" cx="24" cy="24" r="${R}"/>${tp.p > 0 ? `<circle class="p" cx="24" cy="24" r="${R}" stroke-dasharray="${(C * tp.p).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 24 24)"/>` : ''}</svg>${icon(catIcon(g), 22)}</span>${g.id === up ? `<em class="tag">${esc(FEEL.COPY.next)}</em>` : ''}</span>
+        <span class="gp-cn">${esc(g.name)}</span>
+        <span class="gp-cb">${best === null ? 'Not played yet' : `Best <b>${sc(best)}</b>${g.max ? ` / ${g.max}` : ''}`}</span>
+        ${tp.tier ? `<span class="tier ${tp.tier.key}">${esc(tp.tier.name)}</span>` : ''}${nxt ? `<span class="gp-cx">${nxt}</span>` : ''}
+        ${tp.ladder ? `<span class="gp-sr">${pct} percent of the way to the next tier</span>` : ''}</button>`;
+    };
+    return [...new Set(entry.map((x) => x.cat))].map((cat) => `<div class="gp-cathead">${esc(cat)}</div><div class="gp-cards">${entry.filter((x) => x.cat === cat).map(card).join('')}</div>`).join('');
+  }
 
   // ------------------------------------------------------------ the daily challenge
   const focusGames = () => { const v = c.progress.data(); return v.sk.skills.filter((s) => (v.sk.focus || []).includes(s.key)).flatMap((s) => s.subs.flatMap((x) => x.games.map((g) => g.id))); };
@@ -308,14 +336,17 @@ export function registerGuided(c) {
     if (res.date === d && res.game === pick.game && !J().daily[d]) { res.challenge = 'daily'; J().daily[d] = res.id; }
     if (res.session_id && run() && run().id === res.session_id) run().results.push(res.id);
   }
+  let flamePulsed = null;                                                // the flame pulses once a day per page load, not on every redraw
   function dailyCard(where = 'games') {
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
-    const d = today(), pick = dailyPick(), g = gameOf(pick.game); if (!g) return '';
-    const done = !!(J().daily || {})[d], streak = SS.dailyStreak(J().daily || {}, d), inf = info(g.id), lower = g.better === 'lower';
-    return `<div class="card gp-daily" data-daily="${esc(g.id)}"><div class="rv-h"><h2 style="margin:0">Today's challenge</h2><span class="small muted">${streak ? `${streak}-day streak` : 'no streak yet'}</span></div>
-      <p style="margin:6px 0 4px"><b>${esc(g.name)}</b>${pick.focus ? ' <span class="tag">focus area</span>' : ''}</p>
-      <p class="small muted" style="margin:0 0 8px">${inf.target !== undefined && inf.target !== null ? `Target ${sc(inf.target)}${lower ? ' or fewer' : '+'} · ` : ''}about ${G.minutesFor(g.id)} min${done ? ' · done today ✓' : ''}</p>
-      ${done ? '' : `<button class="btn" data-gpdaily="${esc(g.id)}">Play today's challenge</button>`}</div>`;
+    const K = FEEL.COPY.daily, d = today(), pick = dailyPick(), g = gameOf(pick.game); if (!g) return '';
+    const done = !!(J().daily || {})[d], inf = info(g.id), lower = g.better === 'lower', wk = c.progress.data().st?.current || 0;
+    return `<div class="card gp-daily ${done ? 'done' : 'todo'}" data-daily="${esc(g.id)}">
+      <div class="gp-dflame${wk ? ' on' : ''}" id="gpDFlame" role="img" aria-label="${esc(K.streak(wk))}" title="${esc(K.streak(wk))}">${icon('flame', 26)}<b>${wk}</b><small>${wk === 1 ? 'week' : 'weeks'}</small></div>
+      <div class="gp-dmain"><div class="rv-h"><h2 style="margin:0">${esc(K.title)}</h2>${done ? `<span class="gp-dtick">${icon('tick', 14)}${esc(K.doneTag)}</span>` : ''}</div>
+        <p style="margin:4px 0 2px"><b>${esc(g.name)}</b>${pick.focus ? ' <span class="tag">focus area</span>' : ''}</p>
+        <p class="small muted" style="margin:0 0 8px">${inf.target !== undefined && inf.target !== null ? `Target ${sc(inf.target)}${lower ? ' or fewer' : '+'} · ` : ''}about ${G.minutesFor(g.id)} min${done ? ` · ${K.doneLine}` : ''}</p>
+        ${done ? '' : `<button class="btn" data-gpdaily="${esc(g.id)}">${esc(K.play)}</button>`}</div></div>`;
   }
   // ------------------------------------------------------------ welcome back (retention plan 5.2): after 14 days away, one easy game in place of the daily challenge
   const welcomeInfo = () => SS.welcomeBack({ results: J().results || [], sessions: J().sessions || [], rounds: c.DS.rounds, today: today(), games: games(), unitM: unitM(), tierScores: G.tierScores });
@@ -338,11 +369,30 @@ export function registerGuided(c) {
     return `<div class="card"><h2>Build my session</h2><p class="small muted" style="margin:0 0 8px">Games for your two focus areas, weakest first, played back to back.</p>
       <div class="gp-ses">${[30, 45, 60].map((m) => { const p = sessionPlan(m); return `<button class="btn sec" data-gpses="${m}"><b>${m} min</b><small>${p.games.length} games · ${esc(p.games.map((x) => x.name).join(', '))}</small></button>`; }).join('')}</div></div>`;
   }
+  const startMarks = () => { const v = c.progress.data(); return { pot_start: v.fc.ok ? v.fc.potential : null, st_start: v.st ? v.st.current : null }; };   // for the summary's count-up
   async function startSession(minutes) {
     const plan = sessionPlan(minutes); if (!plan.games.length) return; const id = `ses${Date.now()}`;
-    J().session_run = { id, minutes, queue: plan.games.map((g) => g.id), i: 0, results: [], started: new Date().toISOString(), total: plan.total, skill: plan.games[0].skill };
+    J().session_run = { id, minutes, queue: plan.games.map((g) => g.id), i: 0, results: [], started: new Date().toISOString(), total: plan.total, skill: plan.games[0].skill, ...startMarks() };
     await start(plan.games[0].id, { session_id: id });
   }
+  // between two games of a session or a skills test: how far through you are and what comes next. It waits for a tap, so you can walk to the next spot first.
+  async function sesGap() { const r = run(); if (!r) return; seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_gap = r.id; c.saveUi(); c.rerender(); scrollTo(0, 0); }
+  function gapScreen() {
+    const r = run(), K = FEEL.COPY, nx = r && gameOf(r.queue[r.i + 1]); if (!r || c.ui.session_gap !== r.id || !nx) { c.ui.session_gap = null; return ''; }
+    const n = r.queue.length, done = r.i + 1, test = r.kind === 'test', inf = info(nx.id), lower = nx.better === 'lower', anim = FEEL.revealMs(100) > 0;
+    return `<div class="card gp-res gp-rv gp-gap" id="gpRoot" data-gap="${esc(r.id)}">
+      <div class="gp-hero"><div class="gp-rname">${esc(test ? K.session.test : K.session.name)}</div>
+        <div class="gp-rverdict" id="gpGapN">${esc(K.progress(done, n))}</div>
+        <div class="gp-gbar" role="progressbar" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${done}"><i id="gpGapBar" data-to="${done / n}" style="--p:${anim ? (done - 1) / n : done / n}"></i></div>
+        <div class="gp-rnext">${esc(K.next)}</div><div class="gp-gname">${esc(nx.name)}</div>
+        <div class="gp-rlevel">about ${G.minutesFor(nx.id)} min${inf.target !== undefined && inf.target !== null ? ` · Target ${sc(inf.target)}${lower ? ' or fewer' : '+'}` : ''}</div></div>
+      <div class="gp-rbody"><div class="row"><button class="btn" data-gpgapgo>${esc(K.session.start(nx.name))}</button><button class="btn sec" data-gpsesend>${esc(test ? K.session.finishTest : K.session.finish)}</button></div></div></div>`;
+  }
+  function revealGap() {
+    const bar = $('#gpGapBar'); if (!bar || bar.dataset.shown) return; bar.dataset.shown = '1'; FEEL.play('step');
+    const to = bar.dataset.to; requestAnimationFrame(() => requestAnimationFrame(() => bar.style.setProperty('--p', to)));
+  }
+  function pulseFlame() { const e = $('.gp-daily.todo #gpDFlame.on'), d = today(); if (e && flamePulsed !== d) { flamePulsed = d; FEEL.pulse(e, 'flame'); } }
   async function sesNext() { const r = run(); if (!r) return; r.i++; const id = r.queue[r.i]; await start(id, r.kind === 'boss' ? { session_id: r.id, boss: r.boss, target: r.targets?.[id] } : { session_id: r.id }); }
   async function endSession(quiet) {
     const r = run(); if (!r) return; const rs = (J().results || []).filter((x) => r.results.includes(x.id)); J().session_run = null;
@@ -353,7 +403,7 @@ export function registerGuided(c) {
     }
     if (rs.length) {
       const test = r.kind === 'test';
-      J().sessions.push({ id: r.id, date: today(), minutes: r.total, focus: test ? 'other' : SS.SESSION_SKILL_FOCUS[r.skill] || 'other', notes: test ? 'Monthly skills test' : `Guided session: ${rs.map((x) => gameOf(x.game)?.name).join(', ')}`, guided: true, results: r.results,
+      J().sessions.push({ id: r.id, date: today(), minutes: r.total, focus: test ? 'other' : SS.SESSION_SKILL_FOCUS[r.skill] || 'other', notes: test ? 'Monthly skills test' : `Guided session: ${rs.map((x) => gameOf(x.game)?.name).join(', ')}`, guided: true, results: r.results, ...(Number.isFinite(r.pot_start) ? { pot_before: r.pot_start } : {}), ...(Number.isFinite(r.st_start) ? { st_before: r.st_start } : {}),
         ...(test ? {} : { complete: rs.length >= (r.queue || []).length }) });      // complete: every game in the session was finished; it earns a streak freeze
       if (test && rs.length >= ST.TEST_GAMES.length) {
         const scores = Object.fromEntries(rs.map((x) => [x.game, x.score])), rated = ST.rate(scores, games(), unitM());
@@ -361,18 +411,48 @@ export function registerGuided(c) {
         if (!quiet) c.ui.test_summary = r.id;
       } else if (!quiet) c.ui.session_summary = r.id;
     }
-    c.ui.game_result = null; c.saveUi(); await save(); if (!quiet) { c.rerender(); scrollTo(0, 0); }
+    c.ui.game_result = null; c.ui.session_gap = null; c.saveUi(); await save(); if (!quiet) { c.rerender(); scrollTo(0, 0); }
+  }
+  // the session and skills-test summaries share the result screen's look: a green hero, things rising in one after another, a count-up and a small rewards row
+  const sumAnim = (id) => c.ui.sum_seen !== id && FEEL.revealMs(100) > 0;
+  const sumAt = (anim, cls, i) => `class="${cls}${anim ? ' fx-rise' : ''}"${anim ? ` style="--i:${i}"` : ''}`;
+  function rewardChips(anim, i0, { stNow, stBefore, pot, potFrom }) {
+    const K = FEEL.COPY, out = []; let i = i0;
+    if (stNow >= 1) out.push(`<div ${sumAt(anim, `gp-rw${stNow > stBefore ? ' up' : ''}`, i++)} id="gpSStreakBox"><div class="l">${esc(K.rewards.streak)}</div><div class="v">${icon('flame', 22)}<span id="gpSStreak" data-from="${stBefore}" data-to="${stNow}">${stNow}</span></div><div class="s">${K.rewards.weeks(stNow)} in a row</div></div>`);
+    if (pot !== null) { const moved = Number.isFinite(potFrom) && Math.abs(pot - potFrom) >= 0.05;
+      out.push(`<div ${sumAt(anim, `gp-rw${moved && pot < potFrom ? ' up' : ''}`, i++)}><div class="l">${esc(K.session.potential)}</div><div class="v"><span id="gpSPot" data-from="${moved ? potFrom : pot}" data-to="${pot}">${fmt(pot, 1)}</span></div><div class="s">${esc(K.rewards.potential)}${moved ? `, ${pot < potFrom ? 'down' : 'up'} from <s>${fmt(potFrom, 1)}</s>` : ''}</div></div>`); }
+    return out.length ? `<div class="gp-rewards">${out.join('')}</div><p class="gp-rwn">${esc(K.rewards.note)}</p>` : '';
   }
   function summaryScreen() {
     const ses = (J().sessions || []).find((x) => x.id === c.ui.session_summary); if (!ses) { c.ui.session_summary = null; return ''; }
-    const v = c.progress.data(), rs = (ses.results || []).map((id) => (J().results || []).find((x) => x.id === id)).filter(Boolean);
-    const rows = rs.map((r) => { const g = gameOf(r.game), t = tierOf(g, r), inf = info(g.id), lower = g.better === 'lower', hit = inf.target !== undefined && inf.target !== null && (lower ? r.score <= inf.target : r.score >= inf.target);
-      return `<div class="gp-sumrow"><div><b>${esc(g.name)}</b><div class="small muted">${hit ? '✓ hit the target' : inf.target != null ? `target ${sc(inf.target)}${lower ? ' or fewer' : '+'}` : ''}</div></div><div class="gp-sumscore"><b>${sc(r.score)}</b>${tierChip(t?.tier)}</div></div>`; }).join('');
-    const hits = rs.filter((r) => { const g = gameOf(r.game), inf = info(g.id); return inf.target != null && (g.better === 'lower' ? r.score <= inf.target : r.score >= inf.target); }).length;
-    return `<div class="card gp-res" id="gpRoot"><h2>Session done</h2><p class="small muted" style="margin:0 0 8px">${rs.length} games · about ${ses.minutes} min</p>${rows}
-      <p class="small" style="margin:10px 0 4px">${hits} of ${rs.length} targets hit.${v.fc.ok ? ` Potential now <b>${fmt(v.fc.potential, 1)}</b> (now ${fmt(v.fc.current, 1)}).` : ''}</p>
-      <p class="small" style="margin:0 0 8px">Practice streak: <b>${v.st.current} week${v.st.current === 1 ? '' : 's'}</b>.</p>
-      <button class="btn" data-gpdone>Done</button></div>`;
+    const K = FEEL.COPY, v = c.progress.data(), rs = (ses.results || []).map((id) => (J().results || []).find((x) => x.id === id)).filter(Boolean), anim = sumAnim(ses.id); let i = 4;
+    const hitOf = (r) => { const g = gameOf(r.game), inf = info(g.id); return inf.target != null && (g.better === 'lower' ? r.score <= inf.target : r.score >= inf.target); };
+    const rows = rs.map((r) => { const g = gameOf(r.game), t = tierOf(g, r), inf = info(g.id), lower = g.better === 'lower', hit = hitOf(r);
+      return `<div ${sumAt(anim, 'gp-sumrow', i++)}><div><b>${esc(g.name)}</b><div class="small muted">${hit ? '✓ hit the target' : inf.target != null ? `target ${sc(inf.target)}${lower ? ' or fewer' : '+'}` : ''}</div></div><div class="gp-sumscore"><b>${sc(r.score)}</b>${tierChip(t?.tier)}</div></div>`; }).join('');
+    const hits = rs.filter(hitOf).length, total = rs.length, pot = v.fc.ok ? v.fc.potential : null, stNow = v.st ? v.st.current : 0;
+    return `<div class="card gp-res gp-rv" id="gpRoot" data-sid="${esc(ses.id)}" data-hits="${hits}" data-total="${total}"${anim ? ' data-sumreveal="1"' : ''}>
+      <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
+        <div ${sumAt(anim, 'gp-rname', 0)}>${total} game${total === 1 ? '' : 's'} · about ${ses.minutes} min</div>
+        <div ${sumAt(anim, `gp-rverdict ${total && hits === total ? 'met' : ''}`, 1)} id="gpVerdictL">${esc(K.session.done)}</div>
+        <div ${sumAt(anim, 'gp-score', 2)}><b id="gpSNum" data-to="${hits}">${hits}</b><span> / ${total}</span></div>
+        <div ${sumAt(anim, 'gp-rlevel', 3)}>${esc(K.session.hit)}</div></div>
+      <div class="gp-rbody">${rewardChips(anim, i, { stNow, stBefore: Number.isFinite(ses.st_before) ? ses.st_before : stNow, pot, potFrom: ses.pot_before })}
+        <div class="gp-sumrows">${rows}</div>
+        <div ${sumAt(anim, 'gp-rbtn', i + 6)}><button class="btn" data-gpdone>${esc(K.actions.done)}</button></div></div></div>`;
+  }
+  // count-ups and the sound for a summary, once: the score counts up, then the sound (and confetti when every target was hit) and the rewards count
+  function revealSummary() {
+    const root = $('#gpRoot[data-sumreveal]'); if (!root) return; const id = root.dataset.sid; root.removeAttribute('data-sumreveal'); c.ui.sum_seen = id; c.saveUi();
+    const ms = FEEL.revealMs, hits = Number(root.dataset.hits), total = Number(root.dataset.total), kind = root.dataset.kind || 'session', live = () => $('#gpRoot')?.dataset.sid === id, at = (t, f) => later(t, () => { if (live()) f(); });
+    const num = $('#gpSNum'), st = $('#gpSStreak'), pot = $('#gpSPot'), good = kind === 'test' ? Number(root.dataset.better) > 0 : total > 0 && hits === total;
+    if (ms(100) > 0) { if (num) num.textContent = '0'; if (st) st.textContent = st.dataset.from; if (pot) pot.textContent = fmt(Number(pot.dataset.from), 1); }
+    at(ms(180), () => num && FEEL.countUp(num, 0, Number(num.dataset.to), ms(600)));
+    at(ms(900), () => {
+      FEEL.play(good ? (kind === 'test' ? 'pb' : 'win') : 'finish'); if (good) { FEEL.confetti($('#gpConf')); $('#gpVerdictL')?.classList.remove('fx-rise'); FEEL.pulse($('#gpVerdictL'), 'pop'); }
+      if (st && Number(st.dataset.to) > Number(st.dataset.from)) { FEEL.countUp(st, Number(st.dataset.from), Number(st.dataset.to), ms(500)); $('#gpSStreakBox')?.classList.remove('fx-rise'); FEEL.pulse($('#gpSStreakBox'), 'flame'); }
+      if (pot && Number(pot.dataset.to) < Number(pot.dataset.from)) FEEL.countUp(pot, Number(pot.dataset.from), Number(pot.dataset.to), ms(700), (v) => fmt(v, 1));
+    });
+    at(ms(1800), () => $('#gpRoot')?.setAttribute('data-revealed', '1'));
   }
 
   // ------------------------------------------------------------ monthly skills test
@@ -388,20 +468,28 @@ export function registerGuided(c) {
       ${due.done ? '<p class="small" style="margin:0 0 6px">This month\'s test is done ✓. You can run it again if you like.</p>' : ''}<button class="btn ${due.done ? 'sec' : ''}" data-gptest>Start the skills test</button></div>`;
   }
   async function startTest() {
-    const id = `test${Date.now()}`; J().session_run = { id, kind: 'test', minutes: ST.TEST_MINUTES, queue: [...ST.TEST_GAMES], i: 0, results: [], started: new Date().toISOString(), total: ST.TEST_MINUTES, skill: null };
+    const id = `test${Date.now()}`; J().session_run = { id, kind: 'test', minutes: ST.TEST_MINUTES, queue: [...ST.TEST_GAMES], i: 0, results: [], started: new Date().toISOString(), total: ST.TEST_MINUTES, skill: null, ...startMarks() };
     await start(ST.TEST_GAMES[0], { session_id: id });
   }
   function testSummary() {
     const t = (J().skills_tests || []).find((x) => x.id === c.ui.test_summary); if (!t) { c.ui.test_summary = null; return ''; }
-    const prev = lastOf(t), cmp = ST.compare(t, prev), rated = cmp.filter((x) => x.now !== null);
-    const games_ = ST.TEST_GAMES.map((id) => { const pg = t.per_game[id], g = gameOf(id); return pg ? `<div class="gp-sumrow"><div><b>${esc(g?.name || id)}</b><div class="small muted">${esc(pg.label || '')}</div></div><div class="gp-sumscore"><b>${sc(pg.score)}</b></div></div>` : ''; }).join('');
+    const K = FEEL.COPY, prev = lastOf(t), cmp = ST.compare(t, prev), rated = cmp.filter((x) => x.now !== null), anim = sumAnim(t.id); let i = 4;
+    const better = prev ? rated.filter((x) => x.change !== null && x.change >= 0.5).length : 0;
+    const games_ = ST.TEST_GAMES.map((id) => { const pg = t.per_game[id], g = gameOf(id); return pg ? `<div ${sumAt(anim, 'gp-sumrow', i++)}><div><b>${esc(g?.name || id)}</b><div class="small muted">${esc(pg.label || '')}</div></div><div class="gp-sumscore"><b>${sc(pg.score)}</b></div></div>` : ''; }).join('');
     const radar = (ids) => [{ type: 'scatterpolar', r: rated.map((x) => ST.radarValue(x.now)), theta: rated.map((x) => x.title), fill: 'toself', name: 'This test', line: { color: c.P.accent } },
       ...(prev ? [{ type: 'scatterpolar', r: rated.map((x) => ST.radarValue(x.before)), theta: rated.map((x) => x.title), fill: 'none', name: `Last test (${prev.date})`, line: { color: c.P.muted, dash: 'dot' } }] : [])];
-    return `<div class="card gp-res" id="gpRoot"><h2>Skills test done</h2><p class="small muted" style="margin:0 0 8px">${t.date}. ${prev ? `Compared with ${esc(prev.date)}.` : 'This is your first test, so there is nothing to compare with yet.'}</p>
-      <div class="gp-radar">${rated.length >= 3 ? c.plot(radar(), { height: 270, margin: { t: 20, b: 20, l: 40, r: 40 }, polar: { radialaxis: { range: [0, 36], showticklabels: false } }, showlegend: !!prev, legend: { orientation: 'h', y: -0.1 } }) : ''}</div>
+    const big = prev ? better : rated.length, of = prev ? rated.length : 0;
+    return `<div class="card gp-res gp-rv" id="gpRoot" data-sid="${esc(t.id)}" data-kind="test" data-hits="${big}" data-total="${rated.length}" data-better="${better}"${anim ? ' data-sumreveal="1"' : ''}>
+      <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
+        <div ${sumAt(anim, 'gp-rname', 0)}>${esc(t.date)}</div>
+        <div ${sumAt(anim, `gp-rverdict ${better > 0 ? 'met' : ''}`, 1)} id="gpVerdictL">${esc(K.session.testDone)}</div>
+        <div ${sumAt(anim, 'gp-score', 2)}><b id="gpSNum" data-to="${big}">${big}</b>${of ? `<span> / ${of}</span>` : ''}</div>
+        <div ${sumAt(anim, 'gp-rlevel', 3)}>${esc(prev ? K.session.better(better, rated.length).replace(/^\d+ of \d+ /, '') : K.session.rated(rated.length).replace(/^\d+ /, ''))}</div>
+        <div ${sumAt(anim, 'gp-rnext', 3)}>${prev ? `Compared with ${esc(prev.date)}.` : esc(K.session.first)}</div></div>
+      <div class="gp-rbody"><div class="gp-radar">${rated.length >= 3 ? c.plot(radar(), { height: 270, margin: { t: 20, b: 20, l: 40, r: 40 }, polar: { radialaxis: { range: [0, 36], showticklabels: false } }, showlegend: !!prev, legend: { orientation: 'h', y: -0.1 } }) : ''}</div>
       <div class="tbl"><table><thead><tr><th>Skill</th><th>Practice handicap</th>${prev ? '<th>Last test</th><th>Change</th>' : ''}</tr></thead><tbody>${cmp.map((x) => `<tr><td>${esc(x.title)}</td><td>${x.now === null ? '<span class="muted">not in the test</span>' : dHtml(x.now)}</td>${prev ? `<td>${dHtml(x.before)}</td><td>${chg(x)}</td>` : ''}</tr>`).join('')}</tbody></table></div>
-      <h3 style="margin:12px 0 4px">Your scores</h3>${games_}
-      <p class="small muted" style="margin:10px 0">These scores are saved as normal results, so your practice levels now use them.</p><button class="btn" data-gpdone>Done</button></div>`;
+      <h3 style="margin:12px 0 4px">Your scores</h3><div class="gp-sumrows">${games_}</div>
+      <p class="small muted" style="margin:10px 0">These scores are saved as normal results, so your practice levels now use them.</p><div ${sumAt(anim, 'gp-rbtn', i + 1)}><button class="btn" data-gpdone>${esc(K.actions.done)}</button></div></div></div>`;
   }
 
 
@@ -484,14 +572,16 @@ export function registerGuided(c) {
     $$('[data-gpstart]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpstart, { pressure: !!$('#gpPressure')?.checked })));
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
-    $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.saveUi(); c.rerender(); }));
+    $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.ui.session_gap = null; c.saveUi(); c.rerender(); }));
     loadGhosts(); reveal(); bossReveal(); loadLeague();
     $$('[data-gpboss]').forEach((b) => b.addEventListener('click', () => startBoss(Number(b.dataset.gpboss))));
     $$('[data-gptest]').forEach((b) => b.addEventListener('click', startTest));
     $$('[data-gpses]').forEach((b) => b.addEventListener('click', () => startSession(Number(b.dataset.gpses))));
     $$('[data-gpdaily]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpdaily)));
     $$('[data-gpwelcome]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpwelcome, { welcome_back: true, target: Number(b.dataset.wbtarget) })));
-    $$('[data-gpsesnext]').forEach((b) => b.addEventListener('click', sesNext)); $$('[data-gpsesend]').forEach((b) => b.addEventListener('click', () => endSession(false)));
+    $$('[data-gpsesnext]').forEach((b) => b.addEventListener('click', () => (run()?.kind === 'boss' ? sesNext() : sesGap()))); /* a boss runs straight on; sessions and the skills test pause between games */ $$('[data-gpgapgo]').forEach((b) => b.addEventListener('click', sesNext)); $$('[data-gpsesend]').forEach((b) => b.addEventListener('click', () => endSession(false)));
+    $$('[data-pickgame]').forEach((b) => b.addEventListener('click', () => { c.ui.pg_game = b.dataset.pickgame; c.saveUi(); c.rerender(); $('#gpPlay')?.scrollIntoView({ block: 'start', behavior: FEEL.calm() ? 'auto' : 'smooth' }); }));
+    revealGap(); revealSummary(); pulseFlame();
   }
-  return { start, screen, launcher, wire, draft, info, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, startBoss, testCard, afterResult, shareInfo };
+  return { start, screen, gameCards, launcher, wire, draft, info, duelTarget, canGuide, nextGame, sessionCard, dailyCard, homeCard, welcomeInfo, dailyPick, startSession, startTest, startBoss, testCard, afterResult, shareInfo };
 }

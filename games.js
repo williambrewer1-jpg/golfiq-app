@@ -216,6 +216,16 @@ export function tierState(game, results, unitM = YD) {
   const best = bestScore(game, results), cur = best !== null ? tierFor(game, best, unitM) : null;
   return { ladder: ts, tier: cur?.tier || null, next: cur ? cur.next : null, own: false, need: 0 };
 }
+// how far the golfer's best score has come towards the next tier, 0 to 1, for the ring on a game card.
+// The ring starts at the score of the tier already held; with no tier yet it starts at 0 (or, for a lower-is-better game, at the first score played).
+export function tierProgress(game, results, unitM = YD) {
+  const st = tierState(game, results, unitM), best = bestScore(game, results), lower = game.better === 'lower';
+  const out = { tier: st.tier, next: st.next, best, p: 0, own: st.own, need: st.need, ladder: !!st.ladder };
+  if (best === null || !st.ladder) return out;
+  if (!st.next) return { ...out, p: 1 };
+  const start = st.tier ? (st.ladder.find((t) => t.key === st.tier.key)?.score ?? 0) : lower ? scoresOf(game, results)[0].score : 0, span = st.next.score - start;
+  return { ...out, p: span === 0 ? 0 : Math.max(0, Math.min(1, (best - start) / span)) };
+}
 // best score per game from the results list
 export function bestScore(game, results) {
   const s = results.filter((r) => r.game === game.id && Number.isFinite(r.score)).map((r) => r.score);
@@ -243,11 +253,12 @@ export function tierBadges(games, results, unitM = YD) {
 // ------------------------------------------------------------------ the draft saved after every step
 // adj: the range-ball adjustment (%) from Settings, kept in the draft so a game is scored the same way it was played
 // welcome_back / target: a welcome-back game (retention plan 5.2) is played against the golfer's own median, which the draft carries so the screen and the result agree
-export function newDraft(game, { seed = Date.now() % 2147483647, unitM = YD, pressure = false, session_id = null, ghost = null, adj = 0, welcome_back = false, target = null, boss = null } = {}) {
+export function newDraft(game, { seed = Date.now() % 2147483647, unitM = YD, pressure = false, session_id = null, ghost = null, adj = 0, welcome_back = false, target = null, boss = null, duel = null } = {}) {
   const list = steps(game, { seed, unitM }); if (!list) return null;
   return { game: game.id, seed, pressure: !!pressure, answers: [], started: new Date().toISOString(), unitM, session_id, ghost,
     ...(welcome_back ? { welcome_back: true, target: Number.isFinite(target) ? target : null } : {}),
     ...(boss ? { boss, target: Number.isFinite(target) ? target : null } : {}),
+    ...(duel ? { duel, target: Number.isFinite(target) ? target : null } : {}),      // a duel (duels.js): the same seed for both players, and the golfer's own target for the margin
     ...(isDistance(game) ? { balls: [], adj: Math.max(0, Math.min(DRIVER_TEST.adj_max, Number(adj) || 0)), premium: false } : {}) };
 }
 export function resultFromDraft(draft, game, { date, id } = {}) {
@@ -255,5 +266,5 @@ export function resultFromDraft(draft, game, { date, id } = {}) {
   const detail = draft.answers.slice(0, isOpen(game.id) ? draft.answers.length : list.length);
   return { id: id || `r${Date.now()}`, game: game.id, date: date || new Date().toISOString().slice(0, 10), score: sc.score, note: '', mode: 'guided', detail, seed: draft.seed,
     ...(isDistance(game) ? { balls: draft.balls || [], ...(game.id === 'range-driver' ? (() => { const m = driverSummary(draft.balls); return { avg_dist: m.avg, fairways: m.fairways, wides: m.wides }; })() : { longest: driverSummary(draft.balls).longest }) } : {}),
-    ...(draft.pressure ? { pressure: true, pressure_hit: !!pr?.hit } : {}), ...(draft.session_id ? { session_id: draft.session_id } : {}), ...(draft.welcome_back ? { welcome_back: true } : {}), ...(draft.boss ? { boss: draft.boss } : {}) };
+    ...(draft.pressure ? { pressure: true, pressure_hit: !!pr?.hit } : {}), ...(draft.session_id ? { session_id: draft.session_id } : {}), ...(draft.welcome_back ? { welcome_back: true } : {}), ...(draft.boss ? { boss: draft.boss } : {}), ...(draft.duel ? { duel: draft.duel } : {}) };
 }
