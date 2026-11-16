@@ -42,7 +42,7 @@ with sync_playwright() as p:
     check('font follows the app font', all('SF Pro' in x['layout']['font']['family'] or 'system-ui' in x['layout']['font']['family'] for x in allp))
     # the palette follows the theme: dark mode gives a different accent
     pg.evaluate("() => document.documentElement.setAttribute('data-theme', 'dark')"); pg.evaluate("() => window.__plots.length = 0")
-    pg.click('[data-seg="sx_tab"] button[data-v="tee"]'); pg.wait_for_timeout(150)
+    pg.click('[data-seg="sx_tab"] button[data-v="bag"]'); pg.wait_for_timeout(250)
     dark = pg.evaluate("() => window.__plots.slice()")
     check('dark mode recolours the charts', bool(dark) and 'f2cf4a' in json.dumps(dark).lower().replace('#', ''), json.dumps(dark)[:200])
     pg.evaluate("() => document.documentElement.setAttribute('data-theme', 'light')")
