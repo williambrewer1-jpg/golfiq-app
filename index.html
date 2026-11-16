@@ -515,6 +515,11 @@ main{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
 /* ---- review fixes */
 .plot.off{min-height:0}
 main input[type=checkbox],.sheet input[type=checkbox]{width:24px;height:24px;flex:none}
+.seg.tabs.prg{display:flex;gap:6px;overflow:visible;margin-bottom:10px}.seg.tabs.prg button{flex:1 1 0;min-width:0;padding:8px 4px;text-align:center}
+.seg.tabs.prg+.seg{margin-bottom:12px}
+.lknote.in{position:static;margin:12px 0 4px;box-shadow:none}
+/* long explanations fold away behind one line */
+details.note{margin:10px 0 0;font-size:13px;color:var(--muted)}details.note>summary{cursor:pointer;list-style:none;padding:6px 0;min-height:36px;display:flex;align-items:center;gap:6px;font-weight:600}details.note>summary::-webkit-details-marker{display:none}details.note>summary::after{content:'›';transition:transform .15s}details.note[open]>summary::after{transform:rotate(90deg)}details.note>p{margin:2px 0 8px}
 </style>
 </head>
 <body>

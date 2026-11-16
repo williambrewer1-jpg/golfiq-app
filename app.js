@@ -26,7 +26,9 @@ const saveUi = () => localStorage.setItem('golfiq-ui', JSON.stringify(ui));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (v, d = 1, u = '') => (A.isNum(v) ? (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(d)) + u : '–');
 const sgn = (v, d = 2) => (A.isNum(v) ? (v > 0 ? '+' : '') + v.toFixed(d) : '–');
-const note = (t) => `<p class="note">ⓘ ${t}</p>`;
+// short notes stay on the page; long explanations fold behind one line so the cards stay scannable
+const NOTE_FOLD = 170;
+const note = (t, flat = false) => (!flat && String(t).replace(/<[^>]+>/g, '').length > NOTE_FOLD ? `<details class="note"><summary>ⓘ How this is worked out</summary><p>${t}</p></details>` : `<p class="note">ⓘ ${t}</p>`);
 // 2026-11-24 → 24 Nov 26 (shorter and easier to scan than an ISO date)
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const dshort = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1].slice(2)}` : esc(d ?? '–'); };
@@ -35,7 +37,7 @@ function table(rows, cols, opts = {}) {
   if (!rows?.length) return `<p class="muted small">${opts.empty || 'No data'}</p>`;
   const h = cols.map((c) => `<th>${esc(c[1])}</th>`).join('');
   const cell = (v) => (A.isNum(v) ? (Number.isInteger(v) ? String(v) : fmt(v)) : esc(v ?? '–'));
-  const b = rows.map((r, i) => `<tr${opts.click ? ` class="click" data-i="${i}"` : ''}>${cols.map(([k, , f]) => `<td>${f ? f(r[k], r) : cell(r[k])}</td>`).join('')}</tr>`).join('');
+  const b = rows.map((r, i) => `<tr${opts.click ? ` class="click" data-i="${i}"` : ''}>${cols.map(([k, , f]) => `<td>${f ? f(r[k], r) : k === 'date' ? dshort(r[k]) : cell(r[k])}</td>`).join('')}</tr>`).join('');
   return `<div class="tbl"><table${opts.id ? ` id="${opts.id}"` : ''}><thead><tr>${h}</tr></thead><tbody>${b}</tbody></table></div>`;
 }
 const n0 = (v) => fmt(v, 0), n1 = (v) => fmt(v, 1), n2 = (v) => fmt(v, 2), p0 = (v) => fmt(v, 0, '%');
@@ -247,17 +249,14 @@ function pageHome() {
   ${PROG.levelRow()}
   ${COMP ? COMP.kuHome() : ''}
   ${COMP ? COMP.duHome() : ''}
-  ${PROG.homeCard()}
-  ${PROG.journeyHome()}
-  ${PROG.homePayoff()}
   ${GUIDED.homeCard()}
+  ${PROG.journeyHome()}
+  ${PROG.homeCard()}
+  ${PROG.homePayoff()}
   ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${dshort(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
-  ${r18.length ? `<div class="card"><h2>Form <span class="small muted">last 5 rounds vs earlier</span></h2><div class="kpis">${t('stableford_round')}${t('differential')}${t('gir_pct', 0, '%')}${t('fw_pct', 0, '%')}${t('putts_round')}${t('penalties')}</div>
-    ${trendChart(r18.slice(-30), metric, A.METRICS[metric][0], metric === 'stableford_round' ? 36 : null)}<p style="margin:4px 0 0"><a href="#stats" data-stats="scoring">All stats ›</a></p></div>` : ''}
-  ${fs.length ? `<div class="card"><h2>Where the strokes are</h2>${fs.map((f, i) => `<div class="prio"><span>${i + 1}</span><div><b>${esc(f.title)}</b><div class="small muted">~${fmt(f.strokes_per_round)} strokes/round · ${esc(f.focus).slice(0, 110)}${f.focus.length > 110 ? '…' : ''}</div></div></div>`).join('')}
-    <p style="margin:8px 0 0"><a href="#practice" data-practice="focus">Your practice plan ›</a></p></div>` : ''}
+  <div class="quick more"><a class="btn sec" href="#practice" data-practice="focus">Where to improve ›</a><a class="btn sec" href="#stats" data-stats="scoring">All stats ›</a></div>
   ${th.length ? `<details class="card"><summary>Swing thoughts (${th.length})</summary><div class="thoughts" style="margin-top:10px">${th.map((x, i) => `<div class="thought"><span>${i + 1}</span><p>${esc(x)}</p></div>`).join('')}</div></details>` : ''}
   ${sc.owner ? `<div class="card syncline"><span class="small">Garmin sync · last ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleDateString() : 'never')}</span><button class="btn sec sm" id="syncNow">Sync now</button><span id="syncMsg" class="small"></span></div>` : ''}`;
 }
@@ -558,6 +557,7 @@ function pageData() {
   ${issues.length ? `<details><summary>Missing information (${issues.length})</summary>${table(issues.slice(0, 200), [['round_id', 'Round'], ['severity', 'Level'], ['field', 'Field'], ['message', 'Message']])}</details>` : ''}
   ${dups.length ? `<details><summary>Duplicate rounds (${dups.length})</summary>${table(dups, [['date', 'Date'], ['course_name', 'Course'], ['duplicate_of', 'Kept']])}${note('Same course, start within 20 min; the copy with more shots is kept.')}</details>` : ''}</div>
   <div class="card"><h2>Backup & restore</h2><p class="small">Your data exists only on this phone. Save a backup to Files/iCloud Drive regularly – removing the home-screen app or clearing Safari data deletes it.</p>
+  <label class="sw"><input type="checkbox" id="bkSecrets" checked><span><b>Include sign-ins and keys</b><small>Garmin sync token, AI keys and your Friends connection, so a new install works straight away. Keep that file private: anyone who has it can read your data repo and use your keys. Untick this before sharing a backup.</small></span></label>
   <button class="btn" id="bkSave">Save backup</button><label class="btn sec" style="position:relative">Restore…<input type="file" id="bkLoad" accept=".json" style="position:absolute;inset:0;opacity:0"></label>
   <p class="small muted" id="persist"></p><details><summary class="small">Danger zone</summary><button class="btn danger" id="wipe">Delete all data on this phone</button><p class="small muted">Keeps the cloud-sync connection, so Sync now brings your Garmin rounds straight back.</p></details></div>`;
 }
@@ -644,7 +644,7 @@ function pageSettings() {
       <p><button class="btn">Save</button></p></form>
       <h3>State key for the sync job</h3><p class="small">The GitHub job encrypts your Garmin login tokens with this key. Generate it here, copy it into the repo secret <code>GOLFIQ_STATE_KEY</code>. You don't need to keep it on the phone.</p>
       <button class="btn sec" id="genKey">Generate key</button><textarea id="keyOut" rows="2" readonly></textarea>
-      ${note('The token is stored only on this phone and is used only to read your private repo. It\'s never included in backups.')}`;
+      ${note('The token is stored only on this phone and is used only to read your private repo. It is saved in a backup only when “Include sign-ins and keys” is ticked (Data → Backup).')}`;
   }
   const unitsCard = `<div class="card"><h2>Distance units</h2><div class="seg" id="unitSeg">${[['yd', 'Yards (putts in feet)'], ['m', 'Metres']].map(([v, l]) => `<button data-u="${v}" class="${UNIT === v ? 'on' : ''}">${l}</button>`).join('')}</div><p class="note">Display only – data is stored unchanged, so you can switch any time.</p></div>`;
   const rangeCard = `<div class="card"><h2>Range ball adjustment</h2><label class="f" for="rangeAdj">Extra distance for a course ball (%)</label><input id="rangeAdj" type="number" inputmode="numeric" min="0" max="${B.DRIVER_TEST.adj_max}" step="1" value="${Number(state.settings.range_ball_adj) || 0}" style="width:100%"><p class="note">Range balls and mats usually fly shorter than a course ball. The Driver test and Max out add this percentage to every distance you enter, so your level is closer to the course. 0 means no adjustment (up to ${B.DRIVER_TEST.adj_max}). If a distance comes from a premium ball on a launch monitor, tick Premium ball in the game to skip it.</p></div>`;
@@ -766,7 +766,7 @@ function wire(page) {
       }
       rebuild(); toast(`Imported: ${tot.new} new, ${tot.updated} updated, ${tot.unchanged} unchanged, ${tot.failed} failed`); rerender();
     });
-    on('#bkSave', 'click', () => saveFile(`breakingpar-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S.backupObject(state))));
+    on('#bkSave', 'click', () => saveFile(`breakingpar-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(S.backupObject(state, { secrets: $('#bkSecrets')?.checked !== false }))));
     on('#bkLoad', 'change', async (e) => {
       const f = e.target.files[0]; if (!f) return;
       try { const json = JSON.parse(await readFile(f)); if (S.classify(json) !== 'backup') throw new Error('Not a BreakingPar backup');
