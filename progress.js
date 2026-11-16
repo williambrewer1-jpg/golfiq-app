@@ -248,6 +248,7 @@ export function registerProgress(c) {
       if (!document.getElementById('skinCss')) { const el = document.createElement('style'); el.id = 'skinCss'; el.textContent = LCK.skinCss(); document.head.appendChild(el); }
       const l = look(), r = document.documentElement;
       if (l.skin === LCK.DEFAULTS.skin) r.removeAttribute('data-skin'); else r.dataset.skin = l.skin;
+      const head = getComputedStyle(r).getPropertyValue('--head').trim(), tc = document.querySelector('meta[name="theme-color"]'); if (head && tc && tc.content !== head) tc.content = head;   // the status bar follows the app colours
       if (l.badge === LCK.DEFAULTS.badge) r.removeAttribute('data-badge'); else r.dataset.badge = l.badge;
       FEEL.setLook(l.confetti);
     } catch { /* no data yet: the free defaults stay */ }
@@ -288,6 +289,7 @@ export function registerProgress(c) {
       const d = document.createElement('div'); d.id = 'lkNote'; d.className = 'lknote'; d.setAttribute('role', 'status');
       d.innerHTML = `<span><b>${esc(K.unlocked(fr[0].name))}</b>${fr.length > 1 ? ` <span class="small muted">+${fr.length - 1}</span>` : ''}</span><button type="button" class="btn" id="lkTry">${esc(K.tryIt)}</button><button type="button" class="btn sec" id="lkX">${esc(K.later)}</button>`;
       document.body.appendChild(d); FEEL.play('good');
+      const gone = () => { d.remove(); removeEventListener('hashchange', gone); }; addEventListener('hashchange', gone); setTimeout(gone, 12000);   // it leaves with the page (the item stays in the Locker)
       d.querySelector('#lkX').addEventListener('click', () => d.remove());
       d.querySelector('#lkTry').addEventListener('click', async () => { d.remove(); await useItem(fr[0].id); c.done(K.chosen(fr[0].name)); });
     };
@@ -302,7 +304,7 @@ export function registerProgress(c) {
     c.$$('[data-jstage]').forEach((b) => b.addEventListener('click', () => { const [n, k] = b.dataset.jstage.split(':'); stageSheet(Number(n), k); }));
     c.$$('[data-jboss]').forEach((b) => b.addEventListener('click', () => bossSheet(Number(b.dataset.jboss))));
     c.$$('[data-jhome]').forEach((b) => b.addEventListener('click', () => c.guided?.start(b.dataset.jhome)));
-    if (!$('#jnPath')) jnScrolled = false; else if (!jnScrolled) { jnScrolled = true; $('.jn-cur')?.scrollIntoView({ block: 'center' }); }
+    if (!$('#jnPath')) jnScrolled = false; else if (!jnScrolled) { jnScrolled = true; setTimeout(() => requestAnimationFrame(() => $('.jn-cur')?.scrollIntoView({ block: 'center' })), 60); }
     c.$$('[data-freezeok]').forEach((b) => b.addEventListener('click', () => { freezeShown = null; b.closest('[data-freezeline]')?.remove(); }));
     try { rankMoment(); if (c.compete?.shareRank && (c.DS.rounds.length || (J().results || []).length)) c.compete.shareRank(data().lv.rank.name); } catch (e) { console.error(e); }
   }
