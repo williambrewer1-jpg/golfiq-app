@@ -216,6 +216,16 @@ export function tierState(game, results, unitM = YD) {
   const best = bestScore(game, results), cur = best !== null ? tierFor(game, best, unitM) : null;
   return { ladder: ts, tier: cur?.tier || null, next: cur ? cur.next : null, own: false, need: 0 };
 }
+// how far the golfer's best score has come towards the next tier, 0 to 1, for the ring on a game card.
+// The ring starts at the score of the tier already held; with no tier yet it starts at 0 (or, for a lower-is-better game, at the first score played).
+export function tierProgress(game, results, unitM = YD) {
+  const st = tierState(game, results, unitM), best = bestScore(game, results), lower = game.better === 'lower';
+  const out = { tier: st.tier, next: st.next, best, p: 0, own: st.own, need: st.need, ladder: !!st.ladder };
+  if (best === null || !st.ladder) return out;
+  if (!st.next) return { ...out, p: 1 };
+  const start = st.tier ? (st.ladder.find((t) => t.key === st.tier.key)?.score ?? 0) : lower ? scoresOf(game, results)[0].score : 0, span = st.next.score - start;
+  return { ...out, p: span === 0 ? 0 : Math.max(0, Math.min(1, (best - start) / span)) };
+}
 // best score per game from the results list
 export function bestScore(game, results) {
   const s = results.filter((r) => r.game === game.id && Number.isFinite(r.score)).map((r) => r.score);

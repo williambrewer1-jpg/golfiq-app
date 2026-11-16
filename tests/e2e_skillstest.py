@@ -2,7 +2,7 @@
 import http.server, threading, functools, sys, os, re
 from playwright.sync_api import sync_playwright
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from play_helpers import answer_step
+from play_helpers import answer_step, go_next
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a, **k): pass
@@ -25,7 +25,7 @@ def run_test(pg, every):
     pg.click('[data-gptest]'); pg.wait_for_selector('#gpRoot .gp-prompt'); order = []
     for i in range(N):
         order.append(pg.evaluate("() => window.__golfiq.state.journal.game_draft.game")); play_out(pg, every)
-        if i < N - 1: pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
+        if i < N - 1: go_next(pg)
     return order
 with sync_playwright() as p:
     b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); ctx.add_init_script('window.__feelDelay = 0'); pg = ctx.new_page(); errs = []
@@ -40,7 +40,7 @@ with sync_playwright() as p:
         order.append(pg.evaluate("() => window.__golfiq.state.journal.game_draft.game")); play_out(pg, 2)
         if i < N - 1:
             check(f'game {i + 1}: result says skills test, game {i + 1} of {N}', f'Skills test: game {i + 1} of {N}' in pg.inner_text('.gp-res'), pg.inner_text('.gp-res')[-100:])
-            pg.click('[data-gpsesnext]'); pg.wait_for_selector('#gpRoot .gp-prompt')
+            go_next(pg)
     check('the test runs the six fixed games in order, the Driver test last', order == ['putt-369', 'putt-lag', 'chip-updown', 'range-wedge', 'range-greens', 'range-driver'], order)
     check('the last result offers Finish test', 'Finish test' in pg.inner_text('[data-gpsesend]'))
     pg.click('[data-gpsesend]'); pg.wait_for_selector('text=Skills test done')
@@ -63,5 +63,31 @@ with sync_playwright() as p:
     check('more hits give a better (lower) putting handicap', c == [2, True], c)
     pg.screenshot(path='/tmp/test_summary2.png')
     a = pg.evaluate("() => ({ overflow: document.documentElement.scrollWidth > innerWidth + 1 })"); check('no horizontal overflow', not a['overflow'])
-    check('no page errors', not errs, errs); b.close()
+    check('no page errors', not errs, errs); ctx.close()
+
+    # the reveal of the summary (phase D): played with real timing, so the number counts up and the sound fits what happened. Games are played with the delay off and it is switched on for the finish.
+    ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block'); ctx.add_init_script('window.__feelTest = true'); pg = ctx.new_page(); errs = []
+    pg.on('pageerror', lambda e: errs.append(str(e))); pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort())
+    pg.clock.set_fixed_time('2026-11-03T10:00:00'); pg.goto(URL); pg.wait_for_selector('#loadSample'); pg.click('#loadSample'); pg.wait_for_timeout(1500)
+    pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games'}))"); pg.goto(URL + '#practice'); pg.reload(); pg.wait_for_selector('[data-gptest]')
+    def finish_test(pg, every):
+        pg.evaluate("() => { window.__feelDelay = 0; }"); run_test(pg, every)
+        pg.evaluate("() => { window.__feelLog = []; delete window.__feelDelay; }"); pg.click('[data-gpsesend]'); pg.wait_for_selector('#gpSNum'); pg.wait_for_selector('#gpRoot[data-revealed]', timeout=6000)
+        return pg.evaluate("() => window.__feelLog.slice()")
+    log = finish_test(pg, 2)
+    hero = pg.inner_text('.gp-hero')
+    check('first test: the big number is how many skills were rated, with a note that there is nothing to compare with', pg.get_attribute('#gpRoot', 'data-kind') == 'test' and pg.inner_text('#gpSNum') == pg.get_attribute('#gpRoot', 'data-hits') and 'nothing to compare with yet' in hero and 'skills rated' in hero.lower(), hero)
+    check('first test: a quiet finish sound and no confetti', [e for e in log if e in ('finish', 'pb', 'win')] == ['finish'] and 'confetti' not in log, log)
+    pg.evaluate("() => { window.__feelLog = []; }"); pg.reload(); pg.wait_for_selector('#gpRoot[data-kind=test]'); pg.wait_for_timeout(500)
+    check('after a reload the test summary is shown at once, with no sound', pg.evaluate("() => (window.__feelLog || []).length") == 0 and pg.inner_text('#gpSNum') == pg.get_attribute('#gpRoot', 'data-hits'))
+    a = pg.evaluate("() => { const out = []; for (const el of document.querySelectorAll('#gpRoot, #gpRoot *')) { const k = el.getBoundingClientRect(); if (k.width && k.right > innerWidth + 1) out.push(el.className || el.tagName); if (el.matches('button') && k.height < 38) out.push('small button'); } return [document.documentElement.scrollWidth > innerWidth + 1, out]; }")
+    check('the test summary fits the phone: no overflow, buttons at least 38px', a == [False, []], a)
+    pg.click('[data-gpdone]'); pg.wait_for_selector('[data-gptest]'); pg.reload(); pg.wait_for_selector('[data-gptest]')
+    check('Done clears the test summary for good', pg.query_selector('#gpRoot') is None and not pg.evaluate("() => JSON.parse(localStorage.getItem('golfiq-ui') || '{}').test_summary"))
+    pg.clock.set_fixed_time('2026-11-17T10:00:00'); log = finish_test(pg, 8)
+    hero = pg.inner_text('.gp-hero'); better = int(pg.get_attribute('#gpRoot', 'data-better'))
+    check('second test with better scores: the big number is how many skills are better than last time', better > 0 and pg.inner_text('#gpSNum') == str(better) and re.search(r'/\s*\d+\s+skills? better than last test', hero), hero)
+    check('second test: the personal-best sound and confetti', 'pb' in log and 'confetti' in log, log)
+    pg.screenshot(path='/tmp/test_summary_reveal.png')
+    check('no page errors in the reveal run', not errs, errs); b.close()
 srv.shutdown(); print('\n%s' % ('FAILED: ' + ', '.join(fails) if fails else 'all passed')); sys.exit(1 if fails else 0)
