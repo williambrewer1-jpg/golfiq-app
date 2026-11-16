@@ -26,6 +26,9 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const fmt = (v, d = 1, u = '') => (A.isNum(v) ? (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString() : v.toFixed(d)) + u : '–');
 const sgn = (v, d = 2) => (A.isNum(v) ? (v > 0 ? '+' : '') + v.toFixed(d) : '–');
 const note = (t) => `<p class="note">ⓘ ${t}</p>`;
+// 2026-11-24 → 24 Nov 26 (shorter and easier to scan than an ISO date)
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const dshort = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1].slice(2)}` : esc(d ?? '–'); };
 function toast(t, ms = 3500) { const e = $('#toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => { e.style.display = 'none'; }, ms); }
 function table(rows, cols, opts = {}) {
   if (!rows?.length) return `<p class="muted small">${opts.empty || 'No data'}</p>`;
@@ -84,7 +87,7 @@ function refreshPalette() {
 refreshPalette();
 // every Plotly chart is locked (no drag-zoom, no double-tap, no scroll-zoom); only the course map keeps its own pan and zoom
 function drawPlots() {
-  if (!window.Plotly) { plots.forEach(([id]) => { const e = document.getElementById(id); if (e) e.innerHTML = '<p class="muted small">Charts load when online the first time.</p>'; }); return; }
+  if (!window.Plotly) { plots.forEach(([id]) => { const e = document.getElementById(id); if (e) { e.classList.add('off'); e.innerHTML = '<p class="muted small">Charts load when online the first time.</p>'; } }); return; }
   for (const [id, traces, layout] of plots) {
     const e = document.getElementById(id); if (!e) continue;
     const isMap = !!layout.map, font = { family: P.sans, size: 11, color: P.ink };
@@ -211,7 +214,7 @@ function pageHome() {
   ${PROG.journeyHome()}
   ${PROG.homePayoff()}
   ${GUIDED.homeCard()}
-  ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${esc(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
+  ${last ? `<div class="card"><div class="rv-h"><h2 style="margin:0">Last round</h2><span class="small muted">${dshort(last.date)}</span></div><p class="small muted" style="margin:2px 0 8px">${esc(last.course_name || '')}${last.format !== '18' ? ` · ${esc(last.format)} holes` : ''}</p>
     <div class="kpis">${kpi('Gross', last.gross, null, false, 0)}${kpi('Stableford', last.stableford_round, null, true, 0)}${kpi('GIR', last.gir_pct, null, true, 0, '%')}${kpi('Putts', last.putts_round, null, false, 0)}</div>
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
   ${r18.length ? `<div class="card"><h2>Form <span class="small muted">last 5 rounds vs earlier</span></h2><div class="kpis">${t('stableford_round')}${t('differential')}${t('gir_pct', 0, '%')}${t('fw_pct', 0, '%')}${t('putts_round')}${t('penalties')}</div>
@@ -469,7 +472,7 @@ function pageRounds() {
   const cmp = ra && rb ? ms.map((m) => ({ m: A.METRICS[m]?.[0] || m, a: ra[m], b: rb[m], d: A.isNum(ra[m]) && A.isNum(rb[m]) ? rb[m] - ra[m] : null })) : [];
   const ha = ds.holes.filter((h) => h.round_id === a), hb = ds.holes.filter((h) => h.round_id === b);
   const short = (x) => `${x.date} · ${x.course_name || ''} (${x.gross ?? '–'})`;
-  return `${filterSummary(ds)}<div class="card"><h2>Round history <span class="small muted">(tap a round)</span></h2>${table(r, [['date', 'Date'], ['course_name', 'Course'], ['format', 'Holes'], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['fw_pct', 'FW', p0], ['putts_round', 'Putts', n0], ['penalties', 'Pen', n0], ['chain_coverage', 'Shot chain', (v) => fmt(v * 100, 0, '%')]], { click: true, id: 'roundsTbl' })}</div>
+  return `${filterSummary(ds)}<div class="card"><h2>Round history <span class="small muted">(tap a round)</span></h2>${table(r, [['date', 'Date', dshort], ['gross', 'Gross', n0], ['stableford_round', 'Pts', n0], ['course_name', 'Course'], ['format', 'Holes'], ['differential', 'Diff', n1], ['gir_pct', 'GIR', p0], ['fw_pct', 'FW', p0], ['putts_round', 'Putts', n0], ['penalties', 'Pen', n0], ['chain_coverage', 'Shot chain', (v) => fmt(v * 100, 0, '%')]], { click: true, id: 'roundsTbl' })}</div>
   <div class="card"><h2>Compare two rounds</h2>${select('cmp_a', r.map((x) => [x.round_id, short(x)]), a, 'Round A')}${select('cmp_b', r.map((x) => [x.round_id, short(x)]), b, 'Round B')}
   ${table(cmp, [['m', 'Metric'], ['a', 'A', n1], ['b', 'B', n1], ['d', 'B − A', (v) => sgn(v, 1)]])}
   ${plot([{ x: ha.map((h) => h.hole), y: ha.map((h) => h.to_par), type: 'bar', name: 'A' }, { x: hb.map((h) => h.hole), y: hb.map((h) => h.to_par), type: 'bar', name: 'B' }], { barmode: 'group', height: 240, title: 'To par by hole', xaxis: { dtick: 1 } })}
@@ -573,7 +576,7 @@ function pageEdit(embed = false) {
 }
 
 function pageSettings() {
-  const tab = segVal('st_tab', 'clubs'), st = state.settings;
+  const tab = segVal('st_tab', 'general'), st = state.settings;
   let body = '';
   if (tab === 'clubs') {
     const clubs = DS.clubs;
@@ -614,7 +617,7 @@ function pageSettings() {
     <label class="sw"><input type="checkbox" id="feelMotion" ${fl.motion ? 'checked' : ''}><span><b>${FC.motion}</b><small>${FC.motionNote}</small></span></label>
     <p style="margin:6px 0 0"><button type="button" class="btn sec" id="feelTry">${FC.try}</button> <span class="small muted" id="feelTryOut" aria-live="polite"></span></p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
-  return `${demoBanner()}${links}${unitsCard}${rangeCard}${feelCard}${seg('st_tab', [['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'clubs', 'scroll')}${tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
+  return `${demoBanner()}${links}${seg('st_tab', [['general', 'General'], ['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'general', 'scroll')}${tab === 'general' ? `${unitsCard}${rangeCard}${feelCard}` : tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
@@ -889,7 +892,7 @@ $('#backBtn').addEventListener('click', () => { const k = (location.hash.slice(1
 // bottom bar: Play opens the live round, Rounds goes back to the list (like tapping a tab bar twice on iOS)
 $('#nav').addEventListener('click', (e) => { const h = e.target.closest('a')?.getAttribute('href'); if (h === '#play') ui.pl_tab = 'round'; if (h === '#rounds') ui.rd_open = null; saveUi(); if (h === location.hash) render(); });
 $('#sheet').addEventListener('click', (e) => { if (e.target.id === 'sheet') $('#sheet').classList.remove('open'); });
-addEventListener('hashchange', () => { if (COMP?.handleInvite()) { render(); return; } scrollTo(0, 0); render(); });
+addEventListener('hashchange', () => { $('#sheet').classList.remove('open'); if (COMP?.handleInvite()) { render(); return; } scrollTo(0, 0); render(); });
 (async () => {
   state = await S.loadState(); S.requestPersistence(); rebuild();
   const ctx = { A, S, $, $$, esc, fmt, sgn, note, table, kpi, plot, seg, segVal, select, chips, toast, saveFile, readFile, n0, n1, n2, p0, COLORS, P, css,

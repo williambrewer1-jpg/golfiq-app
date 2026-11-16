@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BreakingPar">
 <meta name="theme-color" content="#0a3d2b">
 <title>BreakingPar</title>
@@ -446,6 +445,23 @@ a.po-home{display:block;text-decoration:none;color:var(--ink)}.po-home .muted{fo
 .du-win{font:700 18px var(--serif);margin:6px 0}.du-win.win{color:var(--good)}.du-win.lose,.du-win.draw{color:var(--ink)}.du-stake{margin:4px 0 8px;font-style:italic}
 .du-card .btn.sm,.du-home .btn.sm,.du-pan .btn.sm{min-height:40px}.du-form{margin:10px 0 0}.du-pan{margin:0 0 10px}.du-rec{white-space:nowrap}.du-home h2{margin:0 0 4px}
 
+
+/* ---- iOS 26: no "black-translucent" status bar (the system blurs the top of a page that runs under it). The app now starts
+   below an opaque status bar, which iOS tints from the page background, so the page edge is the header green when installed. */
+@media (display-mode:standalone){html{background:var(--head)}body{min-height:100vh;min-height:100dvh}}
+/* ---- floating glass tab bar (a CSS take on Liquid Glass: translucent, blurred, rounded, lifted off the bottom edge) */
+nav.bottom{left:10px;right:10px;bottom:max(10px,calc(env(safe-area-inset-bottom) - 14px));padding:5px;border:1px solid rgba(255,255,255,.2);border-radius:999px;
+  background:color-mix(in srgb,var(--head) 80%,transparent);-webkit-backdrop-filter:blur(22px) saturate(1.8);backdrop-filter:blur(22px) saturate(1.8);
+  box-shadow:0 12px 30px -10px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.28),inset 0 -1px 0 rgba(0,0,0,.18);max-width:560px;margin:0 auto}
+nav.bottom a{border-radius:999px;padding:6px 0 5px;color:rgba(255,255,255,.86);transition:background .18s ease,color .18s ease}
+nav.bottom a.on{color:var(--flag);background:rgba(255,255,255,.14);box-shadow:inset 0 1px 0 rgba(255,255,255,.18)}
+nav.bottom a:active{background:rgba(255,255,255,.2)}
+@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){nav.bottom{background:var(--head)}}
+@media (prefers-reduced-transparency:reduce){nav.bottom{background:var(--head);-webkit-backdrop-filter:none;backdrop-filter:none}}
+main{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+/* ---- review fixes */
+.plot.off{min-height:0}
+main input[type=checkbox],.sheet input[type=checkbox]{width:24px;height:24px;flex:none}
 </style>
 </head>
 <body>

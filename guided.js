@@ -138,7 +138,7 @@ export function registerGuided(c) {
     c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
     c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) }; if (res.duel) c.compete.duelFinished(res, d.target);       // the duel's final status is worked out on this phone
     // the result is already saved; with a delay only the screen waits, so the last verdict can be read before the result appears
-    const show = () => { busy = false; c.toast(up ? `${up.name} tier reached – ${g.name}` : `Saved: ${sc(res.score)}`); c.rerender(); scrollTo(0, 0); };
+    const show = () => { busy = false; c.rerender(); scrollTo(0, 0); };   // the result screen itself announces the score and any new tier
     if (opts.delay > 0) later(opts.delay, show); else show();
   }
 
