@@ -31,6 +31,7 @@ def page(b, w=390, h=844, sample=True, cloud=False):
     if cloud: pg.add_init_script(FAKE); pg.add_init_script(GLUE)
     pg.goto(URL); pg.wait_for_selector('#loadSample')
     if sample: pg.click('#loadSample'); pg.wait_for_timeout(1500)
+    elif pg.query_selector('[data-obskip]'): pg.click('[data-obskip]'); pg.wait_for_timeout(400)      # a fresh app shows the first-run intro (part A); skipping it leaves the app with no data
     if cloud: pg.evaluate(SEED_CLOUD)
     return ctx, pg, errs
 
