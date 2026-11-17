@@ -1,5 +1,5 @@
 // Offline cache for the app shell (code only - your golf data lives in IndexedDB, not here).
-const CACHE = 'golfiq-v33';
+const CACHE = 'golfiq-v34';
 const SHELL = ['./', 'index.html', 'app.js', 'analytics.js', 'store.js', 'sync.js', 'baseline.js', 'bookmarklet.js', 'features.js', 'pages2.js', 'play.js', 'holemap.js', 'strategy.js', 'bench.js', 'sidegames.js', 'cloud.js', 'compete.js', 'friends.js', 'coach.js', 'progress.js', 'skills.js', 'games.js', 'guided.js', 'feel.js', 'charts.js', 'sessions.js', 'level.js', 'payoff.js', 'locker.js', 'kudos.js', 'duels.js', 'journey.js', 'boss.js', 'challenges.js', 'skillstest.js', 'league.js', 'aicoach.js', 'wallpaper.js', 'icons.js', 'onboarding.js',
   'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 const LIB = 'golfiq-lib-v1';   // the chart library (Plotly): fetched the first time a page needs it, then kept across app updates

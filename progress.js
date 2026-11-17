@@ -8,6 +8,7 @@ import * as BS from './boss.js';
 import * as SK from './skills.js';
 import * as GM from './games.js';
 import * as LV from './level.js';
+import * as ONB from './onboarding.js';
 import * as PO from './payoff.js';
 import * as DU from './duels.js';
 import * as LCK from './locker.js';
@@ -85,6 +86,7 @@ export function registerProgress(c) {
     const top = pl.ledger[0];
     return `<div class="card prog-hero"><h2>Your potential in 6 months</h2>
       <div class="prog-big"><div><span>Now</span><b>${n1(fc.current)}</b></div><i>→</i><div><span>Potential</span><b class="good">${n1(fc.potential)}</b><small>by ${esc(when)}</small></div></div>
+      ${goalCompare(v)}
       <p class="prog-claim">A target of <b>${n1(drop)} shot${Math.abs(drop - 1) < 0.05 ? '' : 's'}</b> off your handicap – and you decide how much of it you earn.</p>
       <div class="pot-bar" aria-label="Where your potential comes from">${seg('base', pl.base)}${seg('mom', pl.momentum)}${seg('unl', pl.unlocked)}${seg('lock', left)}</div>
       <div class="pot-key"><span><i class="base"></i>Base <b>${n1(pl.base)}</b></span><span><i class="mom"></i>Momentum <b>${n1(pl.momentum)}</b></span><span><i class="unl"></i>Unlocked <b>${n1(pl.unlocked)}</b></span>${left >= 0.05 ? `<span><i class="lock"></i>Up to <b>${n1(left)}</b> more to unlock</span>` : ''}</div>
@@ -222,6 +224,31 @@ export function registerProgress(c) {
     return `<div class="card lvfreeze" data-freezeline><span class="lvf-ic">${icon('shield', 24)}</span><p>${esc(FEEL.COPY.freeze.saved(v.st.saved[wk]))}</p><button type="button" class="btn sec" data-freezeok>${esc(FEEL.COPY.freeze.gotIt)}</button></div>`;
   }
   // the top of Home: the rank chip (opens the level sheet) and the freeze line
+  // ---------------------------------------------------------------- the goal from the intro (onboarding.js): Home line and bar, sessions this week
+  const goalName = (key) => FEEL.COPY.intro.goal.goals[key];
+  const monthYear = (iso) => { const d = new Date(`${iso}T12:00:00`); return d.toLocaleDateString(undefined, d.getFullYear() === new Date().getFullYear() ? { month: 'long' } : { month: 'long', year: 'numeric' }); };
+  // the level the goal is measured from: the index when there is one, else the practice level, else the intro's estimate
+  const goalState = () => { const v = data(), pf = ONB.readProfile(c.state.settings); return { v, pf, gp: ONB.goalProgress({ profile: pf, index: v.jidx, practice: ONB.practiceAvg(v.sk.skills) }) }; };
+  const goalLevelNow = () => goalState().gp?.level ?? ONB.startLevel(ONB.readProfile(c.state.settings), null)?.level ?? null;
+  function goalHome() {
+    const pf = ONB.readProfile(c.state.settings); if (!pf.goal && !pf.per_week) return '';
+    const { gp } = goalState(), K = FEEL.COPY.goal, parts = [];
+    if (gp) {
+      const by = gp.due && !gp.overdue ? monthYear(gp.due) : '';
+      parts.push(`<p class="goalline"><b>${esc(K.line(goalName(gp.key), by))}</b></p>`);
+      if (gp.progress !== null) parts.push(`<div class="bar" role="img" aria-label="${esc(`${Math.round(gp.progress * 100)}%`)}"><i style="width:${Math.round(gp.progress * 100)}%"></i></div>`);
+      if (A.isNum(gp.level)) parts.push(`<p class="small muted goalcap">${esc(K.caption(K.basis[gp.basis], n1(gp.level, gp.basis === 'estimate' ? 0 : 1), gp.target))}</p>`);
+      if (gp.reached) parts.push(`<p class="small">${esc(K.reached)}</p>`); else if (gp.overdue) parts.push(`<p class="small">${esc(K.overdue)}</p>`);
+    }
+    if (pf.per_week) parts.push(`<p class="goalweek">${esc(K.week(ONB.sessionsThisWeek(CO.practiceDates(J())), pf.per_week))}</p>`);
+    return parts.length ? `<div class="card goalrow" id="goalRow">${parts.join('')}</div>` : '';
+  }
+  // Progress → Potential: one line setting the goal beside the potential
+  function goalCompare(v) {
+    const gp = ONB.goalProgress({ profile: ONB.readProfile(c.state.settings), index: v.jidx, practice: ONB.practiceAvg(v.sk.skills) });
+    if (!gp || !A.isNum(gp.target) || !v.fc.ok) return '';
+    return `<p class="small goalcmp">${esc(FEEL.COPY.goal.potential(monthYear(new Date(Date.now() + 182 * 864e5).toISOString().slice(0, 10)), n1(v.fc.potential), goalName(gp.key), gp.target))}</p>`;
+  }
   function levelRow() {
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
     const v = data(); return `<div class="lvrow">${chip(v)}</div>${freezeCard(v)}`;
@@ -452,5 +479,5 @@ export function registerProgress(c) {
       <div><span>Streak</span><b>${v.st.current}</b><small>week${v.st.current === 1 ? '' : 's'} ${shield(v.st.freezes_held)}</small></div></div>
       ${g ? `<p class="small" style="margin:8px 0 0">This week: <b>${esc(g.name)}</b>${A.isNum(g.target) ? ` – target ${sc(g.target)}` : ''} · ${g.attempts}/${g.per_week} sessions${g.done ? ' ✓' : ''}</p>` : ''}</a>`;
   }
-  return { page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, lockerPage, applyLook, look, roundPayoffHtml, homePayoff, predictionsCard, tiles };
+  return { goalHome, goalLevelNow, page, homeCard, data, levelUpCard, wire, levelRow, levelSheet, afterRender, shield, journeyPage, journeyHome, advance, lockerPage, applyLook, look, roundPayoffHtml, homePayoff, predictionsCard, tiles };
 }

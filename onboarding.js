@@ -1,4 +1,5 @@
 // onboarding.js — the first-run intro: who sees it, the "no handicap" level choices, the goals, and the profile that is saved.
+// A2 (goal on Home / Progress / Settings): goalProgress, sessionsThisWeek, practiceAvg, setGoal.
 // Pure logic only (no DOM); the screens are drawn and wired in app.js. Every number here is a default and can be tuned.
 //
 //   needsOnboarding({ settings, journal, rounds })  true for a fresh app that has not been through (or skipped) the intro
@@ -30,6 +31,7 @@ export const GOAL_MONTHS = [3, 6, 12], DEFAULT_MONTHS = 6;
 export const PER_WEEK = [1, 2, 3], DEFAULT_PER_WEEK = 2;
 export const NAME_MAX = 30;
 export const HCP_MIN = -10, HCP_MAX = 54;                 // World Handicap System range (plus handicaps are negative here, as in Settings → Handicap)
+import { isoWeek } from './bench.js';
 export const INTRO_SCREENS = 4;
 export const FIRST_GAME = 'putt-369';                     // "Play my first game" — part B makes this step 1 of the first week
 
@@ -65,6 +67,7 @@ const cleanName = (s) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, NA
 export function buildProfile(a = {}, today) {
   const hcp = isNum(a.hcp) ? a.hcp : null, goal = GOALS.some((g) => g.key === a.goal) ? a.goal : preselectGoal(startLevel({ level_choice: a.level_choice }, hcp)?.level);
   const p = { onboarded_at: today, goal: { key: goal, months: GOAL_MONTHS.includes(a.months) ? a.months : DEFAULT_MONTHS, set_at: today }, per_week: PER_WEEK.includes(a.per_week) ? a.per_week : DEFAULT_PER_WEEK };
+  const from = startLevel({ level_choice: a.level_choice }, hcp)?.level; if (isNum(from)) p.goal.from = from;     // the level the progress bar starts from (an estimate when there is no handicap)
   const name = cleanName(a.name); if (name) p.name = name;
   if (hcp === null && levelOf(a.level_choice) !== null) p.level_choice = a.level_choice;   // a typed handicap goes into the handicap history instead
   return p;
@@ -82,6 +85,45 @@ export function readProfile(settings) {
   const name = cleanName(p.name); if (name) out.name = name;
   if (levelOf(p.level_choice) !== null) out.level_choice = p.level_choice;
   if (p.goal && GOALS.some((g) => g.key === p.goal.key)) out.goal = { key: p.goal.key, months: GOAL_MONTHS.includes(p.goal.months) ? p.goal.months : DEFAULT_MONTHS, set_at: typeof p.goal.set_at === 'string' ? p.goal.set_at : null };
+  if (out.goal && isNum(p.goal.from)) out.goal.from = p.goal.from;
   if (PER_WEEK.includes(p.per_week)) out.per_week = p.per_week;
   return out;
+}
+
+// ---------------------------------------------------------------- A2: the goal on Home, Progress and Settings
+const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+// the date a goal is due: the day it was set plus its months (clamped to the end of a short month)
+export function goalDue(goal) {
+  if (!goal?.set_at) return null; const [y, m, d] = goal.set_at.split('-').map(Number); if (!y || !m || !d) return null;
+  const t = new Date(y, m - 1 + (GOAL_MONTHS.includes(goal.months) ? goal.months : DEFAULT_MONTHS), 1), last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+  t.setDate(Math.min(d, last)); return iso(t);
+}
+// The practice level from the rated skills: the average of their practice handicaps (skills.js `practice_hcp`). Null until one skill has a practice rating.
+export function practiceAvg(skills) { const v = (skills || []).map((k) => k.practice_hcp).filter(isNum); return v.length ? Math.round((v.reduce((t, x) => t + x, 0) / v.length) * 10) / 10 : null; }
+// Where the golfer is against their goal. The level used is the handicap index when there is one, otherwise the practice level, otherwise the estimate from the intro.
+// → null when no goal is set; target is null for "Just enjoy practising" (a goal with no number).
+export function goalProgress({ profile, index = null, practice = null, now = new Date() } = {}) {
+  const g = profile?.goal; if (!g) return null;
+  const target = goalLevel(g.key), due = goalDue(g), today = iso(now);
+  const cur = isNum(index) ? { level: index, basis: 'index' } : isNum(practice) ? { level: practice, basis: 'practice' } : isNum(profile.level_choice !== undefined ? levelOf(profile.level_choice) : null) ? { level: levelOf(profile.level_choice), basis: 'estimate' } : null;
+  const out = { key: g.key, months: g.months, target, due, overdue: !!due && due < today, from: isNum(g.from) ? g.from : null, level: cur?.level ?? null, basis: cur?.basis ?? null, reached: false, progress: null };
+  if (!isNum(target) || !cur) return out;
+  out.reached = cur.level <= target;
+  if (out.reached) out.progress = 1;
+  else if (isNum(out.from) && out.from > target) out.progress = Math.max(0, Math.min(1, (out.from - cur.level) / (out.from - target)));   // never below 0: getting worse is not shown as going backwards
+  return out;
+}
+// Days with practice (a game score, a practice session or a wedge entry) in this ISO week. A "session" here is a day of practice; the weekly-streak rule is unchanged.
+export function sessionsThisWeek(dates, now = new Date()) {
+  const wk = isoWeek(now); return new Set((dates || []).filter((d) => isoWeek(new Date(`${d}T12:00:00`)) === wk)).size;
+}
+// Settings → General: change the goal, date and sessions per week. Only the fields given are changed; changing the goal or date restarts it from today at the current level.
+export function setGoal(profile, { key, months, per_week, level = null }, today) {
+  const p = { ...(profile || {}) }, was = p.goal;
+  if (PER_WEEK.includes(per_week)) p.per_week = per_week;
+  if (key !== undefined && key !== '' && GOALS.some((x) => x.key === key)) {
+    const m = GOAL_MONTHS.includes(months) ? months : (was?.months || DEFAULT_MONTHS), same = was && was.key === key && was.months === m;
+    p.goal = same ? { ...was } : { key, months: m, set_at: today, ...(isNum(level) ? { from: level } : {}) };
+  }
+  return p;
 }
