@@ -52,4 +52,23 @@ t('daily streak counts back from today or yesterday', () => {
   const d = { '2026-05-04': 'a', '2026-05-03': 'b', '2026-05-02': 'c', '2026-04-30': 'x' };
   assert.equal(S.dailyStreak(d, '2026-05-04'), 3); assert.equal(S.dailyStreak(d, '2026-05-05'), 3); assert.equal(S.dailyStreak(d, '2026-05-06'), 0); assert.equal(S.dailyStreak({}, '2026-05-04'), 0);
 });
+// ---- first-run plan B5: the 15-minute session and the short daily challenge
+t('15 minutes is offered first and holds two short games', () => {
+  assert.deepEqual(S.SESSION_LENGTHS, [15, 30, 45, 60]); assert.equal(S.SHORT_SESSION, 15);
+  const s = S.buildSession({ minutes: 15, ratings, today: '2026-05-04', pool: B.CHALLENGE_POOL });
+  assert.equal(s.games.length, 2); assert.ok(s.games.every((g) => g.minutes <= S.SHORT_GAME_MAX), JSON.stringify(s.games)); assert.ok(s.total <= 16, s.total);
+});
+t('a 15-minute session with no ratings still fills from the short pool games', () => {
+  const s = S.buildSession({ minutes: 15, ratings: { skills: [], focus: [] }, today: '2026-05-04', pool: B.CHALLENGE_POOL });
+  assert.equal(s.games.length, 2); assert.ok(s.games.every((g) => G.minutesFor(g.id) <= S.SHORT_GAME_MAX));
+});
+t('a new golfer\'s daily challenge is 10 minutes or less, every day, focus days included', () => {
+  const o = { focusGames: ['chip-updown', 'putt-lag', 'range-greens'], pool: B.CHALLENGE_POOL, maxMinutes: 10 };
+  for (let i = 0; i < 28; i++) { const c = S.dailyChallenge(S.addDays('2026-05-04', i), o); assert.ok(G.minutesFor(c.game) <= 10, c.game); }
+});
+t('without the limit the daily challenge is as before', () => {
+  const o = { focusGames: ['chip-updown'], pool: B.CHALLENGE_POOL };
+  for (let i = 0; i < 14; i++) { const d = S.addDays('2026-05-04', i); assert.deepEqual(S.dailyChallenge(d, o), S.dailyChallenge(d, { ...o, maxMinutes: Infinity })); }
+});
+t('a limit nothing meets falls back to the whole pool', () => { assert.ok(B.CHALLENGE_POOL.includes(S.dailyChallenge('2026-05-04', { pool: B.CHALLENGE_POOL, maxMinutes: 1 }).game)); });
 console.log(`${n} tests passed`);

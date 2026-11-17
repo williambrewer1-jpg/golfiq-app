@@ -373,7 +373,7 @@ export const COPY = {
   next: 'Up next',
   progress: (i, n) => `${i} of ${n} done`,
   daily: { title: "Today's challenge", streak: (n) => (n ? `${n} ${n === 1 ? 'week' : 'weeks'} in a row` : 'no streak yet'), play: "Play today's challenge", doneTag: 'Done', doneLine: 'done today' },
-  session: { name: 'Session', test: 'Skills test', start: (name) => `Start ${name}`, finish: 'Finish session', finishTest: 'Finish test', done: 'Session done', testDone: 'Skills test done', hit: 'targets hit', first: 'This is your first test, so there is nothing to compare with yet.',
+  session: { suggested: 'Suggested', name: 'Session', test: 'Skills test', start: (name) => `Start ${name}`, finish: 'Finish session', finishTest: 'Finish test', done: 'Session done', testDone: 'Skills test done', hit: 'targets hit', first: 'This is your first test, so there is nothing to compare with yet.',
     better: (n, t) => `${n} of ${t} ${t === 1 ? 'skill' : 'skills'} better than last test`, rated: (n) => `${n} ${n === 1 ? 'skill' : 'skills'} rated`, potential: 'Potential now' },
   sound: { on: 'Sound on', off: 'Sound off' },
   settings: {

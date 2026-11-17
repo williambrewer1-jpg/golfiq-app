@@ -111,12 +111,14 @@ t('an index always wins over the practice level', () => {
   const j = J.journey({ index: 13.2, practice: 24, games }); assert.equal(j.basis, 'index'); assert.equal(j.stretches[0].state, 'course'); assert.equal(j.current.n, 10);
   assert.equal(J.journey({ index: null, practice: null, games }).basis, null);
 });
-t('new golfer: no rounds, and under 14 days since the first practice result', () => {
-  const now = new Date('2026-11-24T10:00:00Z'), j = (d) => ({ results: [{ id: 'a', game: 'putt-369', date: d, score: 5 }] });
-  assert.ok(FW.isNewGolfer({ journal: { results: [] }, rounds: [], now }));
+t('new golfer: under 14 days since the first practice result, rounds or not', () => {
+  const now = new Date('2026-11-24T10:00:00Z'), j = (d) => ({ results: [{ id: 'a', game: 'putt-369', date: d, score: 5 }, { id: 'b', game: 'putt-lag', date: '2026-11-23', score: 5 }] });
+  assert.ok(FW.isNewGolfer({ journal: { results: [] }, rounds: [], now }), 'no practice yet');
   assert.ok(FW.isNewGolfer({ journal: j('2026-11-11'), rounds: [], now }), '13 days');
-  assert.ok(!FW.isNewGolfer({ journal: j('2026-11-10'), rounds: [], now }), '14 days');
-  assert.ok(!FW.isNewGolfer({ journal: { results: [] }, rounds: [{ round_id: 1 }], now }), 'rounds loaded');
+  assert.ok(!FW.isNewGolfer({ journal: j('2026-11-10'), rounds: [], now }), '14 days: the window is from the first result, not the latest');
+  assert.ok(FW.isNewGolfer({ journal: j('2026-11-11'), rounds: [{ round_id: 1 }], now }), 'rounds do not end it');
+  assert.ok(!FW.isNewGolfer({ journal: j('2026-10-01'), rounds: [], now }), 'no rounds does not keep it going');
+  assert.equal(FW.NEW_DAILY_MAX, 10);
 });
 t('finishing earns 100 points once, outside the daily cap; skipping earns none', () => {
   const lv = playerLevel({ journal: { results: [], first_week: { done_at: '2026-11-10' } }, games });

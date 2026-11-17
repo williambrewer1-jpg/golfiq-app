@@ -4,17 +4,20 @@ import { GUIDED, minutesFor } from './games.js';
 const DAY = 864e5;
 const iso = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 export const addDays = (date, n) => iso(new Date(new Date(`${date}T12:00:00`).getTime() + n * DAY));
-export const GAME_COUNT = { 30: 2, 45: 3, 60: 4 };
+export const GAME_COUNT = { 15: 2, 30: 2, 45: 3, 60: 4 };
+// first-run plan B5: a 15-minute session for everyone, offered first. It holds two short games, each at most SHORT_GAME_MAX minutes.
+export const SESSION_LENGTHS = [15, 30, 45, 60], SHORT_SESSION = 15, SHORT_GAME_MAX = 8;
 export const SESSION_SKILL_FOCUS = { putting: 'three_putts', short: 'scrambling', approach: 'gir', driving: 'fairways' };
 
 // Build a session of 2, 3 or 4 games from the two focus skills: weakest sub-skill first, alternating skills,
 // and nothing that was played yesterday while there is still something else to play.
 export function buildSession({ minutes = 45, ratings, results = [], today, pool = [] } = {}) {
   const want = GAME_COUNT[minutes] || (minutes <= 30 ? 2 : minutes <= 45 ? 3 : 4), yest = addDays(today, -1);
+  const fits = (id) => minutes > SHORT_SESSION || minutesFor(id) <= SHORT_GAME_MAX;    // a short session takes short games only
   const played = new Set(results.filter((r) => String(r.date).slice(0, 10) === yest).map((r) => r.game));
   const skills = ratings?.skills || [], focusKeys = ratings?.focus || [];
   const lanes = (keys) => keys.map((k) => skills.find((s) => s.key === k)).filter(Boolean).map((s) => ({
-    skill: s, queue: [...s.subs].sort((a, b) => (b.strokes || 0) - (a.strokes || 0)).flatMap((sub) => sub.games.filter((g) => GUIDED.has(g.id)).map((g) => ({ id: g.id, name: g.name, skill: s.key, skill_title: s.title, sub: sub.title, target: g.target, better: g.better }))) }));
+    skill: s, queue: [...s.subs].sort((a, b) => (b.strokes || 0) - (a.strokes || 0)).flatMap((sub) => sub.games.filter((g) => GUIDED.has(g.id) && fits(g.id)).map((g) => ({ id: g.id, name: g.name, skill: s.key, skill_title: s.title, sub: sub.title, target: g.target, better: g.better }))) }));
   const picked = [], has = (id) => picked.some((x) => x.id === id);
   const drain = (ls, avoidPlayed) => {
     let progress = true;
@@ -31,7 +34,7 @@ export function buildSession({ minutes = 45, ratings, results = [], today, pool 
   drain(focus, true);
   if (picked.length < want) drain(lanes(skills.filter((s) => s.rated && !focusKeys.includes(s.key)).sort((a, b) => b.strokes - a.strokes).map((s) => s.key)), true);
   if (picked.length < want) drain(focus, false);
-  for (const id of pool) { if (picked.length >= want) break; if (GUIDED.has(id) && !has(id) && !played.has(id)) picked.push({ id, name: id, skill: null }); }
+  for (const id of pool) { if (picked.length >= want) break; if (GUIDED.has(id) && fits(id) && !has(id) && !played.has(id)) picked.push({ id, name: id, skill: null }); }
   const games = picked.map((g) => ({ ...g, minutes: minutesFor(g.id) }));
   // keep it roughly in the time asked for
   while (games.length > 2 && games.reduce((t, g) => t + g.minutes, 0) > minutes * 1.3) games.pop();
@@ -41,8 +44,10 @@ export function buildSession({ minutes = 45, ratings, results = [], today, pool 
 // Same game for the same date. On four days a week it comes from the focus areas, otherwise from the general pool.
 export const FOCUS_DAYS = [1, 2, 4, 6];                                   // Mon, Tue, Thu, Sat
 const hash = (s) => { let h = 7; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
-export function dailyChallenge(date, { focusGames = [], pool = [] } = {}) {
-  const dow = new Date(`${date}T12:00:00`).getDay(), n = hash(date), fg = [...new Set(focusGames)].filter((id) => GUIDED.has(id)).sort(), pl = pool.filter((id) => GUIDED.has(id));
+// maxMinutes (first-run plan B5): a new golfer's challenge is a game of at most that many minutes. If nothing in the pool is that short, the limit is dropped.
+export function dailyChallenge(date, { focusGames = [], pool = [], maxMinutes = Infinity } = {}) {
+  const short = (id) => minutesFor(id) <= maxMinutes, pl0 = pool.filter((id) => GUIDED.has(id)), pls = pl0.filter(short);
+  const dow = new Date(`${date}T12:00:00`).getDay(), n = hash(date), fg = [...new Set(focusGames)].filter((id) => GUIDED.has(id) && short(id)).sort(), pl = pls.length ? pls : pl0;
   if (FOCUS_DAYS.includes(dow) && fg.length) return { game: fg[n % fg.length], focus: true };
   return { game: pl[n % pl.length], focus: false };
 }

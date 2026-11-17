@@ -19,7 +19,8 @@ export const STEPS = [
   { n: 5, title: 'Off the tee', game: 'range-driver', alt: 'putt-369', skill: 'driving' },
 ];
 export const SHORT_MAX_MIN = 15;          // a first-week step takes at most this many minutes (every listed game fits today, so none needs a shorter version)
-export const NEW_DAYS = 14;               // how long after the first practice result a golfer with no rounds still counts as new
+export const NEW_DAYS = 14;               // a golfer counts as new until this many days after their first practice result
+export const NEW_DAILY_MAX = 10;          // a new golfer's daily challenge is a game of at most this many minutes
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const day = (s) => String(s || '').slice(0, 10);
@@ -65,9 +66,9 @@ export function practiceLevel(ratings) {
   return v.length ? r1(v.reduce((t, x) => t + x, 0) / v.length) : null;
 }
 
-// For part B2 (short early practice): no rounds loaded, and either no practice yet or the first practice result is under NEW_DAYS days old.
+// Part B5 (short early practice): a golfer is new until NEW_DAYS days after their first practice result, whether or not they have rounds
+// (Wills, 17 Nov 2026). Before any practice result they count as new too. `rounds` is accepted for the plan's signature but does not decide it.
 export function isNewGolfer({ journal = {}, rounds = [], now = new Date() } = {}) {
-  if (rounds.length) return false;
   const first = (journal.results || []).map((r) => day(r.date)).filter(Boolean).sort()[0]; if (!first) return true;
   const t = now instanceof Date ? now : new Date(now), days = (Date.parse(`${day(t.toISOString())}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 864e5;
   return days < NEW_DAYS;

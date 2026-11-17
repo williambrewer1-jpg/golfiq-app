@@ -446,10 +446,13 @@ export function registerGuided(c) {
   }
 
   // ------------------------------------------------------------ the daily challenge
+  const isNew = () => FW.isNewGolfer({ journal: J(), rounds: c.DS.rounds, now: new Date() });
   const focusGames = () => { const v = c.progress.data(); return v.sk.skills.filter((s) => (v.sk.focus || []).includes(s.key)).flatMap((s) => s.subs.flatMap((x) => x.games.map((g) => g.id))); };
   function dailyPick() {
     const d = today(); if (J().daily_pick?.date === d) return J().daily_pick;
-    const pick = { date: d, ...SS.dailyChallenge(d, { focusGames: focusGames(), pool: B.CHALLENGE_POOL }) }; J().daily_pick = pick; return pick;
+    // a new golfer (firstweek.js isNewGolfer) gets a short game: at most FW.NEW_DAILY_MAX minutes
+    const maxMinutes = isNew() ? FW.NEW_DAILY_MAX : Infinity;
+    const pick = { date: d, ...SS.dailyChallenge(d, { focusGames: focusGames(), pool: B.CHALLENGE_POOL, maxMinutes }) }; J().daily_pick = pick; return pick;
   }
   function afterResult(res) {
     const d = today(), pick = dailyPick(); J().daily = J().daily || {};
@@ -483,11 +486,14 @@ export function registerGuided(c) {
   }
 
   // ------------------------------------------------------------ sessions: 30, 45 or 60 minutes of back-to-back guided games
-  const sessionPlan = (m) => SS.buildSession({ minutes: m, ratings: c.progress.data().sk, results: J().results || [], today: today(), pool: B.CHALLENGE_POOL });
+  const sessionPlan = (m) => { const p = SS.buildSession({ minutes: m, ratings: c.progress.data().sk, results: J().results || [], today: today(), pool: B.CHALLENGE_POOL });
+    return { ...p, games: p.games.map((x) => ({ ...x, name: gameOf(x.id)?.name || x.name })) }; };   // games from the general pool carry only their id as a name
   function sessionCard() {
     if (!c.DS.rounds.length && !(J().results || []).length) return '';
+    // first-run plan B5: 15 minutes is offered first to everyone; for a new golfer it is the highlighted choice (the buttons start at once, so "preselected" = the main button)
+    const pre = isNew() ? SS.SHORT_SESSION : null, K = FEEL.COPY.session;
     return `<div class="card"><h2>Build my session</h2><p class="small muted" style="margin:0 0 8px">Games for your two focus areas, weakest first, played back to back.</p>
-      <div class="gp-ses">${[30, 45, 60].map((m) => { const p = sessionPlan(m); return `<button class="btn sec" data-gpses="${m}"><b>${m} min</b><small>${p.games.length} games · ${esc(p.games.map((x) => x.name).join(', '))}</small></button>`; }).join('')}</div></div>`;
+      <div class="gp-ses">${SS.SESSION_LENGTHS.map((m) => { const p = sessionPlan(m); if (!p.games.length) return ''; return `<button class="btn${m === pre ? ' gp-sespre' : ' sec'}" data-gpses="${m}"${m === pre ? ' aria-describedby="gpSesPre"' : ''}><b>${m} min${m === pre ? ` <span class="tag" id="gpSesPre">${esc(K.suggested)}</span>` : ''}</b><small>${p.games.length} games · ${esc(p.games.map((x) => x.name).join(', '))}</small></button>`; }).join('')}</div></div>`;
   }
   const startMarks = () => { const v = c.progress.data(); return { pot_start: v.fc.ok ? v.fc.potential : null, st_start: v.st ? v.st.current : null }; };   // for the summary's count-up
   async function startSession(minutes) {
