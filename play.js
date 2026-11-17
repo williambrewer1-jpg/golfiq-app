@@ -7,6 +7,7 @@ import * as CH from './challenges.js';
 import * as PO from './payoff.js';
 import * as FEEL from './feel.js';
 import { registerFriends } from './friends.js';
+import { registerCourse, CV_AUTO_OPEN } from './course.js';
 
 export function registerPlay(c) {
   const { A, S, $, $$, esc, fmt, note, plot, seg, segVal, select, toast, COLORS } = c;
@@ -16,6 +17,8 @@ export function registerPlay(c) {
 
   const saveDraft = () => S.saveJournal(c.state);
   const FR = registerFriends(c);
+  let CV = null;                                                     // the Course view (course.js), set up below
+  const redraw = () => (CV?.active() ? CV.redraw() : c.rerender());
   const courses = () => [...new Map(c.DS.rounds.filter((r) => r.course_id).map((r) => [r.course_id, r])).values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   // ------------------------------------------------------------ start a round
@@ -114,12 +117,14 @@ export function registerPlay(c) {
     if (!navigator.geolocation) { gpsErr = 'This browser has no location service'; return; }
     if (watchId !== null) return;
     watchId = navigator.geolocation.watchPosition((p) => {
+      // Course view: keep every fix; it redraws only its moving layer, at most once a second
+      if (CV.active()) { fix = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() }; gpsErr = ''; CV.onFix(); return; }
       const first = !fix, moved = fix ? A.haversine(fix.lat, fix.lon, p.coords.latitude, p.coords.longitude) : 1e9;
       if (!first && moved <= 6) { fix.acc = p.coords.accuracy; return; }           // ignore GPS jitter while standing still
       if (!first && Date.now() - lastDraw <= 4000) return;                          // redraw at most every 4 s while walking
       fix = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: Date.now() }; gpsErr = '';
       if ((location.hash.slice(1) || '').startsWith('play') && !dragging && !document.activeElement?.matches?.('input,select,textarea')) c.rerender();
-    }, (e) => { gpsErr = e.code === 1 ? 'Location permission was declined – allow it for this site in Settings → Safari → Location' : 'No GPS signal yet'; if ((location.hash.slice(1) || '') === 'play') c.rerender(); },
+    }, (e) => { gpsErr = e.code === 1 ? 'Location permission was declined – allow it for this site in Settings → Safari → Location' : 'No GPS signal yet'; if (CV.active()) CV.onFix(); else if ((location.hash.slice(1) || '') === 'play') c.rerender(); },
     { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 });
   }
   function stopGps() { if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
@@ -270,7 +275,7 @@ export function registerPlay(c) {
     if (!wxBusy && navigator.onLine !== false) {
       wxBusy = true;
       fetch(`https://api.open-meteo.com/v1/forecast?latitude=${pos[0].toFixed(4)}&longitude=${pos[1].toFixed(4)}&current=temperature_2m,wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh`)
-        .then((r) => (r.ok ? r.json() : null)).then(async (j) => { if (j?.current && D()) { D().wx = { t: Date.now(), temp_c: j.current.temperature_2m, wind_kmh: j.current.wind_speed_10m, wind_from: j.current.wind_direction_10m }; await saveDraft(); if (!dragging) c.rerender(); } })
+        .then((r) => (r.ok ? r.json() : null)).then(async (j) => { if (j?.current && D()) { D().wx = { t: Date.now(), temp_c: j.current.temperature_2m, wind_kmh: j.current.wind_speed_10m, wind_from: j.current.wind_direction_10m }; await saveDraft(); if (!dragging) redraw(); } })
         .catch(() => {}).finally(() => { wxBusy = false; });
     }
     return w || null;
@@ -280,7 +285,7 @@ export function registerPlay(c) {
     if (elevBusy.has(key) || navigator.onLine === false) return; elevBusy.add(key);
     fetch(ST.elevUrl(spec.points)).then((r) => (r.ok ? r.json() : null)).then(async (j) => {
       if (!Array.isArray(j?.elevation) || j.elevation.length !== spec.points.length) return;
-      const { points, ...g } = spec; c.state.elev[key] = { ...g, values: j.elevation, fetched: new Date().toISOString() }; await S.saveElev(c.state); if (!dragging) c.rerender();
+      const { points, ...g } = spec; c.state.elev[key] = { ...g, values: j.elevation, fetched: new Date().toISOString() }; await S.saveElev(c.state); if (!dragging) redraw();
     }).catch(() => {});
   }
   function strategyHtml() {
@@ -294,6 +299,11 @@ export function registerPlay(c) {
       <div class="recs">${res.slice(0, 6).map((r, i) => `<button type="button" class="recrow" data-usestrat="${i}"><span class="rc">${i ? '' : '★ '}${esc(r.club)}${r.goes_for_green ? ' <em>at green</em>' : ''}</span><span class="rp">${fmt(r.expected, 2)} <small>strokes</small></span><span class="rd small muted">${i ? `+${fmt(r.vs_best, 2)} vs best` : 'best option'}</span>${r.out ? `<span class="pill ${r.out.trouble >= 25 ? 'bad' : r.out.trouble >= 10 ? 'mid' : 'good'}">trouble ${fmt(r.out.trouble, 0)}%</span>` : ''}</button>`).join('')}</div>
       <p class="small muted" style="margin:6px 0 0">Tap a club to aim with it.</p>
       <p class="muted">Differences under ~0.05 strokes are within the noise. Based on ${res[0].n} ${esc(res[0].club)} shots. Water counts a penalty and a drop; trees play as a recovery shot.</p>`;
+  }
+  // the option picked from the strategy table (for the Course view's Use buttons)
+  function stratPick(L, i) {
+    const near = L.feats.filter((f) => f.kind !== 'hole'), pl = conditions(L, L.green);
+    return ST.predict({ ds: c.DS, patternOf, pos: L.pos, green: L.green, line: L.line, feats: near, E: c.E, clubs: L.clubs, factor: pl.factor })[i] || null;
   }
   const inFrame = (fr, pts) => pts.some(([la, lo]) => { const [x, y] = fr.xy(la, lo); return x > 0 && x < fr.w && y > 0 && y < fr.h; });
   function osmHint(d, pos) {
@@ -356,31 +366,99 @@ export function registerPlay(c) {
   }
 
   // ------------------------------------------------------------ score entry
-  function scoreCard(d) {
-    const h = d.holes[d.hole], order = Array.from({ length: d.n }, (_, i) => ((d.first - 1 + i) % 18) + 1), idx = order.indexOf(d.hole);
-    const played = order.filter((n) => d.holes[n].strokes > 0), tot = A.sum(played.map((n) => d.holes[n].strokes)), par = A.sum(played.map((n) => d.holes[n].par));
-    const putts = played.map((n) => d.holes[n].putts).filter(A.isNum), fw = played.filter((n) => d.holes[n].par >= 4 && d.holes[n].fairway);
-    const step = (key, label, val, min) => `<div class="step"><span>${label}</span><div><button type="button" data-step="${key}" data-d="-1" aria-label="less">−</button><b>${val ?? '–'}</b><button type="button" data-step="${key}" data-d="1" aria-label="more">+</button></div></div>`;
+  const holeOrder = (d) => Array.from({ length: d.n }, (_, i) => ((d.first - 1 + i) % 18) + 1);
+  function scoreTotals(d) {
+    const played = holeOrder(d).filter((n) => d.holes[n].strokes > 0), tot = A.sum(played.map((n) => d.holes[n].strokes)), par = A.sum(played.map((n) => d.holes[n].par));
+    return { played, tot, par, toPar: tot - par };
+  }
+  const toParText = (v) => (v === 0 ? 'E' : `${v > 0 ? '+' : ''}${v}`);
+  // the steppers for the current hole (classic page, and the Score tab of the Course view)
+  function scoreEntryHtml(d) {
+    const h = d.holes[d.hole], order = holeOrder(d), idx = order.indexOf(d.hole);
+    const step = (key, label, val) => `<div class="step"><span>${label}</span><div><button type="button" data-step="${key}" data-d="-1" aria-label="less">−</button><b>${val ?? '–'}</b><button type="button" data-step="${key}" data-d="1" aria-label="more">+</button></div></div>`;
     const cs = d.challenge ? CH.status(d.challenge, order.map((n) => d.holes[n]), d.n) : null;
     const chip = cs ? `<div class="chal ${cs.state}" id="plChal"><b>${esc(cs.title)}</b><span>${cs.state === 'failed' ? 'missed' : cs.state === 'achieved' ? 'done ✓' : esc(cs.text)}</span></div>` : '';
-    return `<div class="card"><div class="rv-h"><h2 style="margin:0">Score – hole ${d.hole}</h2><span class="small muted">${idx + 1} of ${d.n}</span></div>${chip}
-      <div class="seg" id="plPar">${[3, 4, 5].map((p) => `<button data-par="${p}" class="${h.par === p ? 'on' : ''}">Par ${p}</button>`).join('')}</div>
+    return `${chip}<div class="seg" id="plPar">${[3, 4, 5].map((p) => `<button data-par="${p}" class="${h.par === p ? 'on' : ''}">Par ${p}</button>`).join('')}</div>
       <div class="steps2">${step('strokes', 'Score', h.strokes || null)}${step('putts', 'Putts', h.putts)}${step('penalties', 'Penalties', h.penalties)}</div>
       ${h.par >= 4 ? `<label class="f">Fairway</label><div class="seg" id="plFw">${[['LEFT', 'Missed left'], ['HIT', 'Hit'], ['RIGHT', 'Missed right']].map(([v, l]) => `<button data-fw="${v}" class="${h.fairway === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
-      <div class="row" style="margin-top:6px"><button class="btn sec" id="plPrev" ${idx === 0 ? 'disabled' : ''}>‹ Previous</button><button class="btn" id="plNext">${idx === d.n - 1 ? 'Review & finish' : 'Next hole ›'}</button></div></div>
-      <div class="card"><h2>${esc(d.course_name)}</h2><div class="kpis"><div class="kpi"><div class="l">Thru ${played.length}</div><div class="v">${played.length ? tot : '–'} <span class="small ${tot - par > 0 ? '' : 'bad'}">${played.length ? (tot - par > 0 ? '+' : '') + (tot - par === 0 ? 'E' : tot - par) : ''}</span></div></div>
+      <div class="row" style="margin-top:6px"><button class="btn sec" id="plPrev" ${idx === 0 ? 'disabled' : ''}>‹ Previous</button><button class="btn" id="plNext">${idx === d.n - 1 ? 'Review & finish' : 'Next hole ›'}</button></div>`;
+  }
+  // totals, the hole strip, finish and discard
+  function scoreSummaryHtml(d) {
+    const order = holeOrder(d), { played, tot, toPar } = scoreTotals(d);
+    const putts = played.map((n) => d.holes[n].putts).filter(A.isNum), fw = played.filter((n) => d.holes[n].par >= 4 && d.holes[n].fairway);
+    return `<h2>${esc(d.course_name)}</h2><div class="kpis"><div class="kpi"><div class="l">Thru ${played.length}</div><div class="v">${played.length ? tot : '–'} <span class="small ${toPar > 0 ? '' : 'bad'}">${played.length ? toParText(toPar) : ''}</span></div></div>
       <div class="kpi"><div class="l">Putts</div><div class="v">${putts.length ? A.sum(putts) : '–'}</div></div><div class="kpi"><div class="l">Fairways</div><div class="v">${fw.length ? `${fw.filter((n) => d.holes[n].fairway === 'HIT').length}/${fw.length}` : '–'}</div></div>
       <div class="kpi"><div class="l">Penalties</div><div class="v">${A.sum(played.map((n) => d.holes[n].penalties || 0))}</div></div></div>
       <div class="strip">${order.map((n) => { const x = d.holes[n], tp = x.strokes ? x.strokes - x.par : null; return `<button type="button" data-goto="${n}" class="${n === d.hole ? 'cur' : ''} ${tp === null ? '' : tp < 0 ? 'under' : tp === 0 ? 'even' : tp === 1 ? 'bogey' : 'worse'}"><i>${n}</i>${x.strokes || '·'}</button>`; }).join('')}</div>
       <p style="margin-top:12px"><button class="btn" id="plFinish" ${played.length ? '' : 'disabled'}>Finish &amp; save round</button><button class="btn sec" id="plDiscard">Discard</button></p>
-      ${note('Saved on this phone as you go – closing the app mid-round loses nothing. Finishing adds the round to your history; you can still edit it later in Rounds → the round → Edit.')}</div>`;
+      ${note('Saved on this phone as you go – closing the app mid-round loses nothing. Finishing adds the round to your history; you can still edit it later in Rounds → the round → Edit.')}`;
+  }
+  function scoreCard(d) {
+    const idx = holeOrder(d).indexOf(d.hole);
+    return `<div id="plScore"><div class="card"><div class="rv-h"><h2 style="margin:0">Score – hole ${d.hole}</h2><span class="small muted">${idx + 1} of ${d.n}</span></div>${scoreEntryHtml(d)}</div>
+      <div class="card">${scoreSummaryHtml(d)}</div></div>`;
+  }
+  // One delegated listener for the score controls inside root. hooks: re() after a change, go(n) to change hole, end() on Next at the last hole.
+  function wireScore(root, d, hooks) {
+    if (!root) return;
+    root.addEventListener('click', async (e) => {
+      const b = e.target.closest('button'); if (!b || !root.contains(b) || b.disabled) return;
+      const h = d.holes[d.hole], order = holeOrder(d), i = order.indexOf(d.hole);
+      if (b.dataset.par && b.closest('#plPar')) { h.par = Number(b.dataset.par); if (h.par === 3) h.fairway = null; hooks.re(); return; }
+      if (b.dataset.step) {
+        const k = b.dataset.step, dlt = Number(b.dataset.d);
+        if (k === 'strokes') h.strokes = Math.max(0, (h.strokes || (dlt > 0 ? h.par - 1 : 0)) + dlt);
+        else if (k === 'putts') h.putts = Math.max(0, (h.putts ?? (dlt > 0 ? 1 : 0)) + dlt);
+        else h.penalties = Math.max(0, (h.penalties || 0) + dlt);
+        hooks.re(); return;
+      }
+      if (b.dataset.fw && b.closest('#plFw')) { h.fairway = h.fairway === b.dataset.fw ? null : b.dataset.fw; hooks.re(); return; }
+      if (b.id === 'plPrev') { hooks.go(order[Math.max(0, i - 1)]); return; }
+      if (b.id === 'plNext') { if (i < d.n - 1) hooks.go(order[i + 1]); else hooks.end(); return; }
+      if (b.dataset.goto) { hooks.go(Number(b.dataset.goto)); return; }
+      if (b.id === 'plDiscard') { discard(); return; }
+      if (b.id === 'plFinish') finish(d);
+    });
+  }
+  async function discard() {
+    if (!confirm('Discard this round? The scores entered so far will be lost.')) return;
+    J().predictions = (J().predictions || []).filter((p) => p.round_id !== `garmin-${J().draft?.id}`); J().draft = null; stopGps(); CV.release(); await saveDraft(); c.rerender();
+  }
+  async function finish(d) {
+    const order = holeOrder(d), n = order.filter((x) => d.holes[x].strokes > 0).length;
+    if (n < d.n && !confirm(`Only ${n} of ${d.n} holes have a score. Save the round with ${n} holes?`)) return;
+    const res = await S.mergeBundles(c.state, [F.manualBundle(d)], 'entered on phone');
+    if (res.failed) { toast(`Could not save: ${res.errors[0]}`); return; }
+    const rid = `garmin-${d.id}`;
+    if (d.side) { J().sideResults = J().sideResults || []; J().sideResults.push({ round_id: rid, date: d.start.slice(0, 10), course: d.course_name, game: FR.gameOf(d, d.side, Object.fromEntries(order.filter((x) => d.holes[x].strokes > 0).map((x) => [x, d.holes[x].strokes]))) }); }
+    let msg = 'Round saved';
+    const gross = order.reduce((t, x) => t + (d.holes[x].strokes > 0 ? d.holes[x].strokes : 0), 0), held = order.filter((x) => d.holes[x].strokes > 0).length, pred = (J().predictions || []).find((p) => p.round_id === rid), pres = pred && pred.n === held ? PO.predictionResult({ predicted: pred.predicted, lo: pred.lo, hi: pred.hi }, gross) : null;
+    if (pres?.beat) { msg = `Round saved – ${FEEL.COPY.payoff.beat(pres.by)}`; FEEL.play('win'); }
+    if (d.challenge) {
+      const o = CH.outcome(d.challenge, order.map((x) => d.holes[x]), d.n), ch = CH.byKey(d.challenge);
+      if (o) { J().course_challenges = J().course_challenges || []; J().course_challenges.push({ round_id: rid, date: d.start.slice(0, 10), key: o.key, sub: ch.sub, goal: o.goal, value: o.value, n: o.n, achieved: o.achieved }); msg = `Round saved – ${CH.titleFor(ch, d.n)}: ${o.achieved ? 'done ✓ (counts as a hit)' : 'not this time'}`; }
+    }
+    J().draft = null; stopGps(); CV.release(); await saveDraft(); c.ui.rd_open = rid; c.saveUi(); c.done(msg); location.hash = '#rounds';
   }
 
+  async function osmHere(e) {
+    const p = fix ? [fix.lat, fix.lon] : null; if (!p) return; e.target.disabled = true; $('#plOsmMsg').textContent = 'Downloading…';
+    try { const m = 0.012, bb = [p[0] - m, p[1] - m / Math.cos(p[0] * Math.PI / 180), p[0] + m, p[1] + m / Math.cos(p[0] * Math.PI / 180)];
+      const r = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(F.overpassQuery(bb))}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      c.state.osm.__live = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: F.parseOverpass(await r.json()) }; await S.saveOsm(c.state);
+      toast(c.state.osm.__live.features.length ? 'Course outlines downloaded' : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
+    } catch (err) { $('#plOsmMsg').textContent = `Map service unavailable (${err.message})`; e.target.disabled = false; }
+  }
+  // Course view: opens by itself while a round is in progress; the classic page stays one tap away (plan 4.1)
+  const cvOn = (d) => CV_AUTO_OPEN && c.ui.pl_cv_off !== d.id;
   function pagePlay() {
     const d = D();
-    if (!d) { stopGps(); return FR.joinCard() + startCard(); }
+    if (!d) { stopGps(); CV.release(); return FR.joinCard() + startCard(); }
     startGps();
-    return liveCard(d) + scoreCard(d) + FR.groupCard(d) + (J().joined ? FR.joinCard() : '');
+    if (cvOn(d)) return CV.render(d);
+    CV.release();
+    return `<p class="cv-open"><button type="button" class="btn" id="cvOpen">${esc(FEEL.COPY.course.open)}</button></p>` + liveCard(d) + scoreCard(d) + FR.groupCard(d) + (J().joined ? FR.joinCard() : '');
   }
   function wirePlay() {
     const d = D(), re = async () => { await saveDraft(); c.rerender(); };
@@ -394,46 +472,17 @@ export function registerPlay(c) {
     FR.wireJoin();
     if (!d) return;
     FR.wireGroup(d, re);
-    const h = d.holes[d.hole], order = Array.from({ length: d.n }, (_, i) => ((d.first - 1 + i) % 18) + 1);
-    $$('#plPar button').forEach((b) => b.addEventListener('click', () => { h.par = Number(b.dataset.par); if (h.par === 3) h.fairway = null; re(); }));
-    $$('[data-step]').forEach((b) => b.addEventListener('click', () => {
-      const k = b.dataset.step, dlt = Number(b.dataset.d);
-      if (k === 'strokes') h.strokes = Math.max(0, (h.strokes || (dlt > 0 ? h.par - 1 : 0)) + dlt);
-      else if (k === 'putts') h.putts = Math.max(0, (h.putts ?? (dlt > 0 ? 1 : 0)) + dlt);
-      else h.penalties = Math.max(0, (h.penalties || 0) + dlt);
-      re();
-    }));
-    $$('#plFw button').forEach((b) => b.addEventListener('click', () => { h.fairway = h.fairway === b.dataset.fw ? null : b.dataset.fw; re(); }));
+    if (cvOn(d)) { CV.wire(d); return; }
+    $('#cvOpen')?.addEventListener('click', () => { c.ui.pl_cv_off = null; c.saveUi(); c.rerender(); scrollTo(0, 0); });
     const go = (n) => { d.hole = n; re().then(() => scrollTo(0, 0)); };
-    $('#plPrev')?.addEventListener('click', () => go(order[Math.max(0, order.indexOf(d.hole) - 1)]));
-    $('#plNext')?.addEventListener('click', () => { const i = order.indexOf(d.hole); if (i < d.n - 1) go(order[i + 1]); else $('#plFinish').scrollIntoView({ behavior: 'smooth' }); });
-    $$('[data-goto]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.goto))));
+    wireScore($('#plScore'), d, { re, go, end: () => $('#plFinish').scrollIntoView({ behavior: 'smooth' }) });
     wireMap();
-    $('#plOsmHere')?.addEventListener('click', async (e) => {
-      const p = fix ? [fix.lat, fix.lon] : null; if (!p) return; e.target.disabled = true; $('#plOsmMsg').textContent = 'Downloading…';
-      try { const m = 0.012, bb = [p[0] - m, p[1] - m / Math.cos(p[0] * Math.PI / 180), p[0] + m, p[1] + m / Math.cos(p[0] * Math.PI / 180)];
-        const r = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(F.overpassQuery(bb))}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        c.state.osm.__live = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: F.parseOverpass(await r.json()) }; await S.saveOsm(c.state);
-        toast(c.state.osm.__live.features.length ? 'Course outlines downloaded' : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
-      } catch (err) { $('#plOsmMsg').textContent = `Map service unavailable (${err.message})`; e.target.disabled = false; }
-    });
-    $('#plDiscard')?.addEventListener('click', async () => { if (!confirm('Discard this round? The scores entered so far will be lost.')) return; J().predictions = (J().predictions || []).filter((p) => p.round_id !== `garmin-${J().draft?.id}`); J().draft = null; stopGps(); await saveDraft(); c.rerender(); });
-    $('#plFinish')?.addEventListener('click', async () => {
-      const n = order.filter((x) => d.holes[x].strokes > 0).length;
-      if (n < d.n && !confirm(`Only ${n} of ${d.n} holes have a score. Save the round with ${n} holes?`)) return;
-      const res = await S.mergeBundles(c.state, [F.manualBundle(d)], 'entered on phone');
-      if (res.failed) { toast(`Could not save: ${res.errors[0]}`); return; }
-      const rid = `garmin-${d.id}`;
-      if (d.side) { J().sideResults = J().sideResults || []; J().sideResults.push({ round_id: rid, date: d.start.slice(0, 10), course: d.course_name, game: FR.gameOf(d, d.side, Object.fromEntries(order.filter((n) => d.holes[n].strokes > 0).map((n) => [n, d.holes[n].strokes]))) }); }
-      let msg = 'Round saved';
-      const gross = order.reduce((t, x) => t + (d.holes[x].strokes > 0 ? d.holes[x].strokes : 0), 0), held = order.filter((x) => d.holes[x].strokes > 0).length, pred = (J().predictions || []).find((p) => p.round_id === rid), pres = pred && pred.n === held ? PO.predictionResult({ predicted: pred.predicted, lo: pred.lo, hi: pred.hi }, gross) : null;
-      if (pres?.beat) { msg = `Round saved – ${FEEL.COPY.payoff.beat(pres.by)}`; FEEL.play('win'); }
-      if (d.challenge) {
-        const o = CH.outcome(d.challenge, order.map((x) => d.holes[x]), d.n), ch = CH.byKey(d.challenge);
-        if (o) { J().course_challenges = J().course_challenges || []; J().course_challenges.push({ round_id: rid, date: d.start.slice(0, 10), key: o.key, sub: ch.sub, goal: o.goal, value: o.value, n: o.n, achieved: o.achieved }); msg = `Round saved – ${CH.titleFor(ch, d.n)}: ${o.achieved ? 'done ✓ (counts as a hit)' : 'not this time'}`; }
-      }
-      J().draft = null; stopGps(); await saveDraft(); c.ui.rd_open = rid; c.saveUi(); c.done(msg); location.hash = '#rounds';
-    });
+    $('#plOsmHere')?.addEventListener('click', osmHere);
   }
-  return { pages: { play: ['Play', 'flag'] }, render: { play: pagePlay }, wire: { play: wirePlay }, noData: ['play'], standingsHtml: FR.standingsHtml, _setFix: (f) => { fix = f; } };
+  CV = registerCourse(c, {
+    fix: () => fix, gpsErr: () => gpsErr, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
+    strategyHtml, stratPick, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
+    scoreEntryHtml, scoreSummaryHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
+  });
+  return { pages: { play: ['Play', 'flag'] }, render: { play: pagePlay }, wire: { play: wirePlay }, noData: ['play'], standingsHtml: FR.standingsHtml, _setFix: (f) => { fix = f; }, course: CV };
 }

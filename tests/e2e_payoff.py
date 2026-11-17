@@ -8,6 +8,9 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a, **k): pass
 srv = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=ROOT)); port = srv.server_address[1]
 threading.Thread(target=srv.serve_forever, daemon=True).start()
+def classic(pg):
+    """A new round opens in the Course view; these checks use the classic score page, one tap away."""
+    pg.wait_for_selector('[data-cvclose]'); pg.click('[data-cvclose]'); pg.wait_for_selector('#cvOpen')
 fails = []
 def check(name, ok, extra=''):
     print(('ok   ' if ok else 'FAIL ') + name + (f'  {extra}' if extra and not ok else ''))
@@ -25,7 +28,7 @@ def play_nine(pg, extra=0):
 def start_nine(pg):
     pg.goto(URL + '#play'); pg.wait_for_selector('#plStart'); pg.select_option('select[name=n]', '9')
     if pg.query_selector('.chal-offer input'): pg.uncheck('.chal-offer input')
-    pg.click('#plStart button.btn'); pg.wait_for_selector('#plNext')
+    pg.click('#plStart button.btn'); classic(pg); pg.wait_for_selector('#plNext')
 with sync_playwright() as p:
     b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 390, 'height': 844}, device_scale_factor=2, service_workers='block')
     ctx.add_init_script('window.__feelDelay = 0; window.__feelTest = true'); pg = ctx.new_page(); errs = []

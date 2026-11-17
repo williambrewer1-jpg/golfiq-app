@@ -376,6 +376,20 @@ export const COPY = {
   session: { suggested: 'Suggested', name: 'Session', test: 'Skills test', start: (name) => `Start ${name}`, finish: 'Finish session', finishTest: 'Finish test', done: 'Session done', testDone: 'Skills test done', hit: 'targets hit', first: 'This is your first test, so there is nothing to compare with yet.',
     better: (n, t) => `${n} of ${t} ${t === 1 ? 'skill' : 'skills'} better than last test`, rated: (n) => `${n} ${n === 1 ? 'skill' : 'skills'} rated`, potential: 'Potential now' },
   sound: { on: 'Sound on', off: 'Sound off' },
+  // the Course view on Play (course.js)
+  course: {
+    open: 'Open course view', close: 'Close course view', hole: (n) => `Hole ${n}`, par: (p) => `Par ${p}`, si: (n) => `SI ${n}`,
+    thru: (tp, n) => (n ? `${tp} thru ${n}` : 'No holes yet'), prev: 'Previous hole', next: 'Next hole',
+    front: 'Front', middle: 'Middle', back: 'Back', toGreen: 'To green',
+    gps: { good: (a) => `GPS ±${a}`, weak: (a) => `GPS weak ±${a}`, none: 'No GPS', tip: (a) => `GPS accurate to about ${a}.` },
+    missing: { gps: 'Waiting for GPS', declined: 'Location is off', map: 'no course map', terrain: 'no slope or weather yet', tee: 'showing the view from the tee', far: (km) => `${km} km away – showing the tee`, green: 'This green is not mapped yet' },
+    recentre: 'Recentre', zoom: (z) => ({ shot: 'Shot', hole: 'Hole', green: 'Green' })[z] || z, zoomLabel: 'Zoom',
+    tabs: { club: 'Club', strategy: 'Strategy', score: 'Score' }, backToMap: 'Back to the map', sheet: 'Change the panel height',
+    score: 'Score', scoreHole: (s, tp) => `Score ${s} (${tp})`, toAim: (d) => `${d} to aim`, plays: (d) => `plays ${d}`, playsFlat: 'plays as it measures', trouble: (p) => `${p}% trouble`, noTrouble: 'trouble: no map',
+    noClub: 'No club', pickClub: 'Change club', from: 'Measure from', fromGps: 'My position', fromTee: 'The tee', style: 'Map', styleMap: 'Course', styleSat: 'Satellite',
+    working: 'Working it out…', noPos: 'No position yet. Distances appear when GPS has a fix, or once the tee of this hole is known.',
+    noGreen: 'BreakingPar does not know where this green is yet. Score entry still works.',
+  },
   settings: {
     title: 'Sound and motion',
     sound: 'Sound', soundNote: 'Short sounds as you play in BreakingPar. They follow your phone\'s silent switch.',
