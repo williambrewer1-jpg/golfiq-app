@@ -239,7 +239,7 @@ const MOVED = {
 const noMatch = '<div class="warn">No rounds match the filters.</div>';
 
 function pageHome() {
-  if (!DS.rounds.length) return PROG.goalHome() + (state.journal.draft ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(state.journal.draft.course_name)} · hole ${state.journal.draft.hole}</b><em>Continue ›</em></a>` : '') + emptyMsg();
+  if (!DS.rounds.length) return PROG.goalHome() + (state.journal.draft ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(state.journal.draft.course_name)} · hole ${state.journal.draft.hole}</b><em>Continue ›</em></a>` : '') + PROG.firstWeekHome() + emptyMsg();
   const r18 = DS.rounds.filter((x) => x.format === '18'), last = DS.rounds[DS.rounds.length - 1], d = state.journal.draft;
   const withD = DS.rounds.filter((x) => A.isNum(x.differential_for_index)), idx = withD.length ? withD[withD.length - 1].index_after : null;
   const off = [...(state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop();
@@ -806,7 +806,8 @@ async function introDone(how) {
   st.profile = p; st.units = a.unit;
   await S.saveSettings(state, 'onboarding', how, { goal: p.goal.key, per_week: p.per_week });
   rebuild();
-  if (how === 'play') { await GUIDED.start(ONB.FIRST_GAME); return; }
+  // "Play my first game": step 1 of the first week (firstweek.js) when it is running, so the first play sets a mark; otherwise the plain game
+  if (how === 'play') { if (PROG.data().fw.show) await GUIDED.startStep(1); else await GUIDED.start(ONB.FIRST_GAME); return; }
   location.hash = '#home'; render();
 }
 

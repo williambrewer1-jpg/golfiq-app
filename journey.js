@@ -50,11 +50,14 @@ function stageProgress(sg, results) {
 // How close a game's best score is to the milestone score: 1 or more means it is there. Games never played score 0 (and so come last).
 const closeness = (g, best) => (!isNum(best) ? 0 : g.better === 'lower' ? (best > 0 ? g.target / best : 1) : (g.target > 0 ? best / g.target : 1));
 
-export function journey({ index = null, results = [], games = [], unitM = 0.9144, bosses = [] } = {}) {
-  const idx = isNum(index) ? index : null, completions = [];
+// `practice` (first-run plan B4): with no index, a golfer who has finished the first week starts from their practice level instead of 30. Stretches above it
+// are 'practice' (passed over, not earned), so they never claim course credit and earn no stage points. basis: 'index' | 'practice' | null.
+export function journey({ index = null, practice = null, results = [], games = [], unitM = 0.9144, bosses = [] } = {}) {
+  const idx = isNum(index) ? index : null, completions = [], start = idx !== null ? idx : isNum(practice) ? practice : null;
+  const basis = idx !== null ? 'index' : start !== null ? 'practice' : null;
   let opened = false;
   const stretches = MILESTONES.map((n) => {
-    const course = idx !== null && idx <= n;
+    const course = start !== null && start <= n;
     const stages = SKILLS.map((sk) => {
       const sg = stageGames(sk, n, games, unitM), p = stageProgress(sg, results);
       if (p.done && !course) completions.push({ n, skill: sk.key, title: stageTitle(sk.title, n), date: p.doneOn, rid: p.doneRid });
@@ -63,7 +66,7 @@ export function journey({ index = null, results = [], games = [], unitM = 0.9144
     });
     const mine = bosses.filter((b) => b && b.n === n), passed = course || mine.some((b) => b.passed), last = mine[mine.length - 1] || null;
     let state;
-    if (course) state = 'course'; else if (passed) state = 'done'; else if (!opened) { state = 'open'; opened = true; } else state = 'locked';
+    if (course) state = basis === 'practice' ? 'practice' : 'course'; else if (passed) state = 'done'; else if (!opened) { state = 'open'; opened = true; } else state = 'locked';
     const boss = { state: passed ? 'passed' : stages.every((s) => s.done) && state === 'open' ? 'ready' : 'locked', attempts: mine.length, last: last ? { date: last.date, passed: !!last.passed } : null };
     return { n, title: stretchTitle(n), state, stages, boss };
   });
@@ -77,7 +80,7 @@ export function journey({ index = null, results = [], games = [], unitM = 0.9144
       current = { n: open.n, next: { kind: 'stage', skill: st.skill, title: st.title, hits: st.hits, need: st.need, line: `${st.title} · ${r1(st.hits)} of ${st.need}`, game: pick ? pick.g.id : null } };
     } else if (open.boss.state === 'ready') current = { n: open.n, next: { kind: 'boss', skill: null, title: open.title, line: `${open.title} is ready`, game: null } };
   }
-  return { stretches, current, completions };
+  return { stretches, current, completions, basis, start };
 }
 
 // Did one saved result move a stage forward in the open stretch? For the result screen: { title, from, to, done } or null.

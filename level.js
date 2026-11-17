@@ -18,6 +18,7 @@ export const POINTS = {
   game: 10, quick: 5, target: 10, tier: 25, pb: 15, pressure: 5, daily: 10,    // a guided game, a typed-in score, and the extras on a result
   session: 20, round: 30, round9: 15, challenge: 20, predicted: 25, test: 40, stage: 50, boss: 150,
   duel: 10, duelWin: 15,
+  first_week: 100,                                                           // finishing all five first-week games (firstweek.js); outside the daily cap
   welcome_back: 2,                                                           // a welcome-back game scores its normal points times this
 };
 // At most this many points a day from games and quick entries, so volume alone cannot farm levels. Rounds, sessions, tests and bosses sit outside it.
@@ -84,6 +85,8 @@ export function playerLevel({ journal = {}, rounds = [], duels = [], games = [],
   for (const s of stages || []) add(s.date, `Journey stage: ${s.title}`, POINTS.stage, s.rid);
   // beaten predictions (payoff.js): one line per round that finished lower than its prediction. Derived from the rounds, so nothing is stored.
   for (const p of predictions || []) add(p.date, p.title || 'Beat the prediction', POINTS.predicted, p.rid);
+  // the first week (firstweek.js): once, on the day its fifth game was played. A skipped first week earns nothing.
+  if (journal.first_week?.done_at) add(journal.first_week.done_at, 'First week finished', POINTS.first_week);
   for (const b of journal.journey?.bosses || []) if (b.passed) add(b.date, `Boss game passed: Beat the ${b.n}`, POINTS.boss);
   for (const d of duels || []) { add(d.date, 'Duel played', POINTS.duel); if (d.won) add(d.date, 'Duel won', POINTS.duelWin); }
 
