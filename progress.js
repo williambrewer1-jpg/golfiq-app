@@ -393,7 +393,8 @@ export function registerProgress(c) {
     if (v.fw.show) return firstWeekPage(v);
     if (!c.DS.rounds.length && !(J().results || []).length && !A.isNum(v.jidx) && !v.fw.skipped) return `<div class="card"><h2>${esc(K.title)}</h2><p class="muted">${esc(K.noIndex)}</p></div>`;
     const list = [...jr.stretches].reverse();                           // scratch at the top, the first stretch at the bottom: you climb the page
-    // the marker: the handicap index, or (first-run plan B4) "Practice level 24" when the road starts from the practice level. Never called a handicap.
+    // the marker: the handicap index, or (first-run plan B4) "Started at practice level 24" when the road starts from the practice level. Never called a
+    // handicap. It says "started at" because the road's start is fixed at the end of the first week; the goal card on Home shows the current practice level.
     const mark = A.isNum(v.jidx) ? K.youAt(fmt(v.jidx, 1)) : jr.basis === 'practice' ? FEEL.COPY.firstWeek.youAt(Math.round(jr.start)) : null;
     const idxTag = mark ? `<div class="jn-you"><span>${esc(mark)}</span></div>` : '';
     let html = '', placed = !mark;

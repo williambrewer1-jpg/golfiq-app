@@ -96,4 +96,7 @@ for (const l of O.LEVEL_CHOICES) assert.ok(COPY.intro.about.levels[l.key], `leve
 assert.ok(COPY.intro.welcome.brand === 'BreakingPar' && !JSON.stringify(Object.values(COPY.intro).map(String)).includes('GolfIQ'));
 const sw = readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 assert.ok(sw.includes("'onboarding.js'"), 'onboarding.js is in the service-worker SHELL');
+// the goal card and the road use one practice-level formula (firstweek.js practiceLevel)
+{ const FW = await import('../firstweek.js'); for (const sk of [[{ practice_hcp: 20 }, { practice_hcp: 27.35 }, { practice_hcp: null }], [], [{ practice_hcp: null }], [{ practice_hcp: 9.96 }]])
+  assert.equal(O.practiceAvg(sk), FW.practiceLevel(sk)); assert.equal(O.practiceAvg(null), null); }
 console.log('onboarding: level choices, goals, who sees it, profile, handicap entry, backup, wording – passed');

@@ -32,6 +32,7 @@ export const PER_WEEK = [1, 2, 3], DEFAULT_PER_WEEK = 2;
 export const NAME_MAX = 30;
 export const HCP_MIN = -10, HCP_MAX = 54;                 // World Handicap System range (plus handicaps are negative here, as in Settings → Handicap)
 import { isoWeek } from './bench.js';
+import { practiceLevel } from './firstweek.js';
 export const INTRO_SCREENS = 4;
 export const FIRST_GAME = 'putt-369';                     // "Play my first game" — part B makes this step 1 of the first week
 
@@ -99,7 +100,8 @@ export function goalDue(goal) {
   t.setDate(Math.min(d, last)); return iso(t);
 }
 // The practice level from the rated skills: the average of their practice handicaps (skills.js `practice_hcp`). Null until one skill has a practice rating.
-export function practiceAvg(skills) { const v = (skills || []).map((k) => k.practice_hcp).filter(isNum); return v.length ? Math.round((v.reduce((t, x) => t + x, 0) / v.length) * 10) / 10 : null; }
+// the golfer's current practice level: one formula for the whole app, owned by firstweek.js (the road's starting point uses the same one, on the first-week results)
+export function practiceAvg(skills) { return practiceLevel(skills || []); }
 // Where the golfer is against their goal. The level used is the handicap index when there is one, otherwise the practice level, otherwise the estimate from the intro.
 // → null when no goal is set; target is null for "Just enjoy practising" (a goal with no number).
 export function goalProgress({ profile, index = null, practice = null, now = new Date() } = {}) {
