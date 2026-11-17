@@ -239,7 +239,7 @@ const MOVED = {
 const noMatch = '<div class="warn">No rounds match the filters.</div>';
 
 function pageHome() {
-  if (!DS.rounds.length) return (state.journal.draft ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(state.journal.draft.course_name)} · hole ${state.journal.draft.hole}</b><em>Continue ›</em></a>` : '') + emptyMsg();
+  if (!DS.rounds.length) return PROG.goalHome() + (state.journal.draft ? `<a class="hero" href="#play"><span>Round in progress</span><b>${esc(state.journal.draft.course_name)} · hole ${state.journal.draft.hole}</b><em>Continue ›</em></a>` : '') + emptyMsg();
   const r18 = DS.rounds.filter((x) => x.format === '18'), last = DS.rounds[DS.rounds.length - 1], d = state.journal.draft;
   const withD = DS.rounds.filter((x) => A.isNum(x.differential_for_index)), idx = withD.length ? withD[withD.length - 1].index_after : null;
   const off = [...(state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop();
@@ -255,6 +255,7 @@ function pageHome() {
     : `<div class="quick"><a class="btn" href="#play">${icon('flag', 18)} Play a round</a><a class="btn sec" href="#practice">${icon('dumbbell', 18)} Practice</a></div>`}
   <div class="kpis">${kpi('BreakingPar index', idx)}<div class="kpi"><div class="l">Official index</div><div class="v">${off ? fmt(off.handicap_index) : '–'}</div><div class="d muted">${off ? 'from ' + esc(off.date) : '<a href="#settings">add in Settings</a>'}</div></div></div>
   ${PROG.levelRow()}
+  ${PROG.goalHome()}
   ${COMP ? COMP.kuHome() : ''}
   ${COMP ? COMP.duHome() : ''}
   ${GUIDED.homeCard()}
@@ -662,8 +663,14 @@ function pageSettings() {
     <label class="sw"><input type="checkbox" id="feelMotion" ${fl.motion ? 'checked' : ''}><span><b>${FC.motion}</b><small>${FC.motionNote}</small></span></label>
     <p style="margin:6px 0 0"><button type="button" class="btn sec" id="feelTry">${FC.try}</button> <span class="small muted" id="feelTryOut" aria-live="polite"></span></p></div>`;
   const links = `<div class="tiles" style="margin-bottom:12px">${[['data', 'Data & sync'], ['help', 'Help & setup'], ['corrections', 'Corrections log']].map(([k, l]) => `<a class="tile" href="#${k}">${icon(PAGES[k][1])}<span>${l}</span></a>`).join('')}</div>`;
+  const GK = FEEL.COPY.goal.settings, gpf = ONB.readProfile(state.settings), gSel = (id, label, opts, cur) => `<label class="f" for="${id}">${label}</label><select id="${id}">${opts.map(([v, l]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const goalCard = `<div class="card" id="goalCard"><h2>${GK.title}</h2>
+    ${gSel('goalKey', GK.goal, [...(gpf.goal ? [] : [['', GK.notSet]]), ...ONB.GOALS.map((g) => [g.key, FEEL.COPY.intro.goal.goals[g.key]])], gpf.goal?.key || '')}
+    ${gSel('goalMonths', GK.months, ONB.GOAL_MONTHS.map((m) => [m, FEEL.COPY.intro.goal.months(m)]), gpf.goal?.months || ONB.DEFAULT_MONTHS)}
+    ${gSel('goalWeek', GK.perWeek, [...(gpf.per_week ? [] : [['', GK.notSet]]), ...ONB.PER_WEEK.map((w) => [w, FEEL.COPY.intro.goal.perWeek(w)])], gpf.per_week || '')}
+    <p class="note">${GK.note}</p></div>`;
   const IK = FEEL.COPY.intro, introCard = `<div class="card"><h2>${IK.replay}</h2><p class="small muted" style="margin:0 0 6px">${IK.replayNote}</p><button type="button" class="btn sec" id="introReplay">${IK.replay}</button></div>`;
-  return `${demoBanner()}${links}${seg('st_tab', [['general', 'General'], ['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'general', 'scroll')}${tab === 'general' ? `${unitsCard}${rangeCard}${feelCard}${introCard}` : tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
+  return `${demoBanner()}${links}${seg('st_tab', [['general', 'General'], ['clubs', 'Clubs'], ['courses', 'Courses'], ['hcp', 'Handicap'], ['sync', 'Garmin sync'], ['friends', 'Friends'], ['locker', 'Locker']], 'general', 'scroll')}${tab === 'general' ? `${unitsCard}${goalCard}${rangeCard}${feelCard}${introCard}` : tab === 'friends' ? COMP.friendsSettings() : tab === 'locker' ? PROG.lockerPage() : `<div class="card">${body}</div>`}`;
 }
 
 function pageHelp() {
@@ -969,6 +976,11 @@ function wireSettings() {
     const names = FEEL.EVENT_NAMES; let i = 0;
     const next = () => { if (!document.body.contains(out) || i >= names.length) { if (document.body.contains(out)) out.textContent = ''; return; } const n = names[i++]; out.textContent = FC2.names[n] || n; FEEL.play(n); setTimeout(next, FEEL.lengthOf(n) * 1000 + 450); };
     next();
+  });
+  for (const id of ['#goalKey', '#goalMonths', '#goalWeek']) $(id)?.addEventListener('change', async () => {
+    const k = $('#goalKey').value, w = Number($('#goalWeek').value) || undefined;
+    st.profile = ONB.setGoal(st.profile, { key: k, months: Number($('#goalMonths').value), per_week: w, level: PROG.goalLevelNow() }, localToday());
+    await S.saveSettings(state, 'set_goal', null, { goal: st.profile.goal?.key, per_week: st.profile.per_week }); done('Goal saved');
   });
   $('#introReplay')?.addEventListener('click', () => { intro = introState(true); scrollTo(0, 0); render(); });
   $('#rangeAdj')?.addEventListener('change', async (e) => {

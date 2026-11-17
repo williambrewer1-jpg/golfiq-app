@@ -340,6 +340,15 @@ export const COPY = {
     ready: { title: 'Ready', line: (mins) => `Your first game takes about ${mins} minutes.`, sub: 'Nine putts from 3, 6 and 9 ft. Hole as many as you can.', play: 'Play my first game', look: "I'll look around first" },
     replay: 'Replay the intro', replayNote: 'See the welcome screens again. Your data stays as it is.',
   },
+  // the goal set in the intro (onboarding.js): Home, Progress and Settings
+  goal: {
+    line: (name, by) => `Goal: ${name}${by ? ` by ${by}` : ''}`, reached: 'Goal reached. Set a new one in Settings.', overdue: 'The date has passed. Set a new one in Settings.',
+    basis: { index: 'Handicap index', practice: 'Practice level', estimate: 'Starting estimate' }, caption: (basis, lvl, target) => `${basis} ${lvl}${target === null ? '' : ` · goal about ${target}`}`,
+    week: (n, of) => `This week: ${Math.min(n, of)} of ${of} session${of === 1 ? '' : 's'}${n >= of ? ' ✓' : ''}`,
+    potential: (when, pot, name, need) => `Your potential by ${when} is ${pot}; your goal (${name}) needs about ${need}.`,
+    settings: { title: 'Your goal', goal: 'Goal', months: 'By when?', perWeek: 'Sessions a week', notSet: 'Not set',
+      note: 'A session is a day with a game score, a practice session or a wedge entry. Changing the goal or date starts it again from your level today. Nothing is lost.' },
+  },
   tier: (name) => `${name} tier`,
   next: 'Up next',
   progress: (i, n) => `${i} of ${n} done`,
