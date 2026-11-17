@@ -18,11 +18,13 @@ export const POINTS = {
   game: 10, quick: 5, target: 10, tier: 25, pb: 15, pressure: 5, daily: 10,    // a guided game, a typed-in score, and the extras on a result
   session: 20, round: 30, round9: 15, challenge: 20, predicted: 25, test: 40, stage: 50, boss: 150,
   duel: 10, duelWin: 15,
+  party: 5,                                                                  // a game played with a friend on this phone (party.js); outside the daily cap, at most PARTY_DAILY a day
   first_week: 100,                                                           // finishing all five first-week games (firstweek.js); outside the daily cap
   welcome_back: 2,                                                           // a welcome-back game scores its normal points times this
 };
 // At most this many points a day from games and quick entries, so volume alone cannot farm levels. Rounds, sessions, tests and bosses sit outside it.
 export const DAILY_CAP = 150;
+export const PARTY_DAILY = 2;                                                                         // games with a friend that earn the party bonus each day
 export const RANKS = [
   { n: 1, name: 'Rookie', at: 0 }, { n: 2, name: 'Range regular', at: 150 }, { n: 3, name: 'Weekend golfer', at: 400 }, { n: 4, name: 'Club player', at: 800 },
   { n: 5, name: 'Medal player', at: 1400 }, { n: 6, name: 'Team player', at: 2200 }, { n: 7, name: 'Club champion', at: 3200 }, { n: 8, name: 'County player', at: 4500 },
@@ -89,6 +91,12 @@ export function playerLevel({ journal = {}, rounds = [], duels = [], games = [],
   if (journal.first_week?.done_at) add(journal.first_week.done_at, 'First week finished', POINTS.first_week);
   for (const b of journal.journey?.bosses || []) if (b.passed) add(b.date, `Boss game passed: Beat the ${b.n}`, POINTS.boss);
   for (const d of duels || []) { add(d.date, 'Duel played', POINTS.duel); if (d.won) add(d.date, 'Duel won', POINTS.duelWin); }
+  // games with a friend (party.js): the owner's saved result carries the group, so this is counted from history too. The first PARTY_DAILY of a day count.
+  const partyDays = new Map();
+  for (const r of order) if (r.party && Array.isArray(r.party.players) && r.party.players.length > 1) {
+    const n = partyDays.get(day(r.date)) || 0; if (n >= PARTY_DAILY) continue; partyDays.set(day(r.date), n + 1);
+    add(r.date, `Played with ${r.party.players.length > 2 ? 'friends' : 'a friend'}`, POINTS.party, r.id);
+  }
 
   const points = lines.reduce((s, l) => s + l.points, 0), derived = rankFor(points), shown = rankByNumber(Math.max(derived.n, floor | 0)) || derived;
   const next = RANKS.find((x) => x.n === shown.n + 1) || null, now = today || day(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString());
