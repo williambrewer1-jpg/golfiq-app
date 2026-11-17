@@ -1,6 +1,7 @@
-"""Browser test for practice with a friend (first-run plan, phase C1): the set-up sheet, a two-player and a four-player game end to end, hand-over screens, turn rotation,
+"""Browser test for practice with a friend (first-run plan, phases C1 and C2): the set-up sheet, a two-player and a four-player game end to end, hand-over screens, turn rotation,
 undo across a hand-over, a reload in the middle of a game, only the owner's result saved and shared (against the fake Firebase), and the layout at 390x844 and 320x568
-with a fresh app and with the sample data. Run: python3 tests/e2e_party.py"""
+with a fresh app and with the sample data. Phase C2: the podium (win sound and confetti), the owner's own score under it, the share text, rematch with a new seed,
+the day's series, next game with the same group, the won-drawn-lost record on the sheet and the podium, and the +5 for a game with a friend. Run: python3 tests/e2e_party.py"""
 import http.server, threading, functools, sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from playwright.sync_api import sync_playwright
@@ -109,8 +110,9 @@ with sync_playwright() as p:
     pg.click('[data-gpundo]'); settle(pg); st = party_state(pg); check('undo inside a turn only takes back that player\'s last answer', st['answers'] == [3, 1] and who(pg) == 'Zed', str(st))
     a = pg.evaluate(AUDIT, '#gpRoot'); check('play screen layout (390x844)', not a['overflow'] and not a['small'], str(a))
     order = run(pg)
-    check('the game ends on the result screen with the final scores', pg.query_selector('.gp-rv .gp-party') is not None and len(pg.query_selector_all('.gp-party .gp-sumrow')) == 2)
-    check('the result says who won, or that it is a tie', any(x in pg.inner_text('.gp-party') for x in ['wins', 'tie']))
+    check('the game ends on the podium with both players', pg.query_selector('.gp-rv .gp-pod') is not None and len(pg.query_selector_all('.gp-pod .gp-podc')) == 2)
+    check('the podium says who won, or that it is a tie', any(x in pg.inner_text('#gpVerdictL') for x in ['wins', 'tie']))
+    check('a handicap game shows each margin on the podium', pg.inner_text('.gp-pod').count('on target') == 2, pg.inner_text('.gp-pod'))
     a = pg.evaluate(AUDIT, '#gpRoot'); check('result screen layout (390x844)', not a['overflow'] and not a['small'], str(a))
 
     # ------------------------------------------------------------ only the owner's result is saved and shared
@@ -136,7 +138,7 @@ with sync_playwright() as p:
     check('four players on the scoreboard', len(pg.query_selector_all('#gpRoot .gp-pc')) == 4)
     order = run(pg)
     check('turns rotate each station (3 ft: Me first, 6 ft: Sam first, 9 ft: Kim first)', order == ['Me', 'Sam', 'Kim', 'Al', 'Sam', 'Kim', 'Al', 'Me', 'Kim', 'Al', 'Me', 'Sam'][:len(order)] and len(order) >= 11, str(order))
-    check('four players on the result', len(pg.query_selector_all('.gp-party .gp-sumrow')) == 4)
+    check('four players on the podium, winner in the middle', len(pg.query_selector_all('.gp-pod .gp-podc')) == 4 and 'p1' in pg.get_attribute('.gp-pod .gp-podc:nth-child(2)', 'class'))
     pg.click('[data-gpdone]')
     games_tab(pg, 'putt-streak'); setup(pg, [('Sam', None)], pressure=False); order = run(pg)
     check('a streak game passes the phone on a miss and still ends', pg.query_selector('.gp-rv .gp-party') is not None, str(order))
@@ -144,8 +146,43 @@ with sync_playwright() as p:
     check('a distance game has its own slider for each player', pg.query_selector('[data-gpball]') is not None)
     order = run(pg); check('the Driver test plays out for two players', pg.query_selector('.gp-rv .gp-party') is not None, str(order))
     pg.click('[data-gpdone]'); games_tab(pg, 'putt-par18'); setup(pg, [('Sam', 15)], mode='handicap', pressure=True); order = run(pg)
-    check('a lower-is-better game with handicap scoring and a pressure finish plays out', pg.query_selector('.gp-rv .gp-party') is not None and 'on target' in pg.inner_text('.gp-party'), pg.inner_text('#gpRoot')[:200])
+    check('a lower-is-better game with handicap scoring and a pressure finish plays out', pg.query_selector('.gp-rv .gp-party') is not None and 'on target' in pg.inner_text('.gp-pod'), pg.inner_text('#gpRoot')[:200])
     check('no page errors (four players and other games)', not errs, str(errs[:2])); ctx.close()
+
+    # ------------------------------------------------------------ phase C2: podium, share, rematch, series, next game, record, points
+    ctx, pg, errs = page(b); pg.add_init_script("navigator.share = (d) => { window.__shared = d; return Promise.resolve(); }"); games_tab(pg, 'putt-369')
+    LEDGER = """async () => { const L = await import('./level.js'), F = await import('./features.js');
+      return L.playerLevel({ journal: window.__golfiq.state.journal, games: F.DEFAULT_GAMES }).ledger.filter((x) => /with a friend/.test(x.what)).length; }"""
+    friend0 = pg.evaluate(LEDGER)
+    setup(pg, [('Sam', 18)]); pg.evaluate("() => { window.__feelLog = []; }")
+    run(pg, stop=None); pg.wait_for_timeout(400); log = pg.evaluate("() => (window.__feelLog || []).slice()")
+    check('the podium plays the win sound and the confetti', 'win' in log and any(str(x).startswith('confetti') for x in log), str(log))
+    check('your own score, verdict and rewards follow under "Your practice"', 'Your practice' in pg.text_content('.gp-pyou') and pg.query_selector('.gp-pyou #gpRNum') is not None and pg.query_selector('.gp-rewards') is not None)
+    check('no series after the first game of the day', pg.query_selector('#gpSeries') is None)
+    check('the record against Sam shows on the podium', 'Against Sam: won' in pg.inner_text('.gp-party'), pg.inner_text('.gp-party'))
+    check('the buttons are Rematch, Next game and Done', [x.strip() for x in pg.eval_on_selector_all('.gp-rbtn button', 'els => els.map((e) => e.textContent)')] == ['Rematch', 'Next game', 'Done'])
+    check('a game with a friend earns the +5 line', pg.evaluate(LEDGER) == friend0 + 1)
+    pg.click('[data-gpsend]'); pg.wait_for_timeout(200); sh = pg.evaluate("() => window.__shared || null")
+    check('"Send Sam the result" opens the share sheet with a short text and a link to the app', sh and 'Send Sam the result' in pg.inner_text('[data-gpsend]') and 'on BreakingPar' in sh['text'] and 'Sam' in sh['text'] and ('wins' in sh['text'] or 'tie' in sh['text']) and sh['url'].endswith('/index.html'), str(sh))
+    a = pg.evaluate(AUDIT, '#gpRoot'); check('podium screen layout (390x844)', not a['overflow'] and not a['small'], str(a))
+    first = pg.evaluate("() => { const r = window.__golfiq.state.journal.results; return r[r.length - 1]; }")
+    pg.click('[data-gprematch]'); pg.wait_for_selector('#gpRoot.gp-full')
+    d = pg.evaluate("() => { const d = window.__golfiq.state.journal.game_draft; return { game: d.game, seed: d.seed, names: d.party.players.map((p) => p.name), hcp: d.party.players.map((p) => p.hcp), log: d.party.log.length }; }")
+    check('rematch: the same game and players, a new seed, nobody has played yet', d['game'] == 'putt-369' and d['names'] == ['Me', 'Sam'] and d['hcp'][1] == 18 and d['seed'] != first['seed'] and d['log'] == 0, str(d))
+    run(pg); pg.wait_for_timeout(300)
+    ser = pg.inner_text('#gpSeries') if pg.query_selector('#gpSeries') else ''
+    check('after the second game the running series shows for the day', ser.startswith('Today:') and 'Me' in ser and 'Sam' in ser, ser)
+    pg.evaluate("() => { window.__shared = null; }"); pg.click('[data-gpsend]'); pg.wait_for_timeout(200)
+    check('the shared text carries the series', 'Today:' in (pg.evaluate("() => window.__shared && window.__shared.text") or ''))
+    check('the +5 counts for the second game too', pg.evaluate(LEDGER) == friend0 + 2)
+    pg.click('[data-gpnextp]'); pg.wait_for_selector('#gpRoot.gp-full')
+    d = pg.evaluate("() => { const d = window.__golfiq.state.journal.game_draft; return { game: d.game, names: d.party.players.map((p) => p.name) }; }")
+    check('next game keeps the group and moves to another game', d['game'] != 'putt-369' and d['names'] == ['Me', 'Sam'], str(d))
+    pg.click('[data-gpquit]'); pg.wait_for_timeout(300)
+    games_tab(pg, 'putt-369'); pg.click('[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]'); pg.fill('#ptN0', 'sam')
+    check('the set-up sheet shows the record against a friend you have played', 'Against sam: won' in pg.inner_text('#sheetPanel .pt-rec') and sum(int(x) for x in __import__('re').findall(r'(\d+)', pg.inner_text('#sheetPanel .pt-rec'))) == 2, pg.inner_text('#sheetPanel .pt-rec'))
+    pg.fill('#ptN0', 'Newcomer'); check('a new name shows no record', pg.inner_text('#sheetPanel .pt-rec').strip() == '')
+    check('no page errors (phase C2)', not errs, str(errs[:2])); ctx.close()
 
     # ------------------------------------------------------------ layout at both phone sizes, fresh app and sample data
     for (w, h) in [(390, 844), (320, 568)]:

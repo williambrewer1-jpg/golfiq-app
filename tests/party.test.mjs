@@ -1,10 +1,11 @@
-// Unit tests for party.js: practice with a friend on one phone (first-run plan, part C1). Run: node tests/party.test.mjs
+// Unit tests for party.js: practice with a friend on one phone (first-run plan, parts C1 and C2). Run: node tests/party.test.mjs
 import assert from 'node:assert/strict';
 import * as P from '../party.js';
 import * as G from '../games.js';
 import * as F from '../features.js';
 import * as B from '../bench.js';
 import * as LG from '../league.js';
+import * as FEEL from '../feel.js';
 let n = 0; const t = (name, f) => { f(); n++; console.log('ok  ', name); };
 const game = (id) => F.DEFAULT_GAMES.find((g) => g.id === id);
 const YD = 0.9144;
@@ -172,5 +173,47 @@ t('privacy: the score shared with friends carries none of the party (no guest na
   const res = { ...G.resultFromDraft(P.ownerDraft({ ...G.newDraft(g, { seed: 7 }), party: p }), g, { date: '2026-11-16' }), party: P.partyRecord(p, g, YD, l) };
   const shared = LG.shareExtras(res, { hit: true, tier: 'gold' }), text = JSON.stringify(shared);
   assert.equal('party' in shared, false); assert.ok(!text.includes('Sam'));
+});
+
+// ------------------------------------------------------------------ phase C2: after the game
+const rec = (players, winner, x = {}) => ({ mode: 'straight', players, winner, ...x });
+const res = (id, date, party) => ({ id, game: 'putt-369', date, score: 5, mode: 'guided', party });
+const pw = (o, s, opl, spl) => rec([{ name: 'Wills', hcp: 12, score: o, place: opl, owner: true }, { name: 'Sam', hcp: 20, score: s, place: spl }], opl < spl ? 'Wills' : spl < opl ? 'Sam' : null);
+t('regroup: the same players and handicaps for a rematch; handicap scoring kept only where the game has a benchmark', () => {
+  const p = mk('putt-369', [sam], { mode: 'handicap' }), done = playAll(p, 'putt-369', (i) => (i ? 0 : 1)), r = P.partyRecord(done, game('putt-369'), YD, list('putt-369'));
+  const again = P.regroup(r, game('putt-369'), YD);
+  assert.deepEqual(again.players.map((x) => [x.name, x.hcp, x.owner, x.answers.length]), [['Wills', 12, true, 0], ['Sam', 20, false, 0]]);
+  assert.equal(again.mode, 'handicap'); assert.equal(again.log.length, 0); assert.ok(again.id);
+  const own = F.DEFAULT_GAMES.find((g) => G.GUIDED.has(g.id) && !B.hasLevel(g.id));
+  if (own) assert.equal(P.regroup(r, own, YD).mode, 'straight', 'no benchmark: straight scoring');
+  assert.equal(P.regroup({ players: [{ name: 'Sam' }] }, game('putt-369'), YD), null, 'no owner in the record: no group');
+});
+t('groupKey: the same group whatever the order or letter case', () => {
+  assert.equal(P.groupKey([{ name: 'Wills' }, { name: 'sam ' }]), P.groupKey([{ name: 'Sam' }, { name: 'wills' }]));
+  assert.notEqual(P.groupKey([{ name: 'Wills' }, { name: 'Sam' }]), P.groupKey([{ name: 'Wills' }, { name: 'Sam' }, { name: 'Kim' }]));
+});
+t('series: shows from the second game of the day with the same group, counts wins up to this game, ties apart', () => {
+  const rs = [res('a', '2026-11-17', pw(7, 5, 1, 2)), res('x', '2026-11-17', rec([{ name: 'Wills', place: 1, owner: true }, { name: 'Kim', place: 2 }], 'Wills')),
+    res('b', '2026-11-17', pw(4, 6, 2, 1)), res('c', '2026-11-17', pw(6, 6, 1, 1)), res('d', '2026-11-17', pw(8, 2, 1, 2)), res('e', '2026-11-18', pw(8, 2, 1, 2))];
+  assert.equal(P.series(rs, 'a'), null, 'the first game is not a series');
+  assert.deepEqual(P.series(rs, 'b'), { games: 2, ties: 0, rows: [{ name: 'Wills', wins: 1 }, { name: 'Sam', wins: 1 }] });
+  assert.deepEqual(P.series(rs, 'd'), { games: 4, ties: 1, rows: [{ name: 'Wills', wins: 2 }, { name: 'Sam', wins: 1 }] });
+  assert.equal(P.series(rs, 'e'), null, 'a new day starts again'); assert.equal(P.series(rs, 'x'), null, 'a different group'); assert.equal(P.series(rs, 'nope'), null);
+  assert.equal(FEEL.COPY.party.series(P.series(rs, 'd').rows, 1), 'Today: Wills 2 – 1 Sam (1 tied)');
+  assert.equal(FEEL.COPY.party.series([{ name: 'Kim', wins: 2 }, { name: 'Wills', wins: 1 }, { name: 'Sam', wins: 0 }], 0), 'Today: Kim 2 · Wills 1 · Sam 0');
+});
+t('record: won, drawn and lost against one partner, from every saved game together, by places', () => {
+  const four = rec([{ name: 'Wills', place: 2, owner: true }, { name: 'Sam', place: 3 }, { name: 'Kim', place: 1 }, { name: 'Al', place: 2 }], 'Kim');
+  const rs = [res('a', '2026-11-01', pw(7, 5, 1, 2)), res('b', '2026-11-02', pw(4, 6, 2, 1)), res('c', '2026-11-03', pw(6, 6, 1, 1)), res('d', '2026-11-04', four), { id: 'solo', game: 'putt-369', date: '2026-11-04', score: 3 }];
+  assert.deepEqual(P.record(rs, 'sam'), { won: 2, drawn: 1, lost: 1 }, 'in a game of four, beating Sam on places is a win');
+  assert.deepEqual(P.record(rs, 'Kim'), { won: 0, drawn: 0, lost: 1 }); assert.deepEqual(P.record(rs, 'Al'), { won: 0, drawn: 1, lost: 0 });
+  assert.deepEqual(P.record(rs, 'Nobody'), { won: 0, drawn: 0, lost: 0 }); assert.equal(P.recordTotal(P.record(rs, 'Sam')), 4); assert.deepEqual(P.record(rs, ''), { won: 0, drawn: 0, lost: 0 });
+  assert.equal(FEEL.COPY.party.record('Sam', { won: 2, drawn: 1, lost: 1 }), 'Against Sam: won 2 · drawn 1 · lost 1');
+});
+t('share text: places, scores, margins in a handicap game, the winner and the series; nothing but what is on the podium', () => {
+  const txt = FEEL.COPY.party.shareText({ game: 'Putting 3-6-9', rows: [{ name: 'Sam', score: 7, place: 1, margin: 1.5 }, { name: 'Wills', score: 5, place: 2, margin: -0.5 }], winner: 'Sam', hc: true, series: 'Today: Sam 2 – 1 Wills' });
+  assert.equal(txt, 'Putting 3-6-9 on BreakingPar\n1st Sam 7 (+1.5 on target)\n2nd Wills 5 (-0.5 on target)\nSam wins.\nToday: Sam 2 – 1 Wills');
+  assert.ok(FEEL.COPY.party.shareText({ game: 'X', rows: [{ name: 'A', score: 3, place: 1 }, { name: 'B', score: 3, place: 1 }], winner: null, hc: false }).endsWith('1st B 3\nA tie at the top.'));
+  assert.equal(FEEL.COPY.party.send(['Sam']), 'Send Sam the result'); assert.equal(FEEL.COPY.party.send(['Sam', 'Kim']), 'Send the result');
 });
 console.log(`\n${n} party tests passed`);

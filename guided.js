@@ -32,7 +32,7 @@ export function registerGuided(c) {
     const b = $('#gpSound'); if (b) b.outerHTML = soundBtn(); $('#gpSound')?.addEventListener('click', toggleSound);
   }
   // audio can only start after a tap: wake it on the first tap of any game button (and again later if the phone suspended it)
-  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gpwelcome], [data-gptest], [data-gpparty], [data-gppstart], [data-gphand]')) FEEL.unlock(); }, true);
+  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gpwelcome], [data-gptest], [data-gpparty], [data-gppstart], [data-gphand], [data-gprematch], [data-gpnextp]')) FEEL.unlock(); }, true);
 
   // what the golfer is aiming at in this game: the target for the skill's next handicap step, and where the plan stands
   function info(id) {
@@ -230,12 +230,41 @@ export function registerGuided(c) {
       <div class="gp-sheet"><div class="gp-btns one"><button class="gp-b hit" data-gphand>${esc(K.ready(pl.name))}</button></div><div class="gp-foot"><button class="btn sec" data-gpundo ${d0.party.log.length ? '' : 'disabled'}>${esc(K.undoHand)}</button></div></div></div>`;
   }
   async function handedOver() { const d = draft(); if (!d?.party) return; const g = gameOf(d.game); d.party = P.handedOver(d.party, g, G.steps(g, { seed: d.seed, unitM: d.unitM })); await save(); render(); }
-  // the plain list of places on the owner's result screen (the podium, rematch and series come in the next phase)
+  // ---- the result of a game with friends (phase C2): a podium in the hero, then the day's series, the record against each friend, and a share button.
+  // Guests' names and scores come only from the owner's saved result, on this phone; the share sheet sends text that the owner chooses to send.
+  const byPlace = (pt) => pt.players.map((p, i) => ({ ...p, i })).sort((a, b) => (a.place ?? 9) - (b.place ?? 9) || a.i - b.i);
+  const PODIUM_ORDER = [1, 0, 2, 3];                        // second, first, third, fourth from left to right, so the winner stands in the middle
+  function podium(r, at) {
+    const R = FEEL.COPY.party.result, pt = r.party, hc = pt.mode === 'handicap', sorted = byPlace(pt);
+    const cols = PODIUM_ORDER.filter((k) => k < sorted.length).map((k) => sorted[k]);
+    return `<div ${at('gp-rverdict met', 1)} id="gpVerdictL">${esc(pt.winner ? R.winner(pt.winner) : R.tie)}</div>
+      <div class="gp-pod" role="list" aria-label="${esc(R.podium)}">${cols.map((p) => { const pl = Number.isFinite(p.place) ? Math.min(4, p.place) : 4;
+        return `<div class="gp-podc p${pl} pc-${P.COLOURS[p.i % P.COLOURS.length]}" role="listitem"><span class="n">${esc(p.name)}</span><b>${sc(p.score)}</b>${hc && Number.isFinite(p.margin) ? `<small>${esc(R.margin(p.margin))}</small>` : ''}<span class="blk"><span>${esc(R.place(p.place))}</span></span></div>`; }).join('')}</div>`;
+  }
   function partyResult(r) {
-    const R = FEEL.COPY.party.result, pt = r.party, hc = pt.mode === 'handicap', sorted = [...pt.players].sort((a, b) => a.place - b.place);
-    return `<div class="gp-party"><h3 style="margin:0 0 4px">${esc(R.title)}</h3><p class="gp-pw">${esc(pt.winner ? R.winner(pt.winner) : R.tie)}</p>
-      ${sorted.map((p) => `<div class="gp-sumrow"><div><b>${esc(R.place(p.place))} · ${esc(p.name)}</b>${hc && Number.isFinite(p.margin) ? `<div class="small muted">${esc(R.margin(p.margin))}</div>` : ''}</div><div class="gp-sumscore"><b>${sc(p.score)}</b></div></div>`).join('')}
+    const K = FEEL.COPY.party, R = K.result, pt = r.party, all = J().results || [], s = P.series(all, r.id), guests = pt.players.filter((p) => !p.owner);
+    const recs = guests.map((p) => ({ name: p.name, rec: P.record(all, p.name) })).filter((x) => P.recordTotal(x.rec));
+    return `<div class="gp-party">${s ? `<p class="gp-pseries" id="gpSeries">${esc(K.series(s.rows, s.ties))}</p>` : ''}
+      ${recs.map((x) => `<p class="small gp-prec">${esc(K.record(x.name, x.rec))}</p>`).join('')}
+      <p style="margin:8px 0"><button type="button" class="btn sec" data-gpsend="${esc(r.id)}">${icon('share', 18)} ${esc(K.send(guests.map((p) => p.name)))}</button></p>
       <p class="small muted" style="margin:6px 0 10px">${esc(R.note)}</p></div>`;
+  }
+  // the share sheet: a short text result and a link to the app. Text only, no image. Without a share sheet the text is copied.
+  async function sendResult(rid) {
+    const r = (J().results || []).find((x) => x.id === rid); if (!r?.party) return;
+    const K = FEEL.COPY.party, g = gameOf(r.game), s = P.series(J().results || [], rid), url = location.href.split('#')[0];
+    const text = K.shareText({ game: g?.name || r.game, rows: byPlace(r.party).map((p) => ({ ...p, score: sc(p.score) })), winner: r.party.winner, hc: r.party.mode === 'handicap', series: s ? K.series(s.rows, s.ties) : null });
+    if (navigator.share) { try { await navigator.share({ title: K.shareTitle, text, url }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(`${text}\n${url}`); c.toast(K.copied); } catch { prompt(K.shareTitle, `${text}\n${url}`); }
+  }
+  // Rematch (same players and game, a new seed) and Next game (same group, the next game the app would suggest). Handicap scoring falls back to straight
+  // when the next game has no benchmark, and says so.
+  async function partyAgain(rid, next = false) {
+    const r = (J().results || []).find((x) => x.id === rid); if (!r?.party) return;
+    const id = next ? nextGame(r.game) : r.game, g = gameOf(id), party = g ? P.regroup(r.party, g, unitM()) : null;
+    if (!party) return start(id);
+    if (r.party.mode === 'handicap' && party.mode !== 'handicap') c.toast(FEEL.COPY.party.result.straightNow);
+    return start(id, { party, pressure: !!r.pressure });
   }
   // the set-up sheet: you plus one to three friends, straight or handicap scoring, optional pressure finish
   const ownerName = () => P.cleanName(c.state.cloud?.nick) || 'Me';
@@ -246,6 +275,8 @@ export function registerGuided(c) {
     const read = () => { S.guests = $$('#sheetPanel [data-pgrow]').map((r) => ({ name: r.querySelector('[data-pgname]').value, hcp: r.querySelector('[data-pghcp]').value })); S.pressure = !!$('#ptPressure')?.checked; S.mode = $('#sheetPanel input[name=ptmode]:checked')?.value || 'straight'; };
     const players = () => [{ name: ownerName(), hcp: own.hcp }, ...S.guests.filter((x) => P.cleanName(x.name)).map((x) => ({ name: x.name, hcp: P.parseHcp(x.hcp) }))];
     const hcOk = () => B.hasLevel(g.id) && P.canHandicap(players(), g);
+    // the record against a friend already played with (worked out from saved results); blank for a new name
+    const recLine = (name) => { const r = P.record(J().results || [], name); return P.recordTotal(r) ? K.record(P.cleanName(name), r) : ''; };
     const used = () => new Set(S.guests.map((x) => P.cleanName(x.name).toLowerCase()).concat(ownerName().toLowerCase()));
     function draw() {
       const rec = (J().partners || []).filter((x) => !used().has(P.cleanName(x.name).toLowerCase())), ok = hcOk(), why = !B.hasLevel(g.id) ? K.noBench : K.needHcp;
@@ -254,6 +285,7 @@ export function registerGuided(c) {
         <div class="pt-row"><label class="f" for="ptOwner">${esc(K.you)}</label><input id="ptOwner" value="${esc(ownerName())}" disabled><p class="small muted" style="margin:4px 0 0">${esc(K.yourLevel(own.hcp === null ? null : sc(own.hcp), own.basis))}</p></div>
         ${S.guests.map((x, i) => `<div class="pt-row" data-pgrow><div class="pt-two"><div><label class="f" for="ptN${i}">${esc(K.guest(i + 1))}</label><input id="ptN${i}" data-pgname maxlength="${P.NAME_MAX}" placeholder="${esc(K.name)}" autocomplete="off" value="${esc(x.name)}"></div>
           <div><label class="f" for="ptH${i}">${esc(K.hcp)}</label><input id="ptH${i}" data-pghcp inputmode="decimal" autocomplete="off" placeholder="e.g. 18" value="${esc(x.hcp)}"></div></div>
+          <p class="small muted pt-rec" data-pgrec>${esc(recLine(x.name))}</p>
           ${S.guests.length > 1 ? `<button type="button" class="btn sec pt-rm" data-pgrm="${i}">${esc(K.remove)} ${esc(P.cleanName(x.name) || K.guest(i + 1))}</button>` : ''}</div>`).join('')}
         ${S.guests.length < P.MAX_PLAYERS - 1 ? `<p style="margin:6px 0"><button type="button" class="btn sec" data-pgadd>${esc(K.add)}</button></p>` : ''}
         ${rec.length && S.guests.length ? `<div class="pt-recent"><span class="small muted">${esc(K.recent)}</span><div class="pt-chips">${rec.map((x, i) => `<button type="button" class="pt-chip" data-pgpick="${esc(x.name)}" data-pghcpv="${x.hcp ?? ''}">${esc(x.name)}${Number.isFinite(x.hcp) ? ` · ${x.hcp}` : ''}</button>`).join('')}</div></div>` : ''}
@@ -271,6 +303,7 @@ export function registerGuided(c) {
       $('#sheetPanel [data-pgadd]')?.addEventListener('click', () => { read(); if (S.guests.length < P.MAX_PLAYERS - 1) S.guests.push({ name: '', hcp: '' }); draw(); });
       $$('#sheetPanel [data-pgrm]').forEach((b) => b.addEventListener('click', () => { read(); S.guests.splice(Number(b.dataset.pgrm), 1); draw(); }));
       $$('#sheetPanel [data-pgpick]').forEach((b) => b.addEventListener('click', () => { read(); const e = S.guests.findIndex((x) => !P.cleanName(x.name)), row = { name: b.dataset.pgpick, hcp: b.dataset.pghcpv }; if (e >= 0) S.guests[e] = row; else if (S.guests.length < P.MAX_PLAYERS - 1) S.guests.push(row); draw(); }));
+      $$('#sheetPanel [data-pgname]').forEach((i) => i.addEventListener('input', () => { const el = i.closest('[data-pgrow]')?.querySelector('[data-pgrec]'); if (el) el.textContent = recLine(i.value); }));
       $$('#sheetPanel [data-pghcp], #sheetPanel [data-pgname]').forEach((i) => i.addEventListener('input', () => { read(); const ok = hcOk(), h = $('#sheetPanel input[value=handicap]'); if (h) { h.disabled = !ok; h.closest('label').classList.toggle('off', !ok); if (!ok && h.checked) $('#sheetPanel input[value=straight]').checked = true; h.nextElementSibling.querySelector('small').textContent = ok ? K.handicapNote : (!B.hasLevel(g.id) ? K.noBench : K.needHcp); } }));
       $('#sheetPanel [data-gppstart]')?.addEventListener('click', async () => {
         read(); const gs = S.guests.filter((x) => P.cleanName(x.name)), bad = P.problem([{ name: ownerName() }, ...gs]);
@@ -285,6 +318,9 @@ export function registerGuided(c) {
 
   function sesButtons(g) {
     if ((J().results || []).find((x) => x.id === c.ui.game_result?.id)?.duel) return `<div class="row"><button class="btn" data-gpdone>Done</button></div>`;       // a duel is one attempt: no "play again"
+    const pr0 = (J().results || []).find((x) => x.id === c.ui.game_result?.id);
+    if (pr0?.party) { const R = FEEL.COPY.party.result;
+      return `<div class="row"><button class="btn" data-gprematch="${esc(pr0.id)}">${esc(R.rematch)}</button><button class="btn sec" data-gpnextp="${esc(pr0.id)}">${esc(R.next)}</button><button class="btn sec" data-gpdone>${esc(R.done)}</button></div>`; }
     const fr = c.ui.game_result?.fw;
     if (fr) {                                                   // a first-week step: on to the next step, or the finish screen after the fifth
       const K = FEEL.COPY.firstWeek, fw = c.progress.data().fw, nx = fw.next;
@@ -310,6 +346,8 @@ export function registerGuided(c) {
   const targetOf = (info0, inf) => (Number.isFinite(info0.target_before) ? info0.target_before : info0.fw ? null : inf.target ?? null);
   // a first play in the first week always celebrates (the win sound and a stamp); confetti stays for a new tier, as on every other result
   const fwMarkCelebration = (tierUp) => ({ sound: tierUp ? 'tier' : 'win', confetti: tierUp });
+  // a game with friends always ends with a winner (or a shared first place) on the podium: the win sound and confetti, whoever won (plan C3)
+  const PODIUM_CEL = { sound: 'win', confetti: true };
   function resultScreen() {
     const info0 = c.ui.game_result, r = (J().results || []).find((x) => x.id === info0?.id);
     if (!r) { c.ui.game_result = null; return ''; }
@@ -357,6 +395,17 @@ export function registerGuided(c) {
       info0.ghost ? `<b>${info0.ghost.state === 'won' ? `You beat ${esc(info0.ghost.nick)}` : info0.ghost.state === 'lost' ? `${esc(info0.ghost.nick)} wins` : `Level with ${esc(info0.ghost.nick)}`}</b> · ${sc(r.score)} to ${sc(info0.ghost.score)}` : '',
       pr ? `${esc(pr.label)}.${pr.hit ? ' Counts as 1.5 hits.' : ''}` : '', credit,
     ].filter(Boolean).map((x) => `<p class="small" style="margin:0 0 6px">${x}</p>`).join('');
+    // a game with friends: the podium takes the hero, and the owner's own score, tier and rewards follow under "Your practice"
+    if (r.party) return `<div class="card gp-res gp-rv gp-pres" id="gpRoot" data-rid="${esc(r.id)}"${info0.seen ? '' : ' data-reveal="1"'}>
+      <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
+        <div ${at('gp-rname', 0)}>${esc(g.name)}</div>${podium(r, at)}</div>
+      <div class="gp-rbody">${partyResult(r)}
+        <div class="gp-pyou"><div class="l">${esc(K.party.result.you)}</div>
+          <div class="gp-pyrow"><span class="gp-pysc"><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</span><span><b>${esc(vText)}</b>${vSub ? `<br><span class="small muted">${esc(vSub)}</span>` : ''}${lv ? `<br><span class="small muted">${esc(K.level(lv.h))}</span>` : ''}</span></div>
+          ${badge || nextT ? `<div class="gp-pybadge">${badge}${nextT ? `<div class="small">${nextT}</div>` : ''}</div>` : ''}</div>
+        ${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
+        <div ${at('gp-rbtn', i)}>${sesButtons(g)}</div>
+        ${det ? `<div class="gp-rdet">${det}</div>` : ''}</div></div>`;
     return `<div class="card gp-res gp-rv${r.boss ? ' gp-boss' : ''}" id="gpRoot" data-rid="${esc(r.id)}"${info0.seen ? '' : ' data-reveal="1"'}>
       <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
         <div ${at('gp-rname', 0)}>${esc(g.name)}</div>
@@ -364,7 +413,7 @@ export function registerGuided(c) {
         <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
         ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
         ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
-      <div class="gp-rbody">${c.compete.duelPanel(r.id)}${r.party ? partyResult(r) : ''}${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
+      <div class="gp-rbody">${c.compete.duelPanel(r.id)}${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
         <div ${at('gp-rbtn', i)}>${sesButtons(g)}</div>
         ${det ? `<div class="gp-rdet">${det}</div>` : ''}</div></div>`;
   }
@@ -374,7 +423,7 @@ export function registerGuided(c) {
     const r = (J().results || []).find((x) => x.id === info0.id); if (!r) return;
     info0.seen = true; root.removeAttribute('data-reveal'); c.saveUi();
     const g = gameOf(r.game), inf = info(g.id), ms = FEEL.revealMs, animated = ms(100) > 0, live = () => $('#gpRoot.gp-rv')?.dataset.rid === r.id, at = (t, f) => later(t, () => { if (live()) f(); });
-    const verdict = G.verdictOf(g, r.score, { target: targetOf(info0, inf), prevBest: info0.prev_best }), cel = info0.fw?.mark ? fwMarkCelebration(!!info0.up) : G.celebrationOf({ verdict, tierUp: !!info0.up });
+    const verdict = G.verdictOf(g, r.score, { target: targetOf(info0, inf), prevBest: info0.prev_best }), cel = r.party ? PODIUM_CEL : info0.fw?.mark ? fwMarkCelebration(!!info0.up) : G.celebrationOf({ verdict, tierUp: !!info0.up });
     const num = $('#gpRNum'), to = r.score, nf = (v) => (Number.isInteger(to) ? String(Math.round(v)) : fmt(v, 1));
     const st = $('#gpRStreak'), pot = $('#gpRPot'), pts = $('#gpRPts');
     if (animated) { if (num) num.textContent = nf(0); if (pts) pts.textContent = '+0'; if (st) st.textContent = st.dataset.from; if (pot) pot.textContent = fmt(Number(pot.dataset.from), 1); }
@@ -725,6 +774,8 @@ export function registerGuided(c) {
     $$('[data-gpstart]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpstart, { pressure: !!$('#gpPressure')?.checked })));
     $$('[data-gpparty]').forEach((b) => b.addEventListener('click', () => partySetup(b.dataset.gpparty, !!$('#gpPressure')?.checked))); $$('[data-gphand]').forEach((b) => b.addEventListener('click', handedOver));
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
+    $$('[data-gprematch]').forEach((b) => b.addEventListener('click', () => partyAgain(b.dataset.gprematch))); $$('[data-gpnextp]').forEach((b) => b.addEventListener('click', () => partyAgain(b.dataset.gpnextp, true)));
+    $$('[data-gpsend]').forEach((b) => b.addEventListener('click', () => sendResult(b.dataset.gpsend)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
     $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.ui.session_gap = null; c.ui.fw_finish = null; c.saveUi(); c.rerender(); }));
     loadGhosts(); reveal(); bossReveal(); loadLeague(); fwReveal();

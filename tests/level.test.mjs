@@ -108,4 +108,14 @@ t('empty and odd history never throws', () => {
   assert.equal(lv({}).points, 0); assert.equal(L.playerLevel().points, 0);
   assert.equal(lv({ results: [{ game: 'custom-x', date: '2026-11-01', score: 3 }, { game: 'putt-lag', date: '', score: 1 }, null] }).points, P.quick, 'an unknown game still counts as a score; a result with no date does not');
 });
+t('a game with a friend earns +5, at most twice a day, outside the daily cap, on the owner\'s result', () => {
+  const party = { mode: 'straight', players: [{ name: 'Wills', owner: true, place: 1 }, { name: 'Sam', place: 2 }], winner: 'Wills' };
+  const rs = [1, 2, 3].map((k) => g('putt-lag', '2026-11-01', 0, { id: `p${k}`, party })).concat([g('putt-lag', '2026-11-02', 0, { id: 'p4', party }), g('putt-lag', '2026-11-02', 0, { id: 's1' })]);
+  const l = lv({ results: rs });
+  assert.equal(l.points, 5 * P.game + 3 * P.party); assert.equal(P.party, 5); assert.equal(L.PARTY_DAILY, 2);
+  assert.equal(L.pointsFor(l, 'p1'), P.game + P.party); assert.equal(L.pointsFor(l, 'p3'), P.game, 'the third game that day: no party bonus'); assert.equal(L.pointsFor(l, 's1'), P.game);
+  const full = Array.from({ length: 16 }, (_, k) => g('putt-lag', '2026-11-03', 0, { id: `f${k}`, party }));
+  assert.equal(lv({ results: full }).points, L.DAILY_CAP + 2 * P.party, 'the bonus sits outside the 150 a day');
+  assert.equal(lv({ results: [g('putt-lag', '2026-11-01', 0, { party: { players: [{ name: 'Wills', owner: true }] } })] }).points, P.game, 'a party record with one player earns nothing extra');
+});
 console.log(`${n} tests passed`);

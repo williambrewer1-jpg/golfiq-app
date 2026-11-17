@@ -20,6 +20,7 @@ export const NAME_MAX = 20;                      // characters in a player's nam
 export const HCP_MIN = -10, HCP_MAX = 54;        // a typed handicap outside this range is ignored (plus handicaps are negative)
 export const RECENT_PARTNERS = 10;               // names kept for quick picking on the set-up sheet
 export const TIE_EPS = 0.05;                     // scores or margins closer than this share a place
+export const SERIES_MIN = 2;                     // the running series shows from the group's second game of the day
 export const MODES = ['straight', 'handicap'];
 // The four player colours, as names of existing colour tokens in index.html (used as var(--name)). Colour is never the only cue: the name is always shown with it.
 export const COLOURS = ['flag', 'bad', 'good', 'muted'];
@@ -163,6 +164,41 @@ export function ownerDraft(draft) {
   const o = draft?.party?.players?.find((p) => p.owner); if (!o) return draft;
   return { ...draft, answers: [...o.answers], ...(o.balls ? { balls: [...o.balls] } : {}) };
 }
+// ------------------------------------------------------------------ after the game (phase C2): rematch, series, record
+// A new party block with the same players (and handicaps) as a finished game, for a rematch or the next game. Handicap scoring is kept when the game allows it,
+// otherwise it falls back to straight. Returns null if the record cannot make a group.
+export function regroup(rec, game, unitM = 0.9144) {
+  const ps = rec?.players || [], o = ps.find((p) => p.owner); if (!o) return null;
+  return newParty({ owner: { name: o.name, hcp: o.hcp }, guests: ps.filter((p) => !p.owner).map((p) => ({ name: p.name, hcp: p.hcp })), mode: rec.mode, game, unitM });
+}
+// Who played, ignoring order and letter case: the same group plays a series
+export const groupKey = (players) => (players || []).map((p) => cleanName(p.name).toLowerCase()).sort().join('|');
+const partyResults = (results) => (results || []).filter((r) => r && r.party && Array.isArray(r.party.players) && r.party.players.length >= MIN_PLAYERS);
+// The running series for one day: the group's games that day, up to and including result `rid`, in the order they were saved.
+// → { games, ties, rows: [{ name, wins }] (most wins first, then playing order) } or null for fewer than SERIES_MIN games
+export function series(results, rid) {
+  const all = partyResults(results), me = all.find((r) => r.id === rid); if (!me) return null;
+  const key = groupKey(me.party.players), day = String(me.date || '').slice(0, 10), upTo = all.indexOf(me);
+  const games = all.slice(0, upTo + 1).filter((r) => String(r.date || '').slice(0, 10) === day && groupKey(r.party.players) === key);
+  if (games.length < SERIES_MIN) return null;
+  const wins = new Map(me.party.players.map((p) => [cleanName(p.name).toLowerCase(), 0])); let ties = 0;
+  for (const r of games) { const w = cleanName(r.party.winner).toLowerCase(); if (w && wins.has(w)) wins.set(w, wins.get(w) + 1); else ties++; }
+  const rows = me.party.players.map((p, i) => ({ name: p.name, wins: wins.get(cleanName(p.name).toLowerCase()), i })).sort((a, b) => b.wins - a.wins || a.i - b.i).map(({ i, ...x }) => x);
+  return { games: games.length, ties, rows };
+}
+// The owner's won–drawn–lost record against one partner, worked out from every saved game they played together. In a game of three or four,
+// it is the two places that count: a better place is a win, the same place a draw.
+export function record(results, partnerName) {
+  const k = cleanName(partnerName).toLowerCase(), out = { won: 0, drawn: 0, lost: 0 }; if (!k) return out;
+  for (const r of partyResults(results)) {
+    const o = r.party.players.find((p) => p.owner), them = r.party.players.find((p) => !p.owner && cleanName(p.name).toLowerCase() === k);
+    if (!o || !them || !isNum(o.place) || !isNum(them.place)) continue;
+    if (o.place < them.place) out.won++; else if (o.place > them.place) out.lost++; else out.drawn++;
+  }
+  return out;
+}
+export const recordTotal = (r) => (r ? r.won + r.drawn + r.lost : 0);
+
 // The recent partners list (J().partners): newest first, one entry per name (case ignored), at most RECENT_PARTNERS
 export function rememberPartners(partners, guests, date) {
   const seen = new Set(), out = [];
