@@ -400,6 +400,11 @@ export const COPY = {
     noClub: 'No club', pickClub: 'Change club', from: 'Measure from', fromGps: 'My position', fromTee: 'The tee', style: 'Map', styleMap: 'Course', styleSat: 'Satellite',
     working: 'Working it out…', noPos: 'No position yet. Distances appear when GPS has a fix, or once the tee of this hole is known.',
     noGreen: 'BreakingPar does not know where this green is yet. Score entry still works.',
+    surf: { fairway: 'Fairway', green: 'Green', rough: 'Rough', bunker: 'Bunker', water: 'Water', trees: 'Trees' }, more: (n) => `+${n} more`,
+    sure: { own: (n) => `From ${n} shots`, est: 'Estimated from your other clubs', dist: (n) => `Distance only: needs ${n} more tracked shots`, none: 'No tracked shots with this club yet' },
+    usual: (lo, hi, u) => `usually ${lo}–${hi} ${u}`,
+    miss: (club, parts) => `Your ${club} finishes about ${parts}.`, allow: 'Allow for it', adjusted: 'Aim allows for your usual miss.',
+    showShots: 'Show shots', hideShots: 'Hide shots', shotsNote: 'Your last 60 shots with this club. A cross is a shot that finished in trouble. Tap the pattern on the map to show or hide them.',
   },
   settings: {
     title: 'Sound and motion',

@@ -44,6 +44,8 @@ t('makeFrame exact fits only the given points; maxK caps the scale', () => {
   const fr = HM.makeFrame(tee, pin, pts, 390, 844, { inset: { t: 130, b: 230 }, exact: true });
   const [, yt] = fr.xy(...tee);
   assert.ok(yt > 844, 'the tee is off screen in the Green zoom');
+  const tight = HM.makeFrame(tee, pin, pts, 390, 844, { inset: { t: 130, b: 230 }, exact: true, pad: [4, 4, 4] });
+  assert.ok(tight.k > fr.k * 1.4, 'the Green zoom\'s small margin brings it closer');
   const capped = HM.makeFrame(tee, pin, pts, 390, 844, { exact: true, maxK: 2 });
   assert.equal(capped.k, 2);
 });
@@ -133,6 +135,117 @@ t('ringsSvg: one ring every 50 yd, none past the top of the clear area', () => {
   assert.equal(all, 7, '50..350 yd under 340 m');
   const clipped = (HM.ringsSvg(fr, tee, 340, 'yd', cv, 400).match(/<circle/g) || []).length;
   assert.ok(clipped < all);
+});
+
+
+// ------------------------------------------------------------------ phase 2: the shot pattern
+const stats = (cx, cy, sx, sy, n = 40) => { const pts = []; for (let i = 0; i < n; i++) { const u = (i + 0.5) / n, v = (i * 0.618034) % 1, r = Math.sqrt(-2 * Math.log(1 - u * 0.999)); pts.push({ x: cx + sx * r * Math.cos(2 * Math.PI * v), y: cy + sy * r * Math.sin(2 * Math.PI * v) }); } return A.dispersionStats(pts); };
+const P0 = ll(0, 0), AIM = ll(0, 150);
+const ac = (p, br = 0) => A.alongCross(P0[0], P0[1], p[0], p[1], br);
+
+t('corridor: zones, edges from the ball to the widest part, centre where the shots finish', () => {
+  const st = stats(0, 150, 8, 6), c = HM.corridor(P0, AIM, st);
+  assert.ok(c.inner.length > 40 && c.outer.length > 40, 'both zones with 40 shots');
+  assert.deepEqual(c.left[0], P0); assert.deepEqual(c.right[0], P0);
+  const [al, cr] = ac(c.left[1]), [ar, rr] = ac(c.right[1]);
+  assert.ok(cr < 0 && rr > 0, 'left edge left, right edge right'); near(Math.abs(cr), Math.abs(rr), 1.5, 'symmetric for a centred pattern');
+  for (const p of c.outer) { const [a, x] = ac(p); assert.ok(Math.atan2(x, a) >= Math.atan2(cr, al) - 1e-9 && Math.atan2(x, a) <= Math.atan2(rr, ar) + 1e-9, 'zone within the edges'); }
+  const [ca, cc] = ac(c.centre); near(ca, st.mean_y_m, 0.3); near(cc, st.mean_lateral_m, 0.3);
+  const few = HM.corridor(P0, AIM, stats(0, 150, 8, 6, 12));
+  assert.ok(few.inner && few.outer === null, 'under 20 shots: the middle half only, edges to it');
+  assert.ok(few.left && few.right);
+  assert.equal(HM.corridor(P0, AIM, { n: 4, enough: false }), null);
+});
+
+t('corridor: slope / plays-like moves the zone (adj), no crosswind drift', () => {
+  const st = stats(0, 150, 8, 6), up = HM.corridor(P0, AIM, st, (y) => y - 10);
+  near(ac(up.centre)[0], st.mean_y_m - 10, 0.3, 'ten metres uphill: lands ten short');
+  near(ac(up.centre)[1], st.mean_lateral_m, 0.3, 'sideways unchanged');
+});
+
+t('missOffset: right/left and long/short of the aim; shown past 4 yd; Allow only for a sideways miss of 2 yd+', () => {
+  const m = HM.missOffset(stats(5.5, 146, 8, 6), 150);
+  near(m.right_m, 5.5, 0.3); near(m.long_m, -4, 0.3); assert.ok(m.show && m.allow);
+  const small = HM.missOffset(stats(1, 149, 8, 6), 150); assert.ok(!small.show, 'under 4 yd: nothing shown');
+  const short = HM.missOffset(stats(0.5, 140, 8, 6), 150); assert.ok(short.show && !short.allow, 'a short miss is shown but cannot be aimed away');
+  assert.equal(HM.missOffset(stats(5, 140, 8, 6)).long_m, null, 'no aim distance: no long/short');
+  assert.equal(HM.missOffset({ enough: false }), null);
+  const wrongClub = HM.missOffset(stats(1, 100, 8, 6), 150); assert.ok(wrongClub.long_m === null && !wrongClub.show, '50 m short is the wrong club, not a miss');
+  near(HM.MISS_SHOW_M, 3.6576, 1e-6);
+});
+
+t('allowForMiss: turns the aim so the pattern centre lands on the original line, same distance', () => {
+  const st = stats(6, 150, 8, 6), aim2 = HM.allowForMiss(P0, AIM, st);
+  near(A.haversine(P0[0], P0[1], aim2[0], aim2[1]), A.haversine(P0[0], P0[1], AIM[0], AIM[1]), 0.01, 'aim distance unchanged');
+  assert.ok(ac(aim2)[1] < -5, 'aim moved left for a right miss');
+  const c2 = HM.corridor(P0, aim2, st).centre;
+  near(ac(c2)[1], 0, 0.15, 'centre now on the old line');
+  const left = HM.allowForMiss(P0, AIM, stats(-6, 150, 8, 6)); assert.ok(ac(left)[1] > 5, 'and right for a left miss');
+  assert.equal(HM.ALLOW_ALONG, false);
+});
+
+t('rangeTicks: the 25th and 75th percentile distances on the line to the aim', () => {
+  const tk = HM.rangeTicks(P0, AIM, 140, 160);
+  near(ac(tk.p25)[0], 140, 0.05); near(ac(tk.p75)[0], 160, 0.05); near(ac(tk.p25)[1], 0, 0.05);
+  const adj = HM.rangeTicks(P0, AIM, 140, 160, (y) => y * 0.9); near(ac(adj.p75)[0], 144, 0.05, 'plays-like applied');
+  assert.equal(HM.rangeTicks(P0, AIM, null, 160), null);
+});
+
+const zone = circle(0, 150, 20, 48);
+const area = (pts) => { const o = pts[0], kx = KY * Math.cos(o[0] * Math.PI / 180); let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += (p[1] - o[1]) * kx * (q[0] - o[0]) * KY - (q[1] - o[1]) * kx * (p[0] - o[0]) * KY; } return Math.abs(a / 2); };
+t('clipZone: a bunker wholly inside the zone comes back whole', () => {
+  const b = circle(5, 150, 4, 16), r = HM.clipZone(zone, [{ kind: 'bunker', pts: b }]);
+  assert.equal(r.length, 1); assert.equal(r[0].kind, 'bunker'); near(r[0].area_m2, area(b), 0.5);
+});
+t('clipZone: only the overlapping part of a hazard, nothing for a far one or for fairway', () => {
+  const water = [ll(10, 120), ll(60, 120), ll(60, 180), ll(10, 180), ll(10, 120)];             // covers x >= 10 of a 20 m circle
+  const r = HM.clipZone(zone, [{ kind: 'water', pts: water }, { kind: 'bunker', pts: circle(200, 150, 5) }, { kind: 'fairway', pts: circle(0, 150, 30) }]);
+  assert.equal(r.length, 1); assert.equal(r[0].kind, 'water');
+  const seg = 20 * 20 * Math.acos(0.5) - 10 * Math.sqrt(20 * 20 - 100);                          // circular segment beyond x = 10
+  near(r[0].area_m2, seg, seg * 0.04, 'segment area');
+  for (const p of r[0].pts) assert.ok(F.pointInPolygon(p[0], p[1], zone) || A.haversine(p[0], p[1], ...ll(0, 150)) <= 20.01, 'inside the zone');
+});
+t('clipZone: concave hazards, single trees and tree rows', () => {
+  const U = [ll(-30, 130), ll(30, 130), ll(30, 170), ll(18, 170), ll(18, 140), ll(-18, 140), ll(-18, 170), ll(-30, 170)];   // a U shape around the middle
+  const r = HM.clipZone(zone, [{ kind: 'trees', pts: U }]);
+  assert.ok(r.length >= 1 && r.every((x) => x.kind === 'trees'));
+  const tree = HM.clipZone(zone, [{ kind: 'tree', pts: [ll(0, 150)] }]);
+  assert.equal(tree.length, 1); near(tree[0].area_m2, 3 * F.TREE_RADIUS_M ** 2, 0.5, 'a 12-sided circle of the tree radius');
+  const row = HM.clipZone(zone, [{ kind: 'treerow', pts: [ll(-40, 155), ll(40, 155)] }]);
+  assert.ok(row.length >= 8 && row.every((x) => x.kind === 'trees'), 'circles along the row inside the zone');
+  assert.deepEqual(HM.clipZone(zone, []), []); assert.deepEqual(HM.clipZone(null, [{ kind: 'bunker', pts: zone }]), []);
+});
+
+t('patternKind: own, estimated (spread from your other clubs), distance only, none', () => {
+  assert.equal(HM.patternKind({ stats: { enough: true } }), 'own');
+  assert.equal(HM.patternKind({ estimated: true, ratio_own: true, stats: { enough: true }, median_m: 180 }), 'estimated');
+  assert.equal(HM.patternKind({ estimated: true, ratio_own: false, stats: { enough: true }, median_m: 180 }), 'distance', 'no own clubs to borrow a spread from');
+  assert.equal(HM.patternKind({ stats: { enough: false }, median_m: 180 }), 'distance');
+  assert.equal(HM.patternKind({ stats: { enough: false }, median_m: null }), 'none');
+  assert.equal(HM.patternKind(null), 'none');
+});
+
+t('patternSvg: three clearly different styles; trouble hatched where it is; shots only on request', () => {
+  const fr = HM.makeFrame(P0, AIM, [ll(0, 170)], 390, 844), st = stats(6, 150, 8, 6), cor = HM.corridor(P0, AIM, st);
+  const haz = HM.clipZone(cor.outer, [{ kind: 'bunker', pts: circle(12, 150, 6) }]), ticks = HM.rangeTicks(P0, AIM, 142, 158);
+  const own = HM.patternSvg(fr, P0, AIM, { v2: true, kind: 'own', ...cor, haz, ticks, dots: [{ p: ll(0, 150), bad: false }, { p: ll(12, 150), bad: true }] });
+  assert.ok(own.includes('hm-zone50') && own.includes('hm-zone90') && (own.match(/hm-edge/g) || []).length === 2);
+  assert.ok(!/hm-zone50[^>]*stroke-dasharray/.test(own), 'own: solid');
+  assert.ok(own.includes('url(#hmZoneIn)') && own.includes('radialGradient'), 'fills fade at the edge');
+  assert.ok(own.includes('class="hm-trouble" data-kind="bunker"') && own.includes('url(#hmHatch)'), 'trouble hatched, not just coloured');
+  assert.equal((own.match(/hm-tick/g) || []).length, 2, 'two distance ticks');
+  assert.ok(own.includes('hm-dot bad') && own.includes('class="hm-dot"'), 'a trouble shot is a cross, others dots');
+  assert.ok(!/#ff6b57"\s*stroke-width="2.2"/.test(own) && !own.includes('rgba(232,74,58'), 'the whole shape is not tinted by the overall risk');
+  const est = HM.patternSvg(fr, P0, AIM, { v2: true, kind: 'estimated', ...cor, haz: [], dots: [] });
+  assert.ok(/hm-zone50[^>]*stroke-dasharray/.test(est) && /hm-edge[^>]*stroke-dasharray/.test(est), 'estimated: dashed');
+  const dist = HM.patternSvg(fr, P0, AIM, { v2: true, kind: 'distance', arc: [ll(-5, 150), ll(0, 151), ll(5, 150)], ticks });
+  assert.ok(dist.includes('hm-arc') && !dist.includes('hm-zone50') && !dist.includes('hm-edge'), 'distance only: the arc');
+  const dyn = HM.dynamicSvg(fr, { pos: P0, aim: AIM, green: ll(0, 300), pat: { v2: true, kind: 'own', ...cor, haz: [], miss: HM.missOffset(st, 150), dots: [] }, cv: (m) => m, unit: 'm', big: true });
+  assert.ok(dyn.includes('hm-miss'), 'usual-miss arrow from the aim');
+  const dynE = HM.dynamicSvg(fr, { pos: P0, aim: AIM, green: ll(0, 300), pat: { v2: true, kind: 'estimated', ...cor, haz: [], miss: null, dots: [] }, cv: (m) => m, unit: 'm', big: true });
+  assert.ok(!dynE.includes('hm-miss'), 'no miss arrow for an estimate');
+  const classic = HM.dynamicSvg(fr, { pos: P0, aim: AIM, green: ll(0, 300), pat: { ell50: cor.inner, ell90: cor.outer, risk: 30, dots: [] }, cv: (m) => m, unit: 'm' });
+  assert.ok(classic.includes('rgba(232,74,58') && !classic.includes('hm-zone50'), 'the classic card keeps its look');
 });
 
 console.log(`${n} tests passed`);

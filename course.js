@@ -18,6 +18,7 @@ export const TAP_SLOP_PX = 10;                  // movement under this is a tap,
 export const SWIPE_PX = 50;                     // a sideways swipe on the top bar this long changes hole
 export const SHEET_DRAG_PX = 40;                // dragging the sheet handle this far changes its height
 export const MAP_MAX_K = 8;
+export const REZOOM_RATIO = 1.4;                // Shot zoom: rebuild the map when the right scale for where you are now differs by this much
 export const BOTTOM_CLEAR_PX = 34;             // extra room above the sheet so your own dot is never under it                     // pixels per metre: the Green zoom never goes closer than this
 export const SHEETS = ['peek', 'half', 'full'];
 export const TABS = ['club', 'strategy', 'score'];
@@ -25,8 +26,8 @@ export const TABS = ['club', 'strategy', 'score'];
 export function registerCourse(c, P) {
   const { A, $, $$, esc, toast } = c;
   const T = FEEL.COPY.course, U = () => c.UNIT;
-  let L = null, M = null, wake = null, raf = 0, lastLive = 0, timer = 0, dragging = false, st = null;
-  let insets = { t: 128, b: 196 };                // measured after the first draw
+  let L = null, M = null, V = null, wake = null, raf = 0, lastLive = 0, timer = 0, dragging = false, st = null;
+  let insets = { t: 128, b: 196, l: 0 };                // measured after the first draw
   const active = () => !!document.getElementById('cvRoot');
   const sheet = () => (SHEETS.includes(c.ui.pl_sheet) ? c.ui.pl_sheet : 'peek');
   const tab = () => (TABS.includes(c.ui.pl_stab) ? c.ui.pl_stab : 'club');
@@ -73,8 +74,55 @@ export function registerCourse(c, P) {
   const viewBottom = () => (L?.fr?.view ? L.fr.view.t + L.fr.view.h : innerHeight);
   function dynHtml() {
     const [, ay] = L.fr.xy(...L.aim);
-    return HM.dynamicSvg(L.fr, { pos: L.pos, aim: L.aim, green: L.green, pat: M.pat, cv: c.cv, unit: U(), clubName: M.club?.name, big: true,
+    return HM.dynamicSvg(L.fr, { pos: L.pos, aim: L.aim, green: L.green, pat: V || M.pat, cv: c.cv, unit: U(), clubName: M.club?.name, big: true,
       pad: L.padOff ?? HM.padOffset(ay, viewBottom()), live: { rings: M ? A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) + 40 : 0, acc: L.usingTee ? null : P.fix()?.acc } });
+  }
+
+  // ------------------------------------------------------------ the shot pattern as drawn in the Course view (plan section 5)
+  const showShots = () => !!c.ui.pl_shots;
+  function remodel() { M = P.model(L); V = pview(); }
+  // How sure the pattern is: 'own' (from your shots), 'estimated' (spread borrowed from your other clubs), 'distance' (arc only), 'none'
+  const kindOf = HM.patternKind;
+  function pview() {
+    const pt = M?.pt, kind = kindOf(pt); if (!L || !M || kind === 'none') return null;
+    const adj = M.adj, ticks = pt.partial_swing ? null : HM.rangeTicks(L.pos, L.aim, pt.p25_m, pt.p75_m, adj);
+    if (kind === 'distance') {
+      const br = A.bearing(L.pos[0], L.pos[1], L.aim[0], L.aim[1]);
+      return { v2: true, kind, ticks, arc: Array.from({ length: 17 }, (_, i) => F.destination(L.pos[0], L.pos[1], br - 8 + i, adj(pt.median_m))) };
+    }
+    const cor = HM.corridor(L.pos, L.aim, pt.stats, adj); if (!cor) return null;
+    const haz = M.nearFeats ? HM.clipZone(cor.outer || cor.inner, M.nearFeats) : [];
+    const miss = kind === 'own' ? HM.missOffset(pt.stats, M.aimDist, adj) : null;
+    return { v2: true, kind, ticks, ...cor, haz, miss, risk: M.pat?.risk ?? null, dots: kind === 'own' && showShots() ? (M.pat?.dots || []) : [] };
+  }
+  const SURF = [['fairway', '#a3d36c'], ['green', '#5fbf4f'], ['rough', '#6fa64a'], ['bunker', '#e6cf86'], ['water', '#3d8bd0'], ['trees', '#24552a']];
+  const TROUBLE = new Set(['bunker', 'water', 'trees']);
+  function outcomeHtml() {
+    const o = M?.out; if (!o) return '';
+    const seg = SURF.map(([k, col]) => ({ k, col, v: o[k] || 0 })).filter((x) => x.v >= 0.5).sort((a, b) => b.v - a.v);
+    const open = !!c.ui.pl_out_open, shown = open ? seg : seg.slice(0, 2), more = seg.length - shown.length;
+    const bar = seg.map((x) => `<i class="${TROUBLE.has(x.k) ? 'tr' : ''}" style="width:${x.v.toFixed(1)}%;background-color:${x.col}"></i>`).join('');
+    return `<button type="button" class="cv-out" data-cvout aria-expanded="${open}"><span class="cv-otop"><span class="cv-obar">${bar}</span><span class="t">${esc(T.trouble(Math.round(o.trouble)))}</span></span>
+      <span class="cv-oleg">${shown.map((x) => `<span><b class="${TROUBLE.has(x.k) ? 'tr' : ''}" style="background-color:${x.col}"></b>${esc(T.surf[x.k])} ${Math.round(x.v)}%</span>`).join('')}${more ? `<span class="m">${esc(T.more(more))}</span>` : ''}</span></button>`;
+  }
+  function sureText() {
+    const pt = M?.pt, k = kindOf(pt);
+    if (k === 'own') return T.sure.own(pt.stats.n);
+    if (k === 'estimated') return T.sure.est;
+    if (k === 'distance') return T.sure.dist(Math.max(1, A.T.min_shots_dispersion - (pt.real_n ?? pt.stats?.n ?? 0)));
+    return M?.club ? T.sure.none : '';
+  }
+  function missHtml() {
+    const m = V?.miss; if (!m?.show || !M?.club) return '';
+    if (L.adjusted) return `<p class="cv-miss">${esc(T.adjusted)}</p>`;
+    const u = U(), side = Math.round(c.cv(Math.abs(m.right_m))), lng = m.long_m === null ? 0 : Math.round(c.cv(Math.abs(m.long_m)));
+    const parts = [side ? `${side} ${u} ${m.right_m > 0 ? 'right' : 'left'}` : null, lng ? `${lng} ${m.long_m > 0 ? 'long' : 'short'}` : null].filter(Boolean);
+    if (!parts.length) return '';
+    return `<div class="cv-miss"><span>${esc(T.miss(M.club.name, parts.join(' and ')))}</span>${m.allow ? `<button type="button" class="btn sec" data-cvallow>${esc(T.allow)}</button>` : ''}</div>`;
+  }
+  function rangeText() {
+    const pt = M?.pt; if (!pt || pt.partial_swing || !A.isNum(pt.p25_m) || !A.isNum(pt.p75_m)) return '';
+    return T.usual(yd(M.adj(pt.p25_m)), yd(M.adj(pt.p75_m)), U());
   }
 
   // Build the map for the current hole: frame, static layer, moving layer. Called on open, hole change, zoom, recentre,
@@ -83,7 +131,7 @@ export function registerCourse(c, P) {
     const d = P.D(), root = $('#cvRoot'), box = $('#cvMap'); if (!d || !root || !box) return;
     const w = where(d);
     if (!w.pos || !w.green) {
-      L = null; M = null; P.setLive(null);
+      L = null; M = null; V = null; P.setLive(null);
       box.innerHTML = `<div class="cv-empty"><p>${esc(w.pos ? T.missing.green : T.noPos)}</p></div>`;
       chrome(w); return;
     }
@@ -92,13 +140,10 @@ export function registerCourse(c, P) {
     const custom = !!saved, aim = custom ? saved.pt : P.defaultAim(w.pos, w.green, w.ht.line, onTee);
     const clubKey = `${d.id}|${d.hole}`;
     L = { d, hole: d.hole, pos: w.pos, green: w.green, aim, feats: w.feats, line: w.ht.line, tee: w.ht.tee, clubs: P.playClubs(), usingTee: w.usingTee, onTee,
-      club: c.ui.pl_club_hole === clubKey ? c.ui.pl_club : null, custom, greenPts: HM.greenOutline(w.green, w.feats) };
+      club: c.ui.pl_club_hole === clubKey ? c.ui.pl_club : null, custom, adjusted: !!(custom && saved.adjusted), greenPts: HM.greenOutline(w.green, w.feats) };
     L.wx = P.weatherNow(d, w.pos); L.grid = Object.values(c.state.elev || {}).find((g) => ST.gridCovers(g, [w.pos, w.green, aim])) || null;
-    M = P.model(L);
-    const ell = M.pat?.ell90 || M.pat?.ell50 || M.pat?.arc || [];
-    const zp = HM.zoomPoints(zoom(), { pos: L.pos, aim: L.aim, green: L.green, tee: L.tee, line: L.line, greenPts: L.greenPts, extra: ell.filter((_, i) => i % 6 === 0) });
-    const W = root.clientWidth || innerWidth, H = root.clientHeight || innerHeight;
-    L.fr = HM.makeFrame(L.pos, L.green, zp.pts, W, H, { inset: { t: insets.t, b: insets.b + BOTTOM_CLEAR_PX, l: 0, r: 0 }, exact: zp.exact, maxK: MAP_MAX_K });
+    remodel();
+    L.fr = frameFor();
     if (!L.grid) P.fetchElev(L.fr);
     const hasMap = w.feats.some((f) => f.kind !== 'hole');
     const style = c.ui.pl_style === 'sat' || !hasMap ? 'sat' : 'map';
@@ -106,6 +151,13 @@ export function registerCourse(c, P) {
     box.innerHTML = HM.svg(L.fr, stat, dynHtml(), style).replace('class="holemap', 'class="holemap cv-svg') + `<span class="hmcredit">${style === 'sat' ? 'Imagery © Esri' : '© OpenStreetMap'}</span>`;
     P.setLive(L); lastLive = Date.now();
     chrome(w);
+  }
+
+  function frameFor() {
+    const root = $('#cvRoot'), ell = M?.pat?.ell90 || M?.pat?.ell50 || M?.pat?.arc || [];
+    const zp = HM.zoomPoints(zoom(), { pos: L.pos, aim: L.aim, green: L.green, tee: L.tee, line: L.line, greenPts: L.greenPts, extra: ell.filter((_, i) => i % 6 === 0) });
+    const W = root?.clientWidth || innerWidth, H = root?.clientHeight || innerHeight;
+    return HM.makeFrame(L.pos, L.green, zp.pts, W, H, { inset: { t: insets.t, b: insets.b + BOTTOM_CLEAR_PX, l: insets.l, r: 0 }, exact: zp.exact, pad: zp.pad, maxK: MAP_MAX_K });
   }
 
   // ------------------------------------------------------------ chrome: top bar, green distances, peek
@@ -135,8 +187,10 @@ export function registerCourse(c, P) {
     const sc = h.strokes > 0 ? T.scoreHole(h.strokes, P.toParText(h.strokes - h.par)) : T.score;
     el.innerHTML = `<div class="cv-prow">
         <button type="button" class="cv-club" data-cvpeekclub aria-label="${esc(T.pickClub)}"><b>${esc(M?.club?.name || T.noClub)}</b><span>▾</span></button>
-        <div class="cv-pnum">${M ? `<b>${yd(aimD)}</b><span>${esc(U())} to aim</span>` : ''}</div></div>
-      ${plays || tr ? `<div class="cv-prow2">${plays ? `<button type="button" class="cv-plays" data-cvplays>${esc(plays)}</button>` : ''}${tr ? `<span class="cv-trbl">${esc(tr)}</span>` : ''}</div>` : ''}
+        <div class="cv-pnum">${M ? `<b>${yd(aimD)}</b><span>${esc(U())} to aim</span>` : ''}</div>${!plays && rangeText() ? `<span class="cv-range">${esc(rangeText())}</span>` : ''}</div>
+      ${plays ? `<div class="cv-prow2"><button type="button" class="cv-plays" data-cvplays>${esc(plays)}</button>${rangeText() ? `<span class="cv-range">${esc(rangeText())}</span>` : ''}</div>` : ''}
+      ${M?.out ? outcomeHtml() : M ? `<p class="cv-sure">${esc(sureText() || tr)}</p>` : ''}
+      ${missHtml()}
       ${c.ui.pl_plays_open && bits.length ? `<p class="cv-why">${esc(bits.join(' · '))}${L?.wx ? ` · wind ${Math.round(L.wx.wind_kmh)} km/h from ${P.compass(L.wx.wind_from)}` : ''}</p>` : ''}
       <div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button></div>`;
   }
@@ -152,7 +206,10 @@ export function registerCourse(c, P) {
     if (tab() === 'strategy') return tb + `<div class="cv-card small" id="cvStrat">${esc(T.working)}</div>`;
     const seg = (key, opts, val) => `<div class="seg">${opts.map(([v, l]) => `<button type="button" data-${key}="${v}" class="${val === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
     const hasMap = L?.feats.some((f) => f.kind !== 'hole');
-    return tb + (L && M ? `<div id="plRec" class="cv-card">${P.recHtml(L, M)}</div>` : `<p class="small muted">${esc(T.noGreen)}</p>`)
+    const sure = sureText(), own = kindOf(M?.pt) === 'own';
+    const how = M?.club ? `<div class="cv-card cv-how"><p><b>${esc(M.club.name)}</b> · ${esc(sure)}${rangeText() ? ` · ${esc(rangeText())}` : ''}</p>
+        ${own ? `<button type="button" class="btn sec" data-cvshots aria-pressed="${showShots()}">${esc(showShots() ? T.hideShots : T.showShots)}</button><p class="small muted">${esc(T.shotsNote)}</p>` : ''}</div>` : '';
+    return tb + how + (L && M ? `<div id="plRec" class="cv-card">${P.recHtml(L, M)}</div>` : `<p class="small muted">${esc(T.noGreen)}</p>`)
       + `<div class="cv-card"><label class="f">${esc(T.from)}</label>${seg('cvpos', [['gps', T.fromGps], ['tee', T.fromTee]], c.ui.pl_pos === 'tee' ? 'tee' : 'gps')}
         ${hasMap ? `<label class="f">${esc(T.style)}</label>${seg('cvstyle', [['map', T.styleMap], ['sat', T.styleSat]], c.ui.pl_style === 'sat' ? 'sat' : 'map')}` : ''}
         ${P.osmHint(d, L?.pos || null)}</div>`;
@@ -182,7 +239,9 @@ export function registerCourse(c, P) {
       L.pos = w.pos;
       L.onTee = !!(L.tee && A.haversine(L.pos[0], L.pos[1], L.tee[0], L.tee[1]) < ON_TEE_M);
       if (!L.custom) L.aim = P.defaultAim(L.pos, L.green, L.line, L.onTee);
-      M = P.model(L);
+      remodel();
+      // Shot zoom follows you: once you have walked on far enough that the picture is much too wide (or tight), rebuild it
+      if (zoom() === 'shot') { const k = frameFor().k / L.fr.k; if (k > REZOOM_RATIO || k < 1 / REZOOM_RATIO) { drawMap(); return; } }
     }
     $('#hmDyn').innerHTML = dynHtml();
     chrome(w);
@@ -197,12 +256,13 @@ export function registerCourse(c, P) {
   }
   function aimMoved() {
     if (!L) return;
-    M = P.model(L);
+    remodel();
     $('#hmDyn').innerHTML = dynHtml(); peek();
     const rec = $('#plRec'); if (rec) rec.innerHTML = P.recHtml(L, M);
   }
+  function toggleShots() { c.ui.pl_shots = !showShots(); c.saveUi(); if (L) { V = pview(); $('#hmDyn').innerHTML = dynHtml(); } }
   async function saveAim() {
-    const d = L.d; d.aim = d.aim || {}; d.aim[L.hole] = { pt: L.aim, from: L.pos };
+    const d = L.d; d.aim = d.aim || {}; d.aim[L.hole] = { pt: L.aim, from: L.pos }; if (L.adjusted) d.aim[L.hole].adjusted = true;
     c.ui.pl_club = L.club; c.ui.pl_club_hole = L.club ? `${d.id}|${L.hole}` : null; c.saveUi(); await P.saveDraft();
   }
   async function recentre() {
@@ -257,11 +317,14 @@ export function registerCourse(c, P) {
       if (b.hasAttribute('data-cvpeekclub')) { setSheet('half', 'club'); return; }
       if (b.hasAttribute('data-cvscore')) { setSheet('half', 'score'); return; }
       if (b.hasAttribute('data-cvplays')) { c.ui.pl_plays_open = !c.ui.pl_plays_open; c.saveUi(); peek(); return; }
+      if (b.hasAttribute('data-cvout')) { c.ui.pl_out_open = !c.ui.pl_out_open; c.saveUi(); peek(); return; }
+      if (b.hasAttribute('data-cvshots')) { toggleShots(); refreshSheet(); return; }
+      if (b.hasAttribute('data-cvallow') && L && M?.pt) { L.aim = HM.allowForMiss(L.pos, L.aim, M.pt.stats, M.adj); L.custom = true; L.adjusted = true; await saveAim(); aimMoved(); FEEL.play('tap'); return; }
       if (b.dataset.cvpos) { c.ui.pl_pos = b.dataset.cvpos; c.saveUi(); L = null; drawMap(); refreshSheet(); return; }
       if (b.dataset.cvstyle) { c.ui.pl_style = b.dataset.cvstyle; c.saveUi(); drawMap(); refreshSheet(); return; }
       if (b.id === 'plOsmHere') { P.osmHere(e); return; }
       if (b.hasAttribute('data-cdedit')) { e.preventDefault(); c.ui.pl_tab = 'caddie'; c.saveUi(); c.rerender(); setTimeout(() => $('#cdDistances')?.scrollIntoView({ block: 'start' }), 50); return; }
-      if (b.dataset.club && b.closest('#plRec') && L) { L.club = b.dataset.club; await saveAim(); aimMoved(); return; }
+      if (b.dataset.club && b.closest('#plRec') && L) { L.club = b.dataset.club; await saveAim(); aimMoved(); refreshSheet(); return; }
       if (b.dataset.usestrat !== undefined && L) {
         const r = P.stratPick(L, Number(b.dataset.usestrat)); if (!r) return;
         L.aim = r.aim; L.custom = true; L.club = r.club_id; await saveAim(); setSheet('peek'); aimMoved();
@@ -300,8 +363,9 @@ export function registerCourse(c, P) {
     const top = $('#cvTop'), pk = $('#cvSheet'); if (!top || !pk) return false;
     const r = $('#cvRoot').getBoundingClientRect(), t = Math.round(top.getBoundingClientRect().bottom - r.top) + 8;
     const b = Math.round(r.bottom - ($('#cvPeek').getBoundingClientRect().top - 22));
-    const changed = Math.abs(t - insets.t) > 8 || Math.abs(b - insets.b) > 8;
-    if (changed) insets = { t, b };
+    const yb = $('#cvYards'), l = yb && !yb.hidden ? Math.round(yb.getBoundingClientRect().right - r.left) + 4 : 0;   // keep the hole clear of the yardages
+    const changed = Math.abs(t - insets.t) > 8 || Math.abs(b - insets.b) > 8 || Math.abs(l - insets.l) > 8;
+    if (changed) insets = { t, b, l };
     return changed;
   }
 
@@ -309,7 +373,7 @@ export function registerCourse(c, P) {
   function wireMap(el) {
     if (!el) return;
     const toXY = (ev) => { const s = el.querySelector('svg'), r = (s || el).getBoundingClientRect(); return [(ev.clientX - r.left) * (L?.fr.w || r.width) / r.width, (ev.clientY - r.top) * (L?.fr.h || r.height) / r.height]; };
-    const set = (x, y) => { L.aim = L.fr.fromXY(x, y); L.custom = true; L.club = null; };
+    const set = (x, y) => { L.aim = L.fr.fromXY(x, y); L.custom = true; L.adjusted = false; L.club = null; };
     const move = (p) => { st.last = p; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; if (!st || !L) return; set(st.last[0], st.last[1] - st.off); aimMoved(); }); };
     el.addEventListener('pointerdown', (ev) => {
       if (!L || ev.target.closest('.hmcredit')) return;
@@ -334,8 +398,14 @@ export function registerCourse(c, P) {
     const end = async (ev) => {
       if (!st || !L) { st = null; return; }
       const s = st; st = null;
-      if (!s.moved && !s.near && ev.type === 'pointerup') { set(s.start[0], s.start[1]); FEEL.play('tap'); }
-      else if (!dragging) return;
+      if (!s.moved && ev.type === 'pointerup') {                // a tap: on the pattern shows or hides your shots; elsewhere moves the aim
+        dragging = false; P.setDragging(false); L.padOff = null;
+        const at = L.fr.fromXY(s.start[0], s.start[1]);
+        if (V?.kind === 'own' && V.inner && F.pointInPolygon(at[0], at[1], V.inner)) { toggleShots(); if ($('[data-cvshots]')) refreshSheet(); return; }
+        if (s.near) { aimMoved(); return; }
+        set(s.start[0], s.start[1]); FEEL.play('tap'); aimMoved(); await saveAim(); return;
+      }
+      if (!dragging) return;
       dragging = false; P.setDragging(false); L.padOff = null; aimMoved(); await saveAim();
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
@@ -345,5 +415,5 @@ export function registerCourse(c, P) {
   }
   addEventListener('resize', () => { if (active()) { measure(); drawMap(); } });
 
-  return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, insets, wake: !!wake }) };
+  return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, V, insets, wake: !!wake }) };
 }
