@@ -457,6 +457,9 @@ body:has(#obRoot) header,body:has(#obRoot) nav.bottom{display:none}
 .gp-cathead{font:600 12px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}.gp-cathead:first-of-type{margin-top:8px}
 .gp-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .gp-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;margin:0;width:100%;min-height:118px;padding:10px 12px 11px;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:14px;font:500 13px var(--sans);cursor:pointer}
+.gp-cardw{display:flex;flex-direction:column;gap:6px;min-width:0}.gp-cardw .gp-card{flex:1 1 auto}
+.gp-cfr{display:flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:4px 8px;border-radius:12px;border:1px solid var(--line);background:var(--chip);color:var(--ink);font:600 13px/1.2 var(--sans);text-align:center;cursor:pointer}.gp-cfr svg{color:var(--gold);flex:none}
+.gp-sesfr{margin-top:8px}
 .gp-card:active{transform:scale(.98)}.gp-card.sel{background:var(--tint);box-shadow:inset 0 0 0 2px var(--gold)}
 .gp-ctop{display:flex;align-items:center;justify-content:space-between;gap:6px;width:100%}.gp-ctop .tag{margin:0}
 .gp-ring{position:relative;flex:0 0 auto;width:46px;height:46px;display:grid;place-items:center;color:var(--ink)}

@@ -331,7 +331,7 @@ export const COPY = {
   },
   // ---- practice with a friend (first-run plan, part C)
   party: {
-    button: 'Play with a friend', title: 'Play with a friend', intro: 'Two to four golfers on one phone. Same shots, taking turns.',
+    button: 'Play with a friend', card: 'With a friend', title: 'Play with a friend', intro: 'Two to four golfers on one phone. Same shots, taking turns.',
     you: 'You', guest: (n) => `Friend ${n}`, name: 'Name', hcp: 'Handicap (optional)', add: 'Add a friend', remove: 'Remove', recent: 'Recent partners',
     scoring: 'Scoring', straight: 'Straight', straightNote: 'The best score wins.',
     handicap: 'Handicap', handicapNote: 'Each player is measured against the score a golfer of their handicap posts. The biggest margin wins.',
@@ -354,6 +354,10 @@ export const COPY = {
       ...rows.map((r) => `${['1st', '2nd', '3rd', '4th'][r.place - 1] || `${r.place}th`} ${r.name} ${r.score}${hc && Number.isFinite(r.margin) ? ` (${r.margin > 0 ? '+' : ''}${r.margin} on target)` : ''}`),
       winner ? `${winner} wins.` : 'A tie at the top.', ...(series ? [series] : [])].join('\n'),
     copied: 'Result copied',
+    // a session played with friends: the group is set up once and plays every game in it
+    sesToggle: 'With friends', sesToggleNote: 'Set up the group once, then play every game in the session together.',
+    sesTitle: (m) => `${m}-minute session with friends`, sesGames: (names) => `Games: ${Array.isArray(names) ? names.join(', ') : ''}`,
+    sesStraight: 'Games with no handicap benchmark are scored straight.', with: (names) => `With ${Array.isArray(names) ? names.join(', ') : ''}`,
   },
   actions: { again: 'Play again', next: 'Next game', done: 'Done' },
   // the first-run intro (onboarding.js, drawn in app.js)

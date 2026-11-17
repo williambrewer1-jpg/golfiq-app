@@ -198,7 +198,8 @@ t('series: shows from the second game of the day with the same group, counts win
   assert.equal(P.series(rs, 'a'), null, 'the first game is not a series');
   assert.deepEqual(P.series(rs, 'b'), { games: 2, ties: 0, rows: [{ name: 'Wills', wins: 1 }, { name: 'Sam', wins: 1 }] });
   assert.deepEqual(P.series(rs, 'd'), { games: 4, ties: 1, rows: [{ name: 'Wills', wins: 2 }, { name: 'Sam', wins: 1 }] });
-  assert.equal(P.series(rs, 'e'), null, 'a new day starts again'); assert.equal(P.series(rs, 'x'), null, 'a different group'); assert.equal(P.series(rs, 'nope'), null);
+  assert.equal(P.series(rs, 'e'), null, 'a new day starts again');
+  assert.deepEqual(P.series(rs, 'e', { min: 1 }), { games: 1, ties: 0, rows: [{ name: 'Wills', wins: 1 }, { name: 'Sam', wins: 0 }] }, 'a session summary asks for the series from one game'); assert.equal(P.series(rs, 'x'), null, 'a different group'); assert.equal(P.series(rs, 'nope'), null);
   assert.equal(FEEL.COPY.party.series(P.series(rs, 'd').rows, 1), 'Today: Wills 2 – 1 Sam (1 tied)');
   assert.equal(FEEL.COPY.party.series([{ name: 'Kim', wins: 2 }, { name: 'Wills', wins: 1 }, { name: 'Sam', wins: 0 }], 0), 'Today: Kim 2 · Wills 1 · Sam 0');
 });
