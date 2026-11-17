@@ -9,6 +9,7 @@ import * as JR from './journey.js';
 import * as LG from './league.js';
 import * as FEEL from './feel.js';
 import * as LV from './level.js';
+import * as P from './party.js';
 import { icon, shotArt } from './icons.js';
 
 export function registerGuided(c) {
@@ -30,7 +31,7 @@ export function registerGuided(c) {
     const b = $('#gpSound'); if (b) b.outerHTML = soundBtn(); $('#gpSound')?.addEventListener('click', toggleSound);
   }
   // audio can only start after a tap: wake it on the first tap of any game button (and again later if the phone suspended it)
-  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gpwelcome], [data-gptest]')) FEEL.unlock(); }, true);
+  document.addEventListener('click', (e) => { if (e.target.closest?.('#gpRoot button, #gpRoot input, [data-gpstart], [data-gpagain], [data-gpnext], [data-gpses], [data-gpdaily], [data-gpwelcome], [data-gptest], [data-gpparty], [data-gppstart], [data-gphand]')) FEEL.unlock(); }, true);
 
   // what the golfer is aiming at in this game: the target for the skill's next handicap step, and where the plan stands
   function info(id) {
@@ -57,11 +58,18 @@ export function registerGuided(c) {
     seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
     J().game_draft = G.newDraft(g, { unitM: opts.unitM || unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.seed ?? opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target, duel: opts.duel || null });
+    if (opts.party) J().game_draft.party = opts.party;
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.ui.session_gap = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
     scrollTo(0, 0);
   }
   const draft = () => J().game_draft || null, draft0 = draft, run = () => J().session_run || null;
+  // ---- practice with a friend: the draft carries a `party` block (party.js). The game screen works on a "view" of the draft for the player whose turn it is:
+  // the same draft with that player's answers and balls, sharing the arrays, so every existing step, score and streak rule works unchanged.
+  const pview = (d, i) => { const pl = d.party.players[i]; return { ...d, answers: pl.answers, balls: pl.balls }; };
+  const curIndex = (d, g, list) => P.turn(d.party, g, list)?.player ?? d.party.log[d.party.log.length - 1] ?? 0;
+  const partyInf = (d, pl) => ({ target: d.party.mode === 'handicap' && Number.isFinite(pl.target) ? pl.target : null, skill_h: pl.hcp });
+  const pillCls = (pl) => `pc-${P.COLOURS.includes(pl.colour) ? pl.colour : 'muted'}`;
 
   // ------------------------------------------------------------ one tap: record it at once, answer back on screen, then move on
   // The answer is saved the moment the button is pressed. Only the screen waits (FEEL.feedbackMs, about 450 ms) so the verdict can be read; taps in that
@@ -78,20 +86,25 @@ export function registerGuided(c) {
   async function answer(v, ball, btn) { if (busy) return; try { await answerNow(v, ball, btn); } catch (e) { busy = false; $('#gpRoot')?.removeAttribute('data-busy'); $('#gpSheet')?.classList.remove('gp-locked'); throw e; } }
   async function answerNow(v, ball, btn) {
     busy = true; const tap0 = Date.now();
-    const d = draft(); if (!d) return; const g = gameOf(d.game), list = G.steps(g, { seed: d.seed, unitM: d.unitM }), sc0 = G.scoreOf(g, list, d.answers);
+    const d0 = draft(); if (!d0) return; const g = gameOf(d0.game), list = G.steps(g, { seed: d0.seed, unitM: d0.unitM });
+    const pt = d0.party ? P.turn(d0.party, g, list) : null; if (d0.party && !pt) return;
+    const d = d0.party ? pview(d0, pt.player) : d0, sc0 = G.scoreOf(g, list, d.answers);
     if (sc0.done) return;
-    const k = d.answers.length, step = list[k], inf = withTarget(d, info(g.id));
-    d.answers.push(v); if (ball) (d.balls = d.balls || []).push(ball);
+    const lead0 = d0.party ? P.liveLeaders(d0.party, g, d0.unitM, list) : null;
+    const k = d.answers.length, step = list[k], inf = d0.party ? partyInf(d0, d0.party.players[pt.player]) : withTarget(d, info(g.id));
+    d.answers.push(v); if (ball) (d.balls = d.balls || []).push(ball); if (d0.party) d0.party.log.push(pt.player);
     const sc1 = G.scoreOf(g, list, d.answers), out = G.outcomeOf(g, step, v, { ball, before: d.answers.slice(0, k) });
     const streak = G.streakOf(g, list, d.answers, d.balls), passed = G.targetPassed(g, list, d.answers, d.balls, inf.target), mile = out.good === true && G.STREAK_MILESTONES.includes(streak), ms = FEEL.feedbackMs();
+    // a change of leader (judged after whole stations) plays the streak sound and shows a banner; a streak milestone or target banner for the same tap wins
+    const lead1 = d0.party ? P.liveLeaders(d0.party, g, d0.unitM, list) : null, newLead = !!lead1 && lead1.length === 1 && lead0.length > 0 && !(lead0.length === 1 && lead0[0] === lead1[0]) && !passed && !mile;
     // sound: a soft click, then the verdict; a milestone sound lands just after the verdict, and the light "step" tick comes when the next step arrives
     FEEL.play('tap'); if (out.good === true) FEEL.play('good'); else if (out.good === false) FEEL.play('miss');
-    const moment = passed ? () => FEEL.play('target') : mile ? () => FEEL.play('streak', { level: FEEL.streakLevel(streak) }) : null;
+    const moment = passed ? () => FEEL.play('target') : mile ? () => FEEL.play('streak', { level: FEEL.streakLevel(streak) }) : newLead ? () => FEEL.play('streak', { level: 0 }) : null;
     if (moment) later(330, moment);
-    const text = passed ? FEEL.COPY.reachedTarget : mile ? FEEL.COPY.streak(streak) : '';
+    const text = passed ? FEEL.COPY.reachedTarget : mile ? FEEL.COPY.streak(streak) : newLead ? FEEL.COPY.party.takesLead(d0.party.players[lead1[0]].name) : '';
     if (text) view.banner = { text, t0: Date.now() };
     feedbackDom({ k, out, sc0, sc1, streak, mile, passed, text, btn, g, list, d, inf });
-    if (sc1.done) { await save(); return finish({ delay: Math.max(0, ms - (Date.now() - tap0)) }); }     // the wait counts from the tap, not from the end of the saves
+    if (d0.party ? P.finished(d0.party, g, list) : sc1.done) { await save(); return finish({ delay: Math.max(0, ms - (Date.now() - tap0)) }); }     // the wait counts from the tap, not from the end of the saves
     later(Math.max(0, ms - 220), () => FEEL.pulse($('#gpMain'), 'slide-out'));
     later(ms, () => { busy = false; if (!draft()) return; if (!moment) FEEL.play('step'); render(); FEEL.pulse($('#gpMain'), 'slide-next'); });
     await save();
@@ -112,7 +125,8 @@ export function registerGuided(c) {
     const bn = $('#gpBanner'); if (bn && text) { bn.hidden = true; bn.textContent = text; bn.style.animationDelay = ''; void bn.offsetWidth; bn.hidden = false; }
   }
   const scoreLabel = (g, i, n) => `${G.isDistance(g) ? `${g.id === 'range-speed' ? 'Longest' : 'Average'} ${c.UNIT}` : 'Score'}${(g.max || G.isDistance(g)) && !G.isOpen(g.id) ? ` · after ${i} of ${n}` : ''}`;
-  async function undo() { if (busy) return; const d = draft(); if (!d || !d.answers.length) return; FEEL.play('tap'); d.answers.pop(); d.balls?.pop(); view.banner = null; await save(); render(); }
+  async function undo() { if (busy) return; const d = draft(); if (d?.party) { if (!d.party.log.length) return; FEEL.play('tap'); d.party = P.undo(d.party); view.banner = null; await save(); render(); return; }
+    if (!d || !d.answers.length) return; FEEL.play('tap'); d.answers.pop(); d.balls?.pop(); view.banner = null; await save(); render(); }
   // Driver test / Max out: the distance the golfer set (slider or typed), plus where it finished, becomes one ball
   const distLimits = (d, g) => { const start = distStart(d, g), step = B.DRIVER_TEST.step; return { min: Math.max(step, Math.round(start * 0.5 / step) * step), max: Math.round(start * 1.5 / step) * step, start }; };
   function distStart(d, g) {                                     // where the slider opens: the last ball, else the usual driver distance, else the table value for a mid handicap
@@ -133,7 +147,10 @@ export function registerGuided(c) {
   const tierOf = (g, r) => (G.isOwn(g) ? G.tierFor(g, r.score, unitM(), G.scoresBefore(g, J().results || [], r.id)) : G.tierFor(g, r.score, unitM()));
   async function finish(opts = {}) {
     const d = draft(), g = gameOf(d.game); const before = G.bestScore(g, J().results || []), v0 = c.progress.data(), led0 = v0.plan.ledger.find((x) => x.game === g.id), inf0 = info(g.id);
-    const res = G.resultFromDraft(d, g, { date: today() }); afterResult(res); J().results.push(res); J().game_draft = null;
+    const plist = d.party ? G.steps(g, { seed: d.seed, unitM: d.unitM }) : null;
+    const res = G.resultFromDraft(d.party ? P.ownerDraft(d) : d, g, { date: today() });
+    if (d.party) { res.party = P.partyRecord(d.party, g, d.unitM, plist); J().partners = P.rememberPartners(J().partners, d.party.players.filter((x) => !x.owner), res.date); }   // guests stay inside the owner's result, on this phone
+    afterResult(res); J().results.push(res); J().game_draft = null;
     const up = G.isOwn(g) ? G.ownTierUp(g, J().results, res.id) : G.tierUp(g, before, res.score, unitM());
     c.ui.game_result = { id: res.id, prev_best: before, target_before: Number.isFinite(d.target) ? d.target : Number.isFinite(inf0.target) ? inf0.target : null, level_before: Number.isFinite(inf0.skill_h) ? inf0.skill_h : null, streak_before: v0.st ? v0.st.current : null, pot_before: v0.fc.ok ? v0.fc.potential : null, hits_before: led0 ? led0.hits : null, up: up?.key || null, session_id: res.session_id || null, ghost: d.ghost ? { nick: d.ghost.nick, score: d.ghost.score, ...LG.finalCompare(g, res.score, d.ghost.score) } : null };
     c.saveUi(); await save(); posting = { id: res.id, p: c.compete.onScore(res) }; if (res.duel) c.compete.duelFinished(res, d.target);       // the duel's final status is worked out on this phone
@@ -144,8 +161,10 @@ export function registerGuided(c) {
 
   // ------------------------------------------------------------ screens
   function playScreen() {
-    const d = draft(), g = gameOf(d.game), list = G.steps(g, { seed: d.seed, unitM: d.unitM }), a = d.answers, sc0 = G.scoreOf(g, list, a), i = a.length, step = list[Math.min(i, list.length - 1)];
-    const inf = withTarget(d, info(g.id)), lower = g.better === 'lower', open = G.isOpen(g.id), last = i === list.length - 1 && !open, pr = d.pressure && last;
+    const d0 = draft(), g = gameOf(d0.game), list = G.steps(g, { seed: d0.seed, unitM: d0.unitM });
+    if (d0.party && P.needsHandover(d0.party, g, list)) return handoverScreen(d0, g, list);        // the phone has to be passed on first
+    const ci = d0.party ? curIndex(d0, g, list) : 0, d = d0.party ? pview(d0, ci) : d0, a = d.answers, sc0 = G.scoreOf(g, list, a), i = a.length, step = list[Math.min(i, list.length - 1)];
+    const inf = d0.party ? partyInf(d0, d0.party.players[ci]) : withTarget(d, info(g.id)), lower = g.better === 'lower', open = G.isOpen(g.id), last = i === list.length - 1 && !open, pr = d.pressure && last;
     const isD = step.input === 'distance', bl = d.balls || [], un = d.unitM === 1 ? 'm' : 'yd';
     const outs = a.map((v, k) => G.outcomeOf(g, list[k], v, { ball: bl[k], before: a.slice(0, k) }));
     const dots = list.slice(0, open ? Math.max(10, i + 1) : list.length).map((s, k) => `<i class="${k < i ? (outs[k].good === true ? 'hit' : outs[k].good === false ? 'miss' : 'done') : k === i ? 'now' : ''}"></i>`).join('');
@@ -170,15 +189,86 @@ export function registerGuided(c) {
     return `<div class="gp gp-full${pr ? ' gp-pr' : ''}${d.boss ? ' gp-boss' : ''}" id="gpRoot"${busy ? ' data-busy="1"' : ''}>
       <div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button>
         <div class="gp-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(prog * 100)}"><i id="gpBar" class="fx-fill" style="--p:${prog}"></i></div>${soundBtn()}</div>
-      ${d.boss ? bossBar(d.boss, i < list.length ? d.game : null) : ''}<div class="gp-strip"><div class="gp-sc"><div class="gp-name">${esc(g.name)}</div><b id="gpScore">${scoreText(g, sc0.score, i)}</b><span id="gpScoreLbl">${scoreLabel(g, i, list.length)}</span></div>
+      ${d0.party ? whoRow(d0, ci, g, list) : ''}${d.boss ? bossBar(d.boss, i < list.length ? d.game : null) : ''}<div class="gp-strip"><div class="gp-sc"><div class="gp-name">${esc(g.name)}</div><b id="gpScore">${scoreText(g, sc0.score, i)}</b><span id="gpScoreLbl">${scoreLabel(g, i, list.length)}</span></div>
         <div class="gp-side"><span class="gp-streak" id="gpStreak" ${streak >= 2 ? '' : 'hidden'}>${icon('flame', 18)}<b>${streak}</b></span><span class="gp-tgt">${esc(tgt)}</span></div>
         <div class="gp-banner" id="gpBanner" ${ban ? `style="animation-delay:-${Date.now() - ban.t0}ms"` : 'hidden'}>${ban ? esc(ban.text) : ''}</div></div>
-      <div class="gp-dots">${dots}</div>
+      ${d0.party ? board(d0, g, list, ci) : ''}<div class="gp-dots">${dots}</div>
       ${ghostLine}${pr ? `<div class="gp-pressure">${esc(G.pressureBanner(g))}</div>` : ''}
       <div class="gp-main" id="gpMain"><div class="gp-art">${shotArt(artFor(g, step))}</div><div class="gp-prompt">${esc(step.prompt)}</div><div class="gp-sub">${esc(step.sub || '')}</div><div class="gp-verdict" id="gpVerdict" aria-live="polite"></div></div>
       <div class="gp-sheet${busy ? ' gp-locked' : ''}" id="gpSheet">${dist}<div class="gp-btns ${isD ? (step.results ? 'three' : 'one') : step.input === 'strokes' ? 'five' : 'two'}">${btns}</div>
-        <div class="gp-foot"><button class="btn sec" data-gpundo ${i ? '' : 'disabled'}>Undo</button></div></div></div>`;
+        <div class="gp-foot"><button class="btn sec" data-gpundo ${(d0.party ? d0.party.log.length : i) ? '' : 'disabled'}>Undo</button></div></div></div>`;
   }
+  // ------------------------------------------------------------ practice with a friend: whose turn, the scoreboard, the hand-over and the set-up sheet
+  function whoRow(d0, ci, g, list) {
+    const pl = d0.party.players[ci], st = P.stationInfo(d0.party, g, list), K = FEEL.COPY.party;
+    return `<div class="gp-who ${pillCls(pl)}"><span class="gp-pill" id="gpWho">${esc(pl.name)}</span>${st ? `<span class="gp-wsub">${esc(K.left(st.left, st.prompt, st.open))}</span>` : ''}</div>`;
+  }
+  // a strip with every player's running score; the leader (judged after whole stations, so going first is no advantage) has a flag, and the player on turn an outline
+  function board(d0, g, list, ci) {
+    const st = P.standings(d0.party, g, d0.unitM, { list }), lead = P.liveLeaders(d0.party, g, d0.unitM, list), K = FEEL.COPY.party;
+    return `<div class="gp-board" role="group" aria-label="${esc(K.scores)}">${st.rows.map((r) => `<div class="gp-pc ${pillCls(d0.party.players[r.i])}${r.i === ci ? ' now' : ''}"><span class="n">${esc(r.name)}</span><b>${r.score === null ? '–' : sc(r.score)}</b>${lead.includes(r.i) ? `<i class="lead">${icon('flag', 12)}</i><span class="gp-sr">${esc(K.leading)}</span>` : ''}</div>`).join('')}</div>`;
+  }
+  function handoverScreen(d0, g, list) {
+    const t = P.turn(d0.party, g, list), pl = d0.party.players[t.player], st = P.stationInfo(d0.party, g, list), K = FEEL.COPY.party;
+    return `<div class="gp gp-full gp-hand" id="gpRoot"><div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button><div class="gp-hname">${esc(g.name)}</div>${soundBtn()}</div>
+      <div class="gp-hmain"><div class="gp-hk">${esc(K.pass)}</div><div class="gp-who big ${pillCls(pl)}"><span class="gp-pill">${esc(pl.name)}</span></div><div class="gp-hsub">${esc(K.left(st.left, st.prompt, st.open))}</div></div>
+      ${board(d0, g, list, t.player)}
+      <div class="gp-sheet"><div class="gp-btns one"><button class="gp-b hit" data-gphand>${esc(K.ready(pl.name))}</button></div><div class="gp-foot"><button class="btn sec" data-gpundo ${d0.party.log.length ? '' : 'disabled'}>${esc(K.undoHand)}</button></div></div></div>`;
+  }
+  async function handedOver() { const d = draft(); if (!d?.party) return; const g = gameOf(d.game); d.party = P.handedOver(d.party, g, G.steps(g, { seed: d.seed, unitM: d.unitM })); await save(); render(); }
+  // the plain list of places on the owner's result screen (the podium, rematch and series come in the next phase)
+  function partyResult(r) {
+    const R = FEEL.COPY.party.result, pt = r.party, hc = pt.mode === 'handicap', sorted = [...pt.players].sort((a, b) => a.place - b.place);
+    return `<div class="gp-party"><h3 style="margin:0 0 4px">${esc(R.title)}</h3><p class="gp-pw">${esc(pt.winner ? R.winner(pt.winner) : R.tie)}</p>
+      ${sorted.map((p) => `<div class="gp-sumrow"><div><b>${esc(R.place(p.place))} · ${esc(p.name)}</b>${hc && Number.isFinite(p.margin) ? `<div class="small muted">${esc(R.margin(p.margin))}</div>` : ''}</div><div class="gp-sumscore"><b>${sc(p.score)}</b></div></div>`).join('')}
+      <p class="small muted" style="margin:6px 0 10px">${esc(R.note)}</p></div>`;
+  }
+  // the set-up sheet: you plus one to three friends, straight or handicap scoring, optional pressure finish
+  const ownerName = () => P.cleanName(c.state.cloud?.nick) || 'Me';
+  function partySetup(id, pressure = false) {
+    const g = gameOf(id); if (!g || !canGuide(id) || !$('#sheetPanel')) return;
+    const v = c.progress.data(), own = P.ownerLevel({ index: v.jidx, ratings: v.sk }), K = FEEL.COPY.party;
+    const S = { guests: [{ name: '', hcp: '' }], mode: 'straight', pressure: !!pressure, err: '' };
+    const read = () => { S.guests = $$('#sheetPanel [data-pgrow]').map((r) => ({ name: r.querySelector('[data-pgname]').value, hcp: r.querySelector('[data-pghcp]').value })); S.pressure = !!$('#ptPressure')?.checked; S.mode = $('#sheetPanel input[name=ptmode]:checked')?.value || 'straight'; };
+    const players = () => [{ name: ownerName(), hcp: own.hcp }, ...S.guests.filter((x) => P.cleanName(x.name)).map((x) => ({ name: x.name, hcp: P.parseHcp(x.hcp) }))];
+    const hcOk = () => B.hasLevel(g.id) && P.canHandicap(players(), g);
+    const used = () => new Set(S.guests.map((x) => P.cleanName(x.name).toLowerCase()).concat(ownerName().toLowerCase()));
+    function draw() {
+      const rec = (J().partners || []).filter((x) => !used().has(P.cleanName(x.name).toLowerCase())), ok = hcOk(), why = !B.hasLevel(g.id) ? K.noBench : K.needHcp;
+      $('#sheetPanel').innerHTML = `<div class="sheet-bar"><button type="button" class="sheet-x" data-sheetx aria-label="Close">${icon('cross', 20)}</button></div>
+        <h2 style="margin:0 0 2px">${esc(K.title)}</h2><p class="small muted" style="margin:0 0 4px">${esc(g.name)} · ${esc(K.intro)}</p><p class="small muted" style="margin:0 0 10px">${esc(K.nameNote)}</p>
+        <div class="pt-row"><label class="f" for="ptOwner">${esc(K.you)}</label><input id="ptOwner" value="${esc(ownerName())}" disabled><p class="small muted" style="margin:4px 0 0">${esc(K.yourLevel(own.hcp === null ? null : sc(own.hcp), own.basis))}</p></div>
+        ${S.guests.map((x, i) => `<div class="pt-row" data-pgrow><div class="pt-two"><div><label class="f" for="ptN${i}">${esc(K.guest(i + 1))}</label><input id="ptN${i}" data-pgname maxlength="${P.NAME_MAX}" placeholder="${esc(K.name)}" autocomplete="off" value="${esc(x.name)}"></div>
+          <div><label class="f" for="ptH${i}">${esc(K.hcp)}</label><input id="ptH${i}" data-pghcp inputmode="decimal" autocomplete="off" placeholder="e.g. 18" value="${esc(x.hcp)}"></div></div>
+          ${S.guests.length > 1 ? `<button type="button" class="btn sec pt-rm" data-pgrm="${i}">${esc(K.remove)} ${esc(P.cleanName(x.name) || K.guest(i + 1))}</button>` : ''}</div>`).join('')}
+        ${S.guests.length < P.MAX_PLAYERS - 1 ? `<p style="margin:6px 0"><button type="button" class="btn sec" data-pgadd>${esc(K.add)}</button></p>` : ''}
+        ${rec.length && S.guests.length ? `<div class="pt-recent"><span class="small muted">${esc(K.recent)}</span><div class="pt-chips">${rec.map((x, i) => `<button type="button" class="pt-chip" data-pgpick="${esc(x.name)}" data-pghcpv="${x.hcp ?? ''}">${esc(x.name)}${Number.isFinite(x.hcp) ? ` · ${x.hcp}` : ''}</button>`).join('')}</div></div>` : ''}
+        <h3 style="margin:12px 0 6px">${esc(K.scoring)}</h3>
+        <label class="pt-opt"><input type="radio" name="ptmode" value="straight" ${S.mode === 'straight' || !ok ? 'checked' : ''}><span><b>${esc(K.straight)}</b><small>${esc(K.straightNote)}</small></span></label>
+        <label class="pt-opt${ok ? '' : ' off'}"><input type="radio" name="ptmode" value="handicap" ${S.mode === 'handicap' && ok ? 'checked' : ''} ${ok ? '' : 'disabled'}><span><b>${esc(K.handicap)}</b><small>${esc(ok ? K.handicapNote : why)}</small></span></label>
+        <label class="pt-opt"><input type="checkbox" id="ptPressure" ${S.pressure ? 'checked' : ''}><span><b>${esc(K.pressure)}</b><small>${esc(G.pressureRule(g))}</small></span></label>
+        <p class="pt-err" id="ptErr" role="alert">${esc(S.err)}</p>
+        <div class="row"><button type="button" class="btn" data-gppstart>${esc(K.start)}</button><button type="button" class="btn sec" data-pgcancel>${esc(K.cancel)}</button></div>`;
+      $('#sheet').classList.add('open'); wireSheet();
+    }
+    function wireSheet() {
+      const close = () => $('#sheet').classList.remove('open');
+      $('#sheetPanel [data-sheetx]')?.addEventListener('click', close); $('#sheetPanel [data-pgcancel]')?.addEventListener('click', close);
+      $('#sheetPanel [data-pgadd]')?.addEventListener('click', () => { read(); if (S.guests.length < P.MAX_PLAYERS - 1) S.guests.push({ name: '', hcp: '' }); draw(); });
+      $$('#sheetPanel [data-pgrm]').forEach((b) => b.addEventListener('click', () => { read(); S.guests.splice(Number(b.dataset.pgrm), 1); draw(); }));
+      $$('#sheetPanel [data-pgpick]').forEach((b) => b.addEventListener('click', () => { read(); const e = S.guests.findIndex((x) => !P.cleanName(x.name)), row = { name: b.dataset.pgpick, hcp: b.dataset.pghcpv }; if (e >= 0) S.guests[e] = row; else if (S.guests.length < P.MAX_PLAYERS - 1) S.guests.push(row); draw(); }));
+      $$('#sheetPanel [data-pghcp], #sheetPanel [data-pgname]').forEach((i) => i.addEventListener('input', () => { read(); const ok = hcOk(), h = $('#sheetPanel input[value=handicap]'); if (h) { h.disabled = !ok; h.closest('label').classList.toggle('off', !ok); if (!ok && h.checked) $('#sheetPanel input[value=straight]').checked = true; h.nextElementSibling.querySelector('small').textContent = ok ? K.handicapNote : (!B.hasLevel(g.id) ? K.noBench : K.needHcp); } }));
+      $('#sheetPanel [data-gppstart]')?.addEventListener('click', async () => {
+        read(); const gs = S.guests.filter((x) => P.cleanName(x.name)), bad = P.problem([{ name: ownerName() }, ...gs]);
+        if (bad) { S.err = K.errors[bad] || K.errors.name; $('#ptErr').textContent = S.err; return; }
+        const party = P.newParty({ owner: { name: ownerName(), hcp: own.hcp }, guests: gs.map((x) => ({ name: x.name, hcp: x.hcp })), mode: S.mode, game: g, unitM: unitM() });
+        if (!party) { $('#ptErr').textContent = K.errors.name; return; }
+        close(); await start(g.id, { party, pressure: S.pressure });
+      });
+    }
+    draw();
+  }
+
   function sesButtons(g) {
     if ((J().results || []).find((x) => x.id === c.ui.game_result?.id)?.duel) return `<div class="row"><button class="btn" data-gpdone>Done</button></div>`;       // a duel is one attempt: no "play again"
     const r = run();
@@ -245,7 +335,7 @@ export function registerGuided(c) {
         <div ${at('gp-score', 2)}><b id="gpRNum" data-to="${r.score}">${sc(r.score)}</b>${g.max ? `<span> / ${g.max}</span>` : G.isDistance(g) ? `<span> ${un}</span>` : ''}</div>
         ${lv ? `<div ${at('gp-rlevel', 3)}>${esc(K.level(lv.h))}</div>` : ''}
         ${badge || nextT ? `<div class="gp-badgewrap">${badge}${nextT ? `<div ${at('gp-rnext', 4)}>${nextT}</div>` : ''}</div>` : ''}</div>
-      <div class="gp-rbody">${c.compete.duelPanel(r.id)}${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
+      <div class="gp-rbody">${c.compete.duelPanel(r.id)}${r.party ? partyResult(r) : ''}${r.boss ? bossStatus(r.boss) : ''}${rw.length ? `<div class="gp-rewards">${rw.join('')}</div>${showNote ? `<p class="gp-rwn">${esc(K.rewards.note)}</p>` : ''}` : ''}
         <div ${at('gp-rbtn', i)}>${sesButtons(g)}</div>
         ${det ? `<div class="gp-rdet">${det}</div>` : ''}</div></div>`;
   }
@@ -300,7 +390,8 @@ export function registerGuided(c) {
     if (!canGuide(g.id)) return '';
     return `${ladder}${beat}<label class="f" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="gpPressure" style="width:22px;height:22px;flex:0 0 auto"> <span>Pressure finish: ${esc(G.pressureRule(g))}</span></label>
       ${c.compete.groupOn() ? `<div id="gpGhost" data-ghostgame="${esc(g.id)}"></div>` : ''}
-      <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>`;
+      <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>
+      <p style="margin:0 0 6px"><button class="btn sec" data-gpparty="${esc(g.id)}">${esc(FEEL.COPY.party.button)}</button></p>`;
   }
   const screenHtml = () => (draft() ? playScreen() : c.ui.game_result ? resultScreen() : c.ui.session_gap ? gapScreen() : c.ui.boss_summary ? bossSummary() : c.ui.test_summary ? testSummary() : c.ui.session_summary ? summaryScreen() : '');
   const screen = screenHtml;
@@ -570,6 +661,7 @@ export function registerGuided(c) {
     $('#gpPrem')?.addEventListener('change', (e) => { const d = draft(); if (d) { d.premium = e.target.checked; save(); } });
     $('[data-gpundo]')?.addEventListener('click', undo); $('[data-gpquit]')?.addEventListener('click', quit); $('#gpSound')?.addEventListener('click', toggleSound);
     $$('[data-gpstart]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpstart, { pressure: !!$('#gpPressure')?.checked })));
+    $$('[data-gpparty]').forEach((b) => b.addEventListener('click', () => partySetup(b.dataset.gpparty, !!$('#gpPressure')?.checked))); $$('[data-gphand]').forEach((b) => b.addEventListener('click', handedOver));
     $$('[data-gpagain]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpagain)));
     $$('[data-gpnext]').forEach((b) => b.addEventListener('click', () => start(nextGame(b.dataset.gpnext))));
     $$('[data-gpdone]').forEach((b) => b.addEventListener('click', () => { seq++; timers.forEach(clearTimeout); timers = []; c.ui.game_result = null; c.ui.session_summary = null; c.ui.boss_summary = null; c.ui.test_summary = null; c.ui.session_gap = null; c.saveUi(); c.rerender(); }));
