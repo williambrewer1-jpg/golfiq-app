@@ -187,24 +187,53 @@ with sync_playwright() as p:
     # previous / next hole from the top bar
     pg.click('[data-cvstep="1"]'); pg.wait_for_timeout(400); check('next-hole arrow goes to hole 5', 'Hole 5' in pg.inner_text('#cvTitle'))
     pg.click('[data-cvstep="-1"]'); pg.wait_for_timeout(400); check('previous-hole arrow goes back to hole 4', 'Hole 4' in pg.inner_text('#cvTitle'))
-    # full height: the scorecard
-    pg.click('#cvHandle'); pg.wait_for_selector('#cvRoot[data-sheet="full"] #plFinish')
-    check('full sheet holds the scorecard with finish and discard', pg.query_selector('#cvBody #plDiscard') is not None and pg.query_selector('#cvBody .strip') is not None)
-    pg.screenshot(path=f'{SHOTS}/390_full.png')
-    controls_ok(pg, 'full sheet (handle aside: Back to the map is at the bottom)', True)
-    check('full sheet has a Back to the map button at the bottom', pg.query_selector('#cvBody [data-cvsheet="peek"]') is not None)
+    # ---- reported bug: a tap in the Score tab must not jump the form back to the top
+    sheet_of = lambda: pg.evaluate("() => document.querySelector('#cvRoot').dataset.sheet")
+    pg.evaluate("() => { const b = document.querySelector('#cvBody'); b.scrollTop = b.scrollHeight; }"); sc0 = pg.evaluate("() => document.querySelector('#cvBody').scrollTop")
+    for sel in ['[data-fw=HIT]', '[data-step=penalties][data-d="1"]', '[data-par="5"]', '[data-step=putts][data-d="-1"]']:
+        pg.evaluate("(s) => document.querySelector('#cvBody ' + s).click()", sel); pg.wait_for_timeout(120)
+    check('Score tab keeps its scroll position after Fairway, Par and stepper taps', sc0 > 0 and pg.evaluate("() => document.querySelector('#cvBody').scrollTop") == sc0, (sc0, pg.evaluate("() => document.querySelector('#cvBody').scrollTop")))
+    d = draft(pg); check('those taps were recorded', d['holes']['4']['fairway'] == 'HIT' and d['holes']['4']['penalties'] == 1 and d['holes']['4']['putts'] == 1, d['holes']['4'])
+    pg.evaluate("() => document.querySelector('#cvBody [data-fw=HIT]').click()"); pg.evaluate("() => document.querySelector('#cvBody [data-step=penalties][data-d=\"-1\"]').click()"); pg.wait_for_timeout(150)
+    # the Score tab reads in the order you enter a hole: score, putts and penalties, fairway, then Next
+    order = pg.evaluate("""() => ['[data-step=strokes]', '[data-step=putts]', '#plFw', '#plNext', '#plPar'].map(s => Math.round(document.querySelector('#cvBody ' + s).getBoundingClientRect().top))""")
+    check('Score tab order: score, putts, fairway, Next, then par', order[0] < order[1] < order[2] < order[3] < order[4], order)
+    pg.evaluate("() => { document.querySelector('#cvBody').scrollTop = 0; }")
+    gap = pg.evaluate("() => { const b = document.querySelector('#cvBody').getBoundingClientRect(), n = document.querySelector('#cvBody #plNext').getBoundingClientRect(); return Math.round(b.bottom - n.bottom); }")
+    check('at 390 x 844 Score down to Next hole fits without scrolling', gap >= 0, gap)
+    check('Score tab links to the scorecard', 'totals and finish' in pg.inner_text('#cvBody .cv-tocard'), pg.inner_text('#cvBody .cv-tocard'))
+
+    # ---- reported issue: totals and Finish were hidden behind a second slide up. Now a Card tab, and a Card button on the strip
     pg.click('#cvHandle'); pg.wait_for_timeout(250)
-    check('handle tap from full goes back to the peek', pg.evaluate("() => document.querySelector('#cvRoot').dataset.sheet") == 'peek')
-    # drag the handle up two steps
+    check('a tap on the handle closes the open panel', sheet_of() == 'peek')
+    card = pg.inner_text('#cvPeek [data-cvcard]')
+    check('the bottom strip has a Card button with the round so far', 'card' in card.lower() and 'E thru 3' in card, card)
+    pg.click('#cvPeek [data-cvcard]'); pg.wait_for_selector('#cvRoot[data-sheet="half"] #cvBody #plFinish')
+    check('Card opens the scorecard with totals, finish and discard in one tap', pg.query_selector('#cvBody #plDiscard') is not None and pg.query_selector('#cvBody .strip') is not None and 'thru 3' in pg.inner_text('#cvBody').lower(), pg.inner_text('#cvBody')[:200])
+    gap = pg.evaluate("() => { const b = document.querySelector('#cvBody').getBoundingClientRect(), f = document.querySelector('#cvBody #plFinish').getBoundingClientRect(); return Math.round(b.bottom - f.bottom); }")
+    check('at 390 x 844 Finish is on screen in the Card tab without scrolling', gap >= 0, gap)
+    check('level par is not shown in red on the card', pg.evaluate("() => !document.querySelector('#cvBody .kpi .v span').classList.contains('bad')"))
+    check('the Card tab is marked as the open tab', pg.evaluate("() => document.querySelector('[data-cvtab=card]').classList.contains('on')"))
+    pg.screenshot(path=f'{SHOTS}/390_card.png')
+    controls_ok(pg, 'Card tab')
+    check('every open tab has a Back to the map button', pg.query_selector('#cvBody [data-cvsheet="peek"]') is not None)
+    pg.click('#cvBody [data-cvsheet="peek"]'); pg.wait_for_timeout(200); check('Back to the map closes the panel', sheet_of() == 'peek')
+    pg.click('#cvHandle'); pg.wait_for_timeout(200); check('a tap on the handle opens the panel again', sheet_of() == 'half')
+    pg.click('#cvHandle'); pg.wait_for_timeout(200)
+    # drag the handle up: full height, same tabs
     hb = pg.query_selector('#cvHandle').bounding_box()
     pg.mouse.move(hb['x'] + hb['width'] / 2, hb['y'] + 20); pg.mouse.down(); pg.mouse.move(hb['x'] + hb['width'] / 2, hb['y'] - 300, steps=8); pg.mouse.up(); pg.wait_for_timeout(250)
-    check('dragging the handle up a long way opens the full sheet', pg.evaluate("() => document.querySelector('#cvRoot').dataset.sheet") == 'full')
-    pg.click('#cvHandle'); pg.wait_for_timeout(200)
+    check('dragging the handle up a long way opens the panel at full height', sheet_of() == 'full' and pg.query_selector('#cvBody .cv-tabs') is not None)
+    pg.click('[data-cvtab="score"]'); pg.wait_for_timeout(200)
+    check('changing tab at full height keeps the height', sheet_of() == 'full')
+    pg.screenshot(path=f'{SHOTS}/390_full.png')
+    controls_ok(pg, 'full height (handle aside: Back to the map is at the bottom)', True)
+    pg.click('#cvHandle'); pg.wait_for_timeout(200); check('a tap on the handle closes full height too', sheet_of() == 'peek')
 
     # ---- reload mid-hole: the round and the view come back
     pg.reload(); pg.wait_for_selector('#cvRoot'); pg.wait_for_timeout(1200)
     d = draft(pg)
-    check('round survives a reload mid-hole', 'Hole 4' in pg.inner_text('#cvTitle') and d['holes']['3']['strokes'] == d['holes']['3']['par'] and d['holes']['4']['putts'] == 2, pg.inner_text('#cvTitle'))
+    check('round survives a reload mid-hole', 'Hole 4' in pg.inner_text('#cvTitle') and d['holes']['3']['strokes'] == d['holes']['3']['par'] and d['holes']['4']['putts'] == 1, pg.inner_text('#cvTitle'))
     check('distances come back after the reload', yards(pg)['m'] and yards(pg)['m'] > 0)
 
     # ---- close: the classic page, still working; reopen
@@ -215,6 +244,9 @@ with sync_playwright() as p:
     check('wake lock released on close', (pg.evaluate("() => window.__wlRel || 0") or 0) >= 1)
     pg.click('#plScore [data-step="strokes"][data-d="1"]'); pg.wait_for_timeout(300)
     check('classic score steppers still work', draft(pg)['holes']['4']['strokes'] == draft(pg)['holes']['4']['par'])
+    pg.evaluate("() => scrollTo(0, document.querySelector('#plFw').getBoundingClientRect().top + scrollY - 200)"); y0 = pg.evaluate("scrollY")
+    pg.evaluate("() => document.querySelector('#plScore [data-fw=LEFT]').click()"); pg.wait_for_timeout(300)
+    check('classic page keeps its scroll position after a Fairway tap', abs(pg.evaluate("scrollY") - y0) <= 2 and draft(pg)['holes']['4']['fairway'] == 'LEFT', (y0, pg.evaluate("scrollY")))
     check('classic hole map still draws', pg.query_selector('.playcard #hm') is not None)
     check('classic card keeps the old pattern look', pg.query_selector('.playcard #hmDyn .hm-zone50') is None and pg.query_selector('.playcard #hmDyn path') is not None)
     pg.screenshot(path=f'{SHOTS}/390_classic.png', full_page=False)
@@ -234,7 +266,8 @@ with sync_playwright() as p:
         if not draft(pg)['holes'][str(draft(pg)['hole'])]['strokes']: pg.click('#cvBody [data-step="strokes"][data-d="1"]')
         nxt = pg.inner_text('#cvBody #plNext'); pg.click('#cvBody #plNext'); pg.wait_for_timeout(250)
         if 'finish' in nxt.lower(): break
-    pg.wait_for_selector('#cvRoot[data-sheet="full"] #plFinish')
+    pg.wait_for_selector('#cvRoot #cvBody #plFinish')
+    check('Next on the last hole opens the Card tab to finish', pg.evaluate("() => document.querySelector('[data-cvtab=card]').classList.contains('on')"))
     rid = 'garmin-' + draft(pg)['id']
     pg.click('#cvBody #plFinish'); pg.wait_for_timeout(1500)
     r = pg.evaluate("(id) => { const r = window.__golfiq.ds.rounds.find(x => x.round_id === id); return r ? { holes: window.__golfiq.ds.holes.filter(h => h.round_id === id).length } : null; }", rid)
@@ -288,7 +321,7 @@ with sync_playwright() as p:
     pg.click('#cvBody [data-cvshots]'); pg.wait_for_timeout(200)
     check('Show shots switch in the Club tab', svgx('.hm-dot') > 0 and 'Hide shots' in pg.inner_text('#cvBody [data-cvshots]'))
     pg.click('#cvBody [data-cvshots]'); pg.wait_for_timeout(200)
-    pg.click('#cvHandle'); pg.click('#cvHandle'); pg.wait_for_timeout(200)                 # half → full → peek
+    pg.click('#cvHandle'); pg.wait_for_timeout(200)                                        # close the panel
     # aim well right of the hole, where nothing is mapped: no trouble drawn, and the zone is the same neutral colour
     tx, ty = pg.evaluate("(p) => window.__golfiq.extra.play.course._state().L.fr.xy(p[0], p[1])", list(point(1, 228, 75)))
     pg.mouse.click(tx, ty); pg.wait_for_timeout(250)
@@ -301,7 +334,7 @@ with sync_playwright() as p:
     pid = pg.evaluate("() => window.__golfiq.ds.clubs.find(c => c.name === 'Pitching Wedge').club_id")
     pg.click('[data-cvpeekclub]'); pg.wait_for_selector('#plRec')
     pg.evaluate("(id) => document.querySelector(`#plRec [data-club=\"${id}\"]`).click()", pid); pg.wait_for_timeout(250)
-    pg.click('#cvHandle'); pg.click('#cvHandle'); pg.wait_for_timeout(250)
+    pg.click('#cvHandle'); pg.wait_for_timeout(250)
     v = V(); peek = pg.inner_text('#cvPeek')
     check('usual miss: the pitching wedge pattern is your own', v['kind'] == 'own' and v['club'] == 'Pitching Wedge', v)
     check('usual miss: one line in the peek, "finishes about 5 yd right"', 'Your Pitching Wedge finishes about 5 yd right' in peek and 'Allow for it' in peek, peek)
@@ -330,7 +363,7 @@ with sync_playwright() as p:
     how = pg.inner_text('#cvBody .cv-how')
     check('estimated: labelled "Estimated from your other clubs", no Show shots', 'Estimated from your other clubs' in how and pg.query_selector('#cvBody [data-cvshots]') is None, how)
     check('estimated: drawn dashed, with no dots and no miss arrow', pg.evaluate("() => document.querySelector('#hmDyn .hm-zone50').hasAttribute('stroke-dasharray')") and svgx('.hm-dot') == 0 and svgx('.hm-miss') == 0)
-    pg.click('#cvHandle'); pg.click('#cvHandle'); pg.wait_for_timeout(250)
+    pg.click('#cvHandle'); pg.wait_for_timeout(250)
     pg.screenshot(path=f'{SHOTS}/390_pattern_estimated.png')
     check('no script errors (pattern)', not errs, errs[:3])
     ctx.close()
@@ -350,8 +383,14 @@ with sync_playwright() as p:
     controls_ok(pg, '320 Score tab')
     pg.click('#cvBody [data-step="strokes"][data-d="1"]'); pg.wait_for_timeout(150)
     check('320: score entry works', draft(pg)['holes']['1']['strokes'] == 4)
-    pg.click('#cvHandle'); pg.wait_for_selector('#cvRoot[data-sheet="full"] #plFinish'); pg.screenshot(path=f'{SHOTS}/320_full.png')
-    check('320: no horizontal overflow (full)', no_overflow(pg))
+    pg.evaluate("() => { const b = document.querySelector('#cvBody'); b.scrollTop = b.scrollHeight; }"); sc0 = pg.evaluate("() => document.querySelector('#cvBody').scrollTop")
+    pg.evaluate("() => document.querySelector('#cvBody [data-fw=LEFT]').click()"); pg.wait_for_timeout(150)
+    check('320: Fairway tap keeps the scroll position (reported bug)', sc0 > 0 and pg.evaluate("() => document.querySelector('#cvBody').scrollTop") == sc0 and draft(pg)['holes']['1']['fairway'] == 'LEFT')
+    check('320: the four tabs fit', pg.evaluate("() => [...document.querySelectorAll('.cv-tabs button')].every(b => b.scrollWidth <= b.clientWidth + 1)"))
+    pg.click('[data-cvtab="card"]'); pg.wait_for_selector('#cvBody #plFinish'); pg.screenshot(path=f'{SHOTS}/320_card.png')
+    check('320: no horizontal overflow (Card)', no_overflow(pg))
+    pg.click('#cvHandle'); pg.wait_for_timeout(200); pg.screenshot(path=f'{SHOTS}/320_peek_after.png')
+    check('320: Score and Card buttons fit side by side', pg.evaluate("() => [...document.querySelectorAll('.cv-pbtns .btn')].every(b => b.scrollWidth <= b.clientWidth + 1)"))
     check('no script errors (320 x 568)', not errs, errs[:3])
     ctx.close()
 
