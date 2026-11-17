@@ -10,26 +10,74 @@ export const W = 360, H = 470;            // viewBox size; the SVG scales to the
 // ------------------------------------------------------------------ frame: lat/lon <-> screen
 // Local flat frame centred on `pos`, rotated so the line pos -> up points to the top of the screen.
 // c = metres right of that line, a = metres along it.
-export function makeFrame(pos, up, include, w = W, h = H) {
+// opt.inset {t, b, l, r}: screen pixels kept clear (top bar, bottom sheet) – the content fits and centres in the rest.
+// opt.exact: fit only `include` (not pos and up) – used by the Green zoom. opt.maxK caps the scale (pixels per metre).
+export function makeFrame(pos, up, include, w = W, h = H, opt = {}) {
   const b = A.bearing(pos[0], pos[1], up[0], up[1]) * RAD, cb = Math.cos(b), sb = Math.sin(b);
   const kx = Math.cos(pos[0] * RAD) * R * RAD, ky = R * RAD;
   const toAC = (la, lo) => { const e = (lo - pos[1]) * kx, n = (la - pos[0]) * ky; return [e * cb - n * sb, e * sb + n * cb]; };
   const fromAC = (c, a) => { const e = c * cb + a * sb, n = -c * sb + a * cb; return [pos[0] + n / ky, pos[1] + e / kx]; };
-  const ac = [[0, 0], toAC(up[0], up[1]), ...include.filter(Boolean).map((p) => (p.ac ? p.ac : toAC(p[0], p[1])))];
+  const inc = include.filter(Boolean).map((p) => (p.ac ? p.ac : toAC(p[0], p[1])));
+  const ac = opt.exact && inc.length ? inc : [[0, 0], toAC(up[0], up[1]), ...inc];
   let c0 = Math.min(...ac.map((p) => p[0])) - 28, c1 = Math.max(...ac.map((p) => p[0])) + 28;
   let a0 = Math.min(...ac.map((p) => p[1])) - 22, a1 = Math.max(...ac.map((p) => p[1])) + 26;
-  const k = Math.min(w / (c1 - c0), h / (a1 - a0));
-  const cm = (c0 + c1) / 2, am = (a0 + a1) / 2;                    // centre the content; the spare room goes to the sides
-  const sx = (c) => (c - cm) * k + w / 2, sy = (a) => h / 2 - (a - am) * k;
+  const I = { t: 0, b: 0, l: 0, r: 0, ...(opt.inset || {}) }, vw = Math.max(40, w - I.l - I.r), vh = Math.max(40, h - I.t - I.b);
+  const k = Math.min(vw / (c1 - c0), vh / (a1 - a0), opt.maxK ?? Infinity);
+  const cm = (c0 + c1) / 2, am = (a0 + a1) / 2, cx = I.l + vw / 2, cy = I.t + vh / 2;   // centre the content in the clear area; the spare room goes to the sides
+  const sx = (c) => (c - cm) * k + cx, sy = (a) => cy - (a - am) * k;
   return {
-    k, w, h, bearing: b / RAD, toAC, fromAC,
+    k, w, h, bearing: b / RAD, toAC, fromAC, view: { l: I.l, t: I.t, w: vw, h: vh },
     xy: (la, lo) => { const [c, a] = toAC(la, lo); return [sx(c), sy(a)]; },
     acXY: (c, a) => [sx(c), sy(a)],
-    fromXY: (x, y) => fromAC((x - w / 2) / k + cm, am - (y - h / 2) / k),
+    fromXY: (x, y) => fromAC((x - cx) / k + cm, am - (y - cy) / k),
     // affine matrix taking (east m, -north m) around pos to screen pixels – used to place the photo tiles
-    matrix: [k * cb, -k * sb, k * sb, k * cb, w / 2 - k * cm, h / 2 + k * am],
+    matrix: [k * cb, -k * sb, k * sb, k * cb, cx - k * cm, cy + k * am],
     toEN: (la, lo) => [(lo - pos[1]) * kx, (la - pos[0]) * ky],
   };
+}
+// Is a point inside the clear part of the frame (with a margin in pixels)?
+export const inView2 = (fr, p, m = 0) => { const [x, y] = fr.xy(p[0], p[1]), v = fr.view || { l: 0, t: 0, w: fr.w, h: fr.h }; return x >= v.l + m && x <= v.l + v.w - m && y >= v.t + m && y <= v.t + v.h - m; };
+
+// ------------------------------------------------------------------ Course view geometry
+// Front and back of the green along your line to the pin: where that line enters and leaves the mapped green outline.
+// Returns null when the line does not cross the outline (then the caller falls back to the outline's extent).
+export function greenEdges(pos, pin, pts) {
+  if (!pos || !pin || !pts || pts.length < 3) return null;
+  const kx = Math.cos(pos[0] * RAD) * R * RAD, ky = R * RAD, en = (p) => [(p[1] - pos[1]) * kx, (p[0] - pos[0]) * ky];
+  const [px, py] = en(pin), L = Math.hypot(px, py); if (L < 0.5) return null;
+  const ux = px / L, uy = py / L, ts = [];
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [ax, ay] = en(pts[j]), [bx, by] = en(pts[i]), dx = bx - ax, dy = by - ay, den = ux * dy - uy * dx;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = (ax * dy - ay * dx) / den, s = (ax * uy - ay * ux) / den;              // ray: t along the line; s along the edge
+    if (s >= 0 && s <= 1 && t >= 0) ts.push(t);
+  }
+  const inside = F.pointInPolygon(pos[0], pos[1], pts);
+  if (inside) return ts.length ? { front_m: 0, back_m: Math.max(...ts), mid_m: L } : null;
+  if (ts.length < 2) return null;
+  return { front_m: Math.min(...ts), back_m: Math.max(...ts), mid_m: L };
+}
+// The mapped green outline that holds (or is nearest, within 30 m of) a green centre.
+export function greenOutline(pin, feats) {
+  if (!pin) return null;
+  const gs = (feats || []).filter((f) => f.kind === 'green');
+  const g = gs.find((f) => F.pointInPolygon(pin[0], pin[1], f.pts)); if (g) return g.pts;
+  const near = gs.map((f) => ({ f, d: A.haversine(pin[0], pin[1], A.mean(f.pts.map((p) => p[0])), A.mean(f.pts.map((p) => p[1]))) })).sort((a, b) => a.d - b.d)[0];
+  return near && near.d < 30 ? near.f.pts : null;
+}
+// Zoom presets: which points the map must show. 'hole' = tee to green, 'shot' = you to a little past the aim, 'green' = the green and its surrounds.
+export const ZOOMS = ['shot', 'hole', 'green'];
+export const ZOOM_PAST_AIM = 0.2, ZOOM_PAST_MIN_M = 25, ZOOM_GREEN_PAD_M = 8;
+export function zoomPoints(preset, { pos, aim, green, tee, line, greenPts, extra = [] }) {
+  if (preset === 'hole') return { pts: [tee || pos, green, ...(line || []), pos].filter(Boolean), exact: true };
+  if (preset === 'green' && green) {
+    const br = A.bearing(pos[0], pos[1], green[0], green[1]), base = greenPts?.length ? greenPts : [green];
+    const pad = [0, 90, 180, 270].map((d) => F.destination(green[0], green[1], br + d, ZOOM_GREEN_PAD_M + (greenPts?.length ? 0 : 12)));
+    return { pts: [...base, ...pad], exact: true };
+  }
+  const to = aim || green; if (!to) return { pts: [pos], exact: false };
+  const d = A.haversine(pos[0], pos[1], to[0], to[1]), past = F.destination(to[0], to[1], A.bearing(pos[0], pos[1], to[0], to[1]), Math.max(ZOOM_PAST_MIN_M, d * ZOOM_PAST_AIM));
+  return { pts: [pos, to, past, ...extra], exact: true };
 }
 
 // ------------------------------------------------------------------ satellite tiles (Esri World Imagery)
@@ -112,7 +160,7 @@ const P = (pts) => pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.t
 const inView = (fr, pts, pad = 60) => pts.some(([la, lo]) => { const [x, y] = fr.xy(la, lo); return x > -pad && x < fr.w + pad && y > -pad && y < fr.h + pad; });
 const lbl = (x, y, t, cls = '') => `<text class="hm-l ${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}">${t}</text>`;
 // a distance in a dark tag, so it reads over any background
-const tag = (x, y, t) => { const w = 12 * String(t).length + 12; return `<g class="hm-tag"><rect x="${(x - w / 2).toFixed(1)}" y="${(y - 13).toFixed(1)}" width="${w}" height="26" rx="8" fill="rgba(7,44,31,.86)" stroke="rgba(242,207,74,.9)" stroke-width="1"/><text class="hm-l big" x="${x.toFixed(1)}" y="${(y + 1).toFixed(1)}" text-anchor="middle">${t}</text></g>`; };
+export const tag = (x, y, t, size = 18) => { const u = size / 1.5, w = u * String(t).length + u, hh = Math.round(size * 1.45); return `<g class="hm-tag"><rect x="${(x - w / 2).toFixed(1)}" y="${(y - hh / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${hh}" rx="8" fill="rgba(7,44,31,.86)" stroke="rgba(242,207,74,.9)" stroke-width="1"/><text class="hm-l big" x="${x.toFixed(1)}" y="${(y + 1).toFixed(1)}" text-anchor="middle"${size !== 18 ? ` style="font-size:${size}px"` : ''}>${t}</text></g>`; };
 
 const DEFS = `<defs>
 <pattern id="hmRough" width="9" height="9" patternUnits="userSpaceOnUse"><rect width="9" height="9" fill="#6fa64a"/><path d="M1 3l1.5-2M5.5 8l1.5-2" stroke="#5f9640" stroke-width="1"/></pattern>
@@ -147,21 +195,30 @@ export function staticSvg(fr, o) {
     for (const f of feats) if (f.kind === 'tree' && inView(fr, f.pts, 10)) { const [x, y] = fr.xy(...f.pts[0]); out.push(`<circle cx="${x.toFixed(1)}" cy="${(y + tr * 0.25).toFixed(1)}" r="${tr.toFixed(1)}" fill="rgba(0,0,0,.22)"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${tr.toFixed(1)}" fill="url(#hmTree)"/>`); }
   }
   if (line) out.push(`<path d="${P(line.map((p) => fr.xy(...p)))}" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.5" stroke-dasharray="2 5" stroke-linecap="round"/>`);
-  // distance rings from where you are
-  const [px, py] = fr.xy(...pos), step = unit === 'yd' ? 45.72 : 50;
-  for (let r = step; r < Math.min(rings || 0, step * 12); r += step) {
-    const rad = r * fr.k; if (py - rad < 8) break;
-    out.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${rad.toFixed(1)}" fill="none" stroke="rgba(255,255,255,.38)" stroke-width="1" stroke-dasharray="3 5"/>`);
-    out.push(lbl(px - 5, py - rad - 4, String(Math.round(cv(r))), 'ring'));
-  }
+  // distance rings from where you are (in the Course view they move with you, so they are drawn in the dynamic layer)
+  if (!o.noPos) out.push(ringsSvg(fr, pos, rings, unit, cv));
   if (tee) { const [x, y] = fr.xy(...tee); out.push(`<rect x="${(x - 4).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="8" height="8" rx="2" fill="#fff" stroke="#0a3d2b" stroke-width="1.5"/>`); }
   if (green) {
     const [x, y] = fr.xy(...green);
     out.push(`<line x1="${x.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x.toFixed(1)}" y2="${(y - 26).toFixed(1)}" stroke="#fff" stroke-width="1.8"/><path d="M${x.toFixed(1)} ${(y - 26).toFixed(1)}l13 4.5-13 4.5z" fill="#f2cf4a" stroke="#8a6b10" stroke-width=".6"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="#fff" stroke="#14261d" stroke-width="1"/>`);
   }
-  out.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="9" fill="rgba(46,134,222,.25)"/><circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5.5" fill="#2e86de" stroke="#fff" stroke-width="2"/>`);
-  if (posLabel) out.push(lbl(px, py + 22, posLabel, 'mid'));
+  if (!o.noPos) { out.push(posDot(fr, pos)); if (posLabel) { const [px, py] = fr.xy(...pos); out.push(lbl(px, py + 22, posLabel, 'mid')); } }
   return out.join('');
+}
+export const RING_STEP = { yd: 45.72, m: 50 }, RING_MAX = 12;
+export function ringsSvg(fr, pos, rings, unit, cv, minY = 8) {
+  const out = [], [px, py] = fr.xy(...pos), step = RING_STEP[unit] || RING_STEP.m;
+  for (let r = step; r < Math.min(rings || 0, step * RING_MAX); r += step) {
+    const rad = r * fr.k; if (py - rad < minY) break;
+    out.push(`<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${rad.toFixed(1)}" fill="none" stroke="rgba(255,255,255,.38)" stroke-width="1" stroke-dasharray="3 5"/>`);
+    out.push(lbl(px - 5, py - rad - 4, String(Math.round(cv(r))), 'ring'));
+  }
+  return out.join('');
+}
+// you: a blue dot; poor accuracy adds a pale ring of that radius
+export function posDot(fr, pos, acc_m = null) {
+  const [px, py] = fr.xy(...pos), ar = A.isNum(acc_m) ? acc_m * fr.k : 0;
+  return `${ar > 12 ? `<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="${Math.min(ar, 400).toFixed(1)}" fill="rgba(46,134,222,.12)" stroke="rgba(46,134,222,.5)" stroke-width="1"/>` : ''}<circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="9" fill="rgba(46,134,222,.25)"/><circle class="hm-me" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5.5" fill="#2e86de" stroke="#fff" stroke-width="2"/>`;
 }
 
 // The part that moves while you drag: lines, pattern, aim marker, distance labels.
@@ -172,7 +229,8 @@ const riskCol = (r) => (r === null || r === undefined ? ['255,214,64', '#ffd640'
 
 // The part that moves while you drag: lines, pattern (coloured by risk), aim marker, thumb handle, distance tags.
 export function dynamicSvg(fr, o) {
-  const { pos, aim, green, pat, cv, clubName } = o, out = [];
+  const { pos, aim, green, pat, cv, clubName } = o, out = [], TS = o.big ? 28 : 18, HR = o.big ? 24 : 17;
+  if (o.live) out.push(ringsSvg(fr, pos, o.live.rings, o.unit, cv, (fr.view?.t || 0) + 8));
   const [px, py] = fr.xy(...pos), [ax, ay] = fr.xy(...aim), [rgb, line] = riskCol(pat?.risk), dash = pat?.estimated ? ' stroke-dasharray="6 4"' : '';
   if (pat?.ell50) {
     if (pat.ell90) out.push(`<path d="${P(pat.ell90.map((p) => fr.xy(...p)))}Z" fill="rgba(${rgb},.16)" stroke="rgba(${rgb},.95)" stroke-width="1.4" stroke-dasharray="4 3"/>`);
@@ -184,19 +242,20 @@ export function dynamicSvg(fr, o) {
   }
   out.push(`<line x1="${px.toFixed(1)}" y1="${py.toFixed(1)}" x2="${ax.toFixed(1)}" y2="${ay.toFixed(1)}" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`);
   const dAim = A.haversine(pos[0], pos[1], aim[0], aim[1]);
-  out.push(tag((px + ax) / 2 + 26, (py + ay) / 2, Math.round(cv(dAim))));
+  out.push(tag((px + ax) / 2 + TS * 1.45, (py + ay) / 2, Math.round(cv(dAim)), TS));
   if (green && A.haversine(aim[0], aim[1], green[0], green[1]) > 4) {
     const [gx, gy] = fr.xy(...green), dG = A.haversine(aim[0], aim[1], green[0], green[1]);
     out.push(`<line x1="${ax.toFixed(1)}" y1="${ay.toFixed(1)}" x2="${gx.toFixed(1)}" y2="${gy.toFixed(1)}" stroke="rgba(255,255,255,.85)" stroke-width="1.5" stroke-dasharray="5 4"/>`);
-    out.push(tag((ax + gx) / 2 + 26, (ay + gy) / 2, Math.round(cv(dG))));
+    out.push(tag((ax + gx) / 2 + TS * 1.45, (ay + gy) / 2, Math.round(cv(dG)), TS));
   }
   // aim ring + thumb handle
   const off = o.pad ?? padOffset(ay, fr.h), hy = ay + off, sgn = Math.sign(off);
   out.push(`<g class="hm-aim"><line x1="${ax.toFixed(1)}" y1="${(ay + sgn * 12).toFixed(1)}" x2="${ax.toFixed(1)}" y2="${(hy - sgn * 17).toFixed(1)}" stroke="rgba(255,255,255,.8)" stroke-width="1.5" stroke-dasharray="2 3"/>
     <circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="11" fill="rgba(10,61,43,.35)" stroke="#fff" stroke-width="2.5"/><circle cx="${ax.toFixed(1)}" cy="${ay.toFixed(1)}" r="3" fill="#fff"/>
-    <g class="hm-pad"><circle cx="${ax.toFixed(1)}" cy="${hy.toFixed(1)}" r="17" fill="rgba(255,255,255,.92)" stroke="#0a3d2b" stroke-width="1.5"/>${[-5, 0, 5].map((d) => `<line x1="${(ax - 6).toFixed(1)}" y1="${(hy + d).toFixed(1)}" x2="${(ax + 6).toFixed(1)}" y2="${(hy + d).toFixed(1)}" stroke="#0a3d2b" stroke-width="1.6" stroke-linecap="round"/>`).join('')}</g></g>`);
+    <g class="hm-pad"><circle cx="${ax.toFixed(1)}" cy="${hy.toFixed(1)}" r="${HR}" fill="rgba(255,255,255,.92)" stroke="#0a3d2b" stroke-width="1.5"/>${[-5, 0, 5].map((d) => `<line x1="${(ax - 6).toFixed(1)}" y1="${(hy + d).toFixed(1)}" x2="${(ax + 6).toFixed(1)}" y2="${(hy + d).toFixed(1)}" stroke="#0a3d2b" stroke-width="1.6" stroke-linecap="round"/>`).join('')}</g></g>`);
   const riskTxt = A.isNum(pat?.risk) ? ` · ${Math.round(pat.risk)}% trouble` : '';
-  if (clubName) out.push(lbl(ax, ay - sgn * 20, `${clubName}${pat?.estimated ? ' (est.)' : ''}${riskTxt}`, 'mid'));
+  if (clubName) out.push(lbl(ax, ay - sgn * (o.big ? 26 : 20), `${clubName}${pat?.estimated ? ' (est.)' : ''}${riskTxt}`, 'mid'));
+  if (o.live) out.push(posDot(fr, pos, o.live.acc));
   return out.join('');
 }
 
