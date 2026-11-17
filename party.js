@@ -175,12 +175,12 @@ export function regroup(rec, game, unitM = 0.9144) {
 export const groupKey = (players) => (players || []).map((p) => cleanName(p.name).toLowerCase()).sort().join('|');
 const partyResults = (results) => (results || []).filter((r) => r && r.party && Array.isArray(r.party.players) && r.party.players.length >= MIN_PLAYERS);
 // The running series for one day: the group's games that day, up to and including result `rid`, in the order they were saved.
-// → { games, ties, rows: [{ name, wins }] (most wins first, then playing order) } or null for fewer than SERIES_MIN games
-export function series(results, rid) {
+// → { games, ties, rows: [{ name, wins }] (most wins first, then playing order) } or null for fewer than `min` games (SERIES_MIN on the result screen)
+export function series(results, rid, { min = SERIES_MIN } = {}) {
   const all = partyResults(results), me = all.find((r) => r.id === rid); if (!me) return null;
   const key = groupKey(me.party.players), day = String(me.date || '').slice(0, 10), upTo = all.indexOf(me);
   const games = all.slice(0, upTo + 1).filter((r) => String(r.date || '').slice(0, 10) === day && groupKey(r.party.players) === key);
-  if (games.length < SERIES_MIN) return null;
+  if (games.length < min) return null;
   const wins = new Map(me.party.players.map((p) => [cleanName(p.name).toLowerCase(), 0])); let ties = 0;
   for (const r of games) { const w = cleanName(r.party.winner).toLowerCase(); if (w && wins.has(w)) wins.set(w, wins.get(w) + 1); else ties++; }
   const rows = me.party.players.map((p, i) => ({ name: p.name, wins: wins.get(cleanName(p.name).toLowerCase()), i })).sort((a, b) => b.wins - a.wins || a.i - b.i).map(({ i, ...x }) => x);

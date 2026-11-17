@@ -42,7 +42,7 @@ def games_tab(pg, game):
 
 def setup(pg, guests, mode='straight', pressure=False):
     """Open the sheet, add friends (name, hcp) and start."""
-    pg.click('[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
+    pg.click('button.btn[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
     for i, (name, hcp) in enumerate(guests):
         if i: pg.click('#sheet [data-pgadd]')
         pg.fill(f'#ptN{i}', name)
@@ -76,7 +76,7 @@ with sync_playwright() as p:
     ctx, pg, errs = page(b, cloud=True); games_tab(pg, 'putt-369')
     check('the launcher has a Play with a friend button', pg.query_selector('[data-gpparty]') is not None)
     n0 = pg.evaluate("() => window.__golfiq.state.journal.results.length")
-    pg.click('[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
+    pg.click('button.btn[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
     check('the sheet shows you and one friend, straight scoring picked', pg.input_value('#ptOwner') == 'Wills' and pg.query_selector('#ptN0') is not None and pg.is_checked('#sheet input[value=straight]'))
     check('handicap scoring is off until every player has a handicap', pg.is_disabled('#sheet input[value=handicap]'))
     pg.click('#sheet [data-gppstart]'); check('starting with no friend named shows a message and does not start', 'friend' in pg.inner_text('#ptErr').lower() and pg.query_selector('#gpRoot.gp-full') is None)
@@ -127,7 +127,7 @@ with sync_playwright() as p:
     check('the owner\'s own score did reach it, as for any game', '"putt-369"' in posted, posted[:200])
     pg.click('[data-gpdone]'); pg.wait_for_timeout(300)
     pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games', pg_game: 'putt-369'}))"); pg.reload(); pg.wait_for_selector('[data-gpparty]')
-    pg.click('[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
+    pg.click('button.btn[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
     check('Zed shows up as a recent partner', 'Zed' in pg.inner_text('.pt-chips'))
     pg.click('.pt-chip'); check('tapping a recent partner fills the friend row, handicap included', pg.input_value('#ptN0') == 'Zed' and pg.input_value('#ptH0') == '20')
     check('no page errors (two players)', not errs, str(errs[:2])); ctx.close()
@@ -179,17 +179,60 @@ with sync_playwright() as p:
     d = pg.evaluate("() => { const d = window.__golfiq.state.journal.game_draft; return { game: d.game, names: d.party.players.map((p) => p.name) }; }")
     check('next game keeps the group and moves to another game', d['game'] != 'putt-369' and d['names'] == ['Me', 'Sam'], str(d))
     pg.click('[data-gpquit]'); pg.wait_for_timeout(300)
-    games_tab(pg, 'putt-369'); pg.click('[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]'); pg.fill('#ptN0', 'sam')
+    games_tab(pg, 'putt-369'); pg.click('button.btn[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]'); pg.fill('#ptN0', 'sam')
     check('the set-up sheet shows the record against a friend you have played', 'Against sam: won' in pg.inner_text('#sheetPanel .pt-rec') and sum(int(x) for x in __import__('re').findall(r'(\d+)', pg.inner_text('#sheetPanel .pt-rec'))) == 2, pg.inner_text('#sheetPanel .pt-rec'))
     pg.fill('#ptN0', 'Newcomer'); check('a new name shows no record', pg.inner_text('#sheetPanel .pt-rec').strip() == '')
     check('no page errors (phase C2)', not errs, str(errs[:2])); ctx.close()
+
+    # ------------------------------------------------------------ "Play with a friend" on each game card, and a session played with friends
+    ctx, pg, errs = page(b); games_tab(pg, 'putt-369')
+    cards = pg.evaluate("() => ({ cards: document.querySelectorAll('.gp-card').length, fr: document.querySelectorAll('.gp-cardw .gp-cfr[data-gpparty]').length })")
+    check('every guided game card has its own Play with a friend button', cards['fr'] > 0 and cards['fr'] == pg.evaluate("() => [...document.querySelectorAll('.gp-card')].filter((c) => window.__golfiq.guided.canGuide(c.dataset.pickgame)).length"), str(cards))
+    a = pg.evaluate(AUDIT, '.gp-cards'); check('game cards with the friend button: no overflow, taps 38px (390x844)', not a['overflow'] and not a['small'], str(a))
+    pg.click('.gp-cfr[data-gpparty="putt-lag"]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
+    check('the card button opens the set-up sheet for that game', pg.query_selector('#ptPressure') is not None)
+    pg.fill('#ptN0', 'Sam'); pg.click('#sheet [data-gppstart]'); pg.wait_for_selector('#gpRoot.gp-full')
+    d = pg.evaluate("() => { const d = window.__golfiq.state.journal.game_draft; return { game: d.game, names: d.party.players.map((p) => p.name) }; }")
+    check('...and starts that game with the group', d['game'] == 'putt-lag' and d['names'] == ['Me', 'Sam'], str(d))
+    pg.click('[data-gpquit]'); pg.wait_for_timeout(300)
+    pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games'}))"); pg.reload(); pg.wait_for_selector('[data-gpses]')
+    check('the session card offers With friends', pg.query_selector('#gpSesFriends') is not None)
+    pg.click('[data-gpses="30"]'); pg.wait_for_selector('#gpRoot .gp-prompt')
+    check('without the option a session starts solo, as before', pg.evaluate("() => !window.__golfiq.state.journal.game_draft.party"))
+    pg.click('[data-gpquit]'); pg.wait_for_timeout(300); pg.evaluate("() => localStorage.setItem('golfiq-ui', JSON.stringify({pr_tab: 'games'}))"); pg.reload(); pg.wait_for_selector('[data-gpses]')
+    pg.check('#gpSesFriends'); pg.click('[data-gpses="30"]'); pg.wait_for_selector('#sheet.open [data-gppstart]')
+    sheet = pg.inner_text('#sheetPanel')
+    check('ticked, a session length opens the set-up sheet once, for the session, without a pressure finish', '30-minute session with friends' in sheet and 'Games:' in sheet and pg.query_selector('#ptPressure') is None, sheet[:200])
+    a = pg.evaluate(AUDIT, '#sheetPanel'); check('session set-up sheet layout (390x844)', not a['overflow'] and not a['small'], str(a))
+    pg.fill('#ptN0', 'Sam'); pg.fill('#ptH0', '18'); pg.click('#sheet [data-gppstart]'); pg.wait_for_selector('#gpRoot.gp-full')
+    run0 = pg.evaluate("() => { const r = window.__golfiq.state.journal.session_run; return { n: r.queue.length, group: r.group }; }")
+    check('the session run carries the group', run0['group'] and [x['name'] for x in run0['group']['players']] == ['Me', 'Sam'] and run0['n'] >= 2, str(run0))
+    played = []
+    for k in range(run0['n']):
+        d = pg.evaluate("() => { const d = window.__golfiq.state.journal.game_draft; return { game: d.game, ses: !!d.session_id, names: d.party ? d.party.players.map((p) => p.name) : null }; }")
+        played.append(d)
+        run(pg); pg.wait_for_timeout(300)
+        if k < run0['n'] - 1:
+            check(f'session game {k + 1}: the result shows the podium and offers the next session game, not Rematch', pg.query_selector('.gp-pod') is not None and pg.query_selector('[data-gpsesnext]') is not None and pg.query_selector('[data-gprematch]') is None)
+            pg.click('[data-gpsesnext]'); pg.wait_for_selector('[data-gpgapgo]')
+            check(f'gap {k + 1}: the pause screen says who is playing', 'With Sam' in pg.inner_text('#gpGapWith'))
+            pg.click('[data-gpgapgo]'); pg.wait_for_selector('#gpRoot.gp-full')
+    check('every game in the session was played by the group', all(x['ses'] and x['names'] == ['Me', 'Sam'] for x in played), str(played))
+    pg.click('[data-gpsesend]'); pg.wait_for_selector('text=Session done')
+    ser = pg.inner_text('#gpSesSeries') if pg.query_selector('#gpSesSeries') else ''
+    check('the session summary shows the series for the day', ser.startswith('Today:') and 'Sam' in ser, ser)
+    a = pg.evaluate(AUDIT, '#gpRoot'); check('session summary layout (390x844)', not a['overflow'] and not a['small'], str(a))
+    saved = pg.evaluate("() => { const J = window.__golfiq.state.journal, s = J.sessions[J.sessions.length - 1]; return { n: s.results.length, party: s.results.map((id) => !!(J.results.find((r) => r.id === id) || {}).party) }; }")
+    check('the session is saved with the owner\'s results, each carrying the group', saved['n'] == run0['n'] and all(saved['party']), str(saved))
+    check('no page errors (cards and sessions)', not errs, str(errs[:2])); ctx.close()
 
     # ------------------------------------------------------------ layout at both phone sizes, fresh app and sample data
     for (w, h) in [(390, 844), (320, 568)]:
         for sample in (False, True):
             tag = f'{w}x{h} {"sample" if sample else "fresh"}'
             ctx, pg, errs = page(b, w, h, sample=sample); games_tab(pg, 'putt-369')
-            pg.click('[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]'); pg.click('#sheet [data-pgadd]'); pg.click('#sheet [data-pgadd]')
+            a = pg.evaluate(AUDIT, '.gp-cards'); check(f'{tag}: game cards with the friend button', not a['overflow'] and not a['small'], str(a))
+            pg.click('button.btn[data-gpparty]'); pg.wait_for_selector('#sheet.open [data-gppstart]'); pg.click('#sheet [data-pgadd]'); pg.click('#sheet [data-pgadd]')
             a = pg.evaluate(AUDIT, '#sheetPanel'); check(f'{tag}: set-up sheet with three friends', not a['overflow'] and not a['small'], str(a))
             pg.fill('#ptN0', 'Alexander'); pg.fill('#ptN1', 'Bartholomew'); pg.fill('#ptN2', 'Christopher'); pg.click('#sheet [data-gppstart]'); pg.wait_for_selector('#gpRoot.gp-full')
             a = pg.evaluate(AUDIT, '#gpRoot'); check(f'{tag}: play screen, four players, long names', not a['overflow'] and not a['small'], str(a))
