@@ -394,16 +394,17 @@ export function clubPattern(ds, clubId) {
   const pts = st.map((s) => ({ x: s.lateral_m, y: Math.sqrt(Math.max(s.dist_m ** 2 - s.lateral_m ** 2, 0)) + k }));
   const all = A.stockShots(ds.shots, ds.clubs).filter((s) => s.club_id === clubId && !s.partial && !s.partial_by_intent).map((s) => s.dist_m + k);
   const med = all.length ? median(all) : cd.mine_m;
-  return { club_id: clubId, pts, stats: A.dispersionStats(pts), n_dist: all.length, median_m: med, p10_m: all.length >= 5 ? quantile(all, 0.1) : null, p90_m: all.length >= 5 ? quantile(all, 0.9) : null, source: cd.use };
+  return { club_id: clubId, pts, stats: A.dispersionStats(pts), n_dist: all.length, median_m: med, p10_m: all.length >= 5 ? quantile(all, 0.1) : null, p90_m: all.length >= 5 ? quantile(all, 0.9) : null,
+    p25_m: all.length >= 5 ? quantile(all, 0.25) : null, p75_m: all.length >= 5 ? quantile(all, 0.75) : null, source: cd.use };
 }
 // A part swing (wedge matrix) uses the full-swing pattern of that wedge, scaled to its carry.
 export function wedgePattern(base, carry, latRatio) {
   if (base?.stats?.enough && isNum(base.stats.mean_y_m) && base.stats.mean_y_m > 0) {
     const k = carry / base.stats.mean_y_m, pts = base.pts.map((p) => ({ x: p.x * k, y: carry + (p.y - base.stats.mean_y_m) * k }));
-    return { ...base, pts, stats: A.dispersionStats(pts), median_m: carry, partial_swing: true, base_id: base.club_id };
+    return { ...base, pts, stats: A.dispersionStats(pts), median_m: carry, p25_m: null, p75_m: null, partial_swing: true, base_id: base.club_id };
   }
   const e = estimatedPattern({ median_m: carry, p10_m: carry - 1.2816 * wedgeSd(carry), p90_m: carry + 1.2816 * wedgeSd(carry), stats: { n: 0 } }, latRatio);
-  return e ? { ...e, partial_swing: true } : null;
+  return e ? { ...e, p25_m: null, p75_m: null, partial_swing: true } : null;
 }
 // Front / back of a mapped green along the line of play.
 export function greenFrontBack(lat, lon, pin, features) {
@@ -495,9 +496,11 @@ export function scoreKillers(holes, shots, shortM = 137.16) {
 // Uses your own spread from the clubs that do have enough shots (sideways spread as a share of distance, median
 // across clubs), else 7% of distance; distance spread from the club's own 10th-90th percentile, else 6%.
 // Deterministic points (no randomness), so the picture doesn't jump about while you drag.
-export function lateralRatio(ds, patternOf) {
+// Sideways spread per metre of distance, from your own clubs that have a pattern. With none, 0.07 (a guess) – or null when strict,
+// so the Course view can say "distance only" rather than draw a spread that does not come from your shots.
+export function lateralRatio(ds, patternOf, strict = false) {
   const r = ds.clubs.map((c) => patternOf(c.club_id)).filter((p) => p.stats?.enough && p.stats.mean_y_m > 30 && !p.estimated).map((p) => p.stats.sd_lateral_m / p.stats.mean_y_m);
-  return r.length ? median(r) : 0.07;
+  return r.length ? median(r) : strict ? null : 0.07;
 }
 export function estimatedPattern(base, latRatio, n = 120) {
   if (!base || !isNum(base.median_m)) return null;

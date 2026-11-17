@@ -141,8 +141,9 @@ export function registerPlay(c) {
       const p = F.wedgePattern(patternOf(w.club_id), w.carry_m, patCache.ratio ?? F.lateralRatio(c.DS, rawOf)); patCache.m.set(ck, p); return p;
     }
     const raw = rawOf(cid); if (patCache.m.has(cid)) return patCache.m.get(cid);
-    if (patCache.ratio === null) patCache.ratio = F.lateralRatio(c.DS, rawOf);
-    const p = raw.stats.enough ? raw : (F.estimatedPattern(raw, patCache.ratio) || raw); patCache.m.set(cid, p); return p;
+    if (patCache.ratio === null) { patCache.ratio = F.lateralRatio(c.DS, rawOf); patCache.ratioOwn = F.lateralRatio(c.DS, rawOf, true) !== null; }
+    const e = raw.stats.enough ? null : F.estimatedPattern(raw, patCache.ratio);
+    const p = raw.stats.enough ? raw : e ? { ...e, ratio_own: patCache.ratioOwn } : raw; patCache.m.set(cid, p); return p;
   };
   const playClubs = () => c.DS.clubs.filter((x) => x.category !== 'putter' && x.active !== 0 && (A.isNum(x.target_total_m) || c.DS.shots.some((s) => s.club_id === x.club_id)));
   const clubName = (id) => c.DS.clubs.find((x) => x.club_id === id)?.name || id;
@@ -190,7 +191,7 @@ export function registerPlay(c) {
       const br = A.bearing(L.pos[0], L.pos[1], L.aim[0], L.aim[1]);
       pat = { arc: Array.from({ length: 17 }, (_, i) => F.destination(L.pos[0], L.pos[1], br - 8 + i, adj(pt.median_m))) };
     }
-    return { aimDist, pl, rec, top, safer, cid, club, pt, pat, out };
+    return { aimDist, pl, adj, nearFeats, rec, top, safer, cid, club, pt, pat, out };
   }
 
   const PCT = (v) => `${Math.round(v)}%`;
