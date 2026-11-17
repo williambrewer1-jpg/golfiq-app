@@ -106,7 +106,7 @@ with sync_playwright() as p:
         jr = pg.evaluate("() => { const v = window.__golfiq.progress.data(); return { basis: v.jr.basis, start: v.jr.start, cur: v.jr.current && v.jr.current.n }; }")
         you = pg.inner_text('.jn-you')
         check('the road starts from the practice level', jr['basis'] == 'practice' and jr['cur'] is not None and jr['cur'] < jr['start'] and jr['cur'] >= jr['start'] - 5, jr)
-        check('the marker reads "Practice level N", never handicap', you.startswith('Practice level ') and 'handicap' not in you.lower(), you)
+        check('the marker reads "Started at practice level N", never handicap', you.startswith('Started at practice level ') and 'handicap' not in you.lower(), you)
         check('stretches above it are marked as above the practice level', ('Above your practice level' in pg.inner_text('#jnPath')) == (jr['start'] <= 30), pg.inner_text('#jnPath')[:200])
         check('the first-week list is gone', pg.query_selector('#fwSteps') is None)
         pg.goto(URL); pg.wait_for_selector('#main')

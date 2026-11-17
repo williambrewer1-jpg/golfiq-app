@@ -318,7 +318,7 @@ export const COPY = {
     badge: 'First week', points: (n) => `+${n} points`,
     levels: 'Your practice levels', unrated: 'Not rated yet', unratedNote: (skill) => `Play a ${String(skill).toLowerCase()} game to rate it.`,
     estimate: 'Practice levels come from games on the practice ground, which is easier than the course. They are a starting point, not a handicap.',
-    openRoad: 'Open the road to scratch', youAt: (n) => `Practice level ${n}`,
+    openRoad: 'Open the road to scratch', youAt: (n) => `Started at practice level ${n}`, roadFrom: (n) => `Your road to scratch starts at practice level ${n}.`,
   },
   freeze: {
     label: 'Streak freezes', held: (n) => `${n} freeze${n === 1 ? '' : 's'} held`,

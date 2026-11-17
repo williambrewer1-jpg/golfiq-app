@@ -417,7 +417,7 @@ export function registerGuided(c) {
       : st.own ? `<p class="small muted" style="margin:4px 0 8px">Play ${st.need} more time${st.need === 1 ? '' : 's'} and BreakingPar will set your own tiers from your scores.</p>` : '';
     const beat = inf.target !== undefined && inf.target !== null ? `<p class="small" style="margin:0 0 8px">Beat the ${inf.skill_h}-handicapper: <b>${sc(inf.target)}${g.better === 'lower' ? ' or fewer' : '+'}</b> (${esc(inf.sub)}).</p>` : '';
     if (!canGuide(g.id)) return '';
-    return `${ladder}${beat}<label class="f" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px"><input type="checkbox" id="gpPressure" style="width:22px;height:22px;flex:0 0 auto"> <span>Pressure finish: ${esc(G.pressureRule(g))}</span></label>
+    return `${ladder}${beat}<label class="f gp-prlabel" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px;min-height:44px;cursor:pointer"><input type="checkbox" id="gpPressure" style="width:22px;height:22px;flex:0 0 auto"> <span>Pressure finish: ${esc(G.pressureRule(g))}</span></label>
       ${c.compete.groupOn() ? `<div id="gpGhost" data-ghostgame="${esc(g.id)}"></div>` : ''}
       <p style="margin:0 0 6px"><button class="btn" data-gpstart="${esc(g.id)}">Play guided · ~${G.minutesFor(g.id)} min</button></p>
       <p style="margin:0 0 6px"><button class="btn sec" data-gpparty="${esc(g.id)}">${esc(FEEL.COPY.party.button)}</button></p>`;
@@ -668,7 +668,7 @@ export function registerGuided(c) {
     const anim = !c.ui.fw_seen && FEEL.revealMs(100) > 0, at = (cls, i) => sumAt(anim, cls, i);
     const rows = v.sk.skills.map((s, i) => `<div ${at('gp-sumrow', 4 + i)}><div><b>${esc(s.title)}</b>${A_.isNum(s.practice_hcp) ? '' : `<div class="small muted">${esc(K.unratedNote(s.title))}</div>`}</div>
       <div class="gp-sumscore">${A_.isNum(s.practice_hcp) ? `<b>${Math.round(s.practice_hcp)}</b>` : `<span class="small muted">${esc(K.unrated)}</span>`}</div></div>`).join('');
-    const road = v.jr.basis === 'practice' ? `<p class="small" style="margin:10px 0 0">${esc(K.youAt(Math.round(v.jr.start)))} · ${esc(FEEL.COPY.journey.title)}</p>` : '';
+    const road = v.jr.basis === 'practice' ? `<p class="small" style="margin:10px 0 0">${esc(K.roadFrom(Math.round(v.jr.start)))}</p>` : '';
     return `<div class="card gp-res gp-rv fw-done" id="gpRoot" data-fwdone="1"${c.ui.fw_seen ? '' : ' data-reveal="1"'}>
       <div class="gp-hero"><canvas class="gp-confetti" id="gpConf" aria-hidden="true"></canvas>
         <div ${at('gp-rname', 0)}>${esc(K.doneKicker)}</div><div ${at('gp-rverdict met', 1)} id="gpVerdictL">${esc(K.doneTitle)}</div><div ${at('gp-rsub', 2)}>${esc(K.doneLine)}</div>

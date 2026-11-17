@@ -15,7 +15,7 @@ def check(name, ok, extra=''):
     print(('ok   ' if ok else 'FAIL ') + name + (f'  {extra}' if extra and not ok else ''))
     if not ok: fails.append(name)
 URL = f'http://127.0.0.1:{port}/index.html'
-# tap sizes are checked on what B2 adds (the session and daily cards); overflow on the whole page
+# tap sizes (the Pressure finish label counts as the tap target for its checkbox) and overflow on the whole page
 AUDIT = """(sel) => { const bad = [];
   for (const el0 of document.querySelectorAll(sel.split(',').map((x) => `${x.trim()} button, ${x.trim()} a.btn`).join(', '))) { const el = el0.type === 'checkbox' && el0.closest('label') ? el0.closest('label') : el0, r = el.getBoundingClientRect(); if (r.height && (r.height < 38 || r.width < 38)) bad.push((el.textContent || el.id).trim().slice(0, 24) + ':' + Math.round(r.width) + 'x' + Math.round(r.height)); }
   return { overflow: document.documentElement.scrollWidth > innerWidth + 1, small: bad }; }"""
@@ -49,7 +49,7 @@ with sync_playwright() as p:
         check(f'[{sz}] the 15-minute option lists two games by name', '2 games' in txt and 'putt-' not in txt and 'range-' not in txt, txt)
         gid = pg.get_attribute('.gp-daily', 'data-daily')
         check(f'[{sz}] new golfer: the daily challenge is 10 minutes or less', pg.evaluate(MIN, gid) <= 10, gid)
-        audit(pg, '.gp-ses, .gp-daily', f'[{sz}] Games tab (new golfer)')
+        audit(pg, '#main', f'[{sz}] Games tab (new golfer)')
         if W == 390:
             n0 = pg.evaluate("() => (window.__golfiq.state.journal.sessions || []).length")
             plan = pg.evaluate("() => window.__golfiq.state.journal.results.length")
@@ -71,7 +71,7 @@ with sync_playwright() as p:
         ctx, pg, errs = golfer(b, W, H, 20)
         check(f'[{sz}] not new: 15 minutes is still offered first', lengths(pg) == [15, 30, 45, 60], lengths(pg))
         check(f'[{sz}] not new: nothing is highlighted', not any(is_pre(pg, m) for m in (15, 30, 45, 60)))
-        audit(pg, '.gp-ses, .gp-daily', f'[{sz}] Games tab (not new)')
+        audit(pg, '#main', f'[{sz}] Games tab (not new)')
         check(f'[{sz}] no page errors (not new)', not errs, errs); ctx.close()
 
     # ------------------------------------------------------------ the sample data: rounds, and practice results older than 14 days
@@ -79,7 +79,7 @@ with sync_playwright() as p:
     new = pg.evaluate("async () => { const FW = await import('./firstweek.js'), g = window.__golfiq; return FW.isNewGolfer({ journal: g.state.journal, rounds: g.ds.rounds, now: new Date() }); }")
     check('sample data: 15 minutes offered first', lengths(pg) == [15, 30, 45, 60], lengths(pg))
     check('sample data: highlighted only if the sample counts as new', is_pre(pg, 15) == new, new)
-    audit(pg, '.gp-ses, .gp-daily', 'sample data: Games tab')
+    audit(pg, '#main', 'sample data: Games tab')
     check('no page errors (sample)', not errs, errs); ctx.close()
     b.close()
 print('\n' + (f'{len(fails)} FAILED: {fails}' if fails else 'all short-practice browser checks passed'))
