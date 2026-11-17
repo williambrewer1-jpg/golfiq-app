@@ -27,10 +27,12 @@ def play_out(pg, every=3):
     pg.wait_for_selector('#gpRoot.gp-full'); taps = 0
     while pg.query_selector('#gpRoot:not(.gp-rv) [data-gp], #gpRoot:not(.gp-rv) [data-gpball]') and taps < 60: answer_step(pg, taps, every=every); taps += 1
     pg.wait_for_selector('#gpRoot.gp-rv', timeout=6000); pg.wait_for_selector('#gpRoot[data-revealed]', timeout=6000)
-def new_page(b, w, h):
+def new_page(b, w, h, intro=False):
     ctx = b.new_context(viewport={'width': w, 'height': h}, device_scale_factor=2, service_workers='block'); ctx.add_init_script('window.__feelDelay = 0; window.__feelTest = true')
     pg = ctx.new_page(); errs = []; pg.on('pageerror', lambda e: errs.append(str(e))); pg.on('dialog', lambda d: d.accept()); pg.route('**/cdn.jsdelivr.net/**', lambda r: r.abort())
-    pg.goto(URL); pg.wait_for_selector('#loadSample'); return ctx, pg, errs
+    pg.goto(URL); pg.wait_for_selector('#obRoot')
+    if intro: return ctx, pg, errs
+    pg.click('[data-obskip]'); pg.wait_for_selector('#obRoot', state='detached'); pg.wait_for_selector('#main #loadSample'); return ctx, pg, errs      # a fresh app opens on the intro (part A); skipping it lands on Home
 
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -126,11 +128,19 @@ with sync_playwright() as p:
     pg.click('[data-fwroad]'); pg.wait_for_selector('#jnPath'); audit(pg, '#main', '[320x568] road from the practice level')
     check('[320x568] no page errors', not errs, errs); ctx.close()
 
+    # ------------------------------------------------------------ the intro's "Play my first game" starts step 1 of the first week
+    ctx, pg, errs = new_page(b, 390, 844, intro=True)
+    for _ in range(3): pg.click('[data-obnext]'); pg.wait_for_timeout(60)
+    pg.click('[data-obplay]'); pg.wait_for_selector('#gpRoot.gp-full')
+    check('"Play my first game" opens step 1 with "Set your mark"', pg.evaluate("() => window.__golfiq.state.journal.game_draft?.first_week") == 1 and 'Set your mark' in pg.inner_text('.gp-strip'), pg.inner_text('.gp-strip'))
+    play_out(pg); check('…and its result sets the mark', pg.inner_text('#gpVerdictL').startswith('Mark set') and pg.evaluate(FW)['count'] == 1)
+    check('no page errors (intro hand-over)', not errs, errs); ctx.close()
+
     # ------------------------------------------------------------ skip
     ctx, pg, errs = new_page(b, 390, 844)
     pg.evaluate("() => { location.hash = '#practice'; }"); pg.wait_for_selector('#fwSteps'); pg.click('[data-fwskip]'); pg.wait_for_selector('#jnPath')
     check('skip opens the full road at 30', pg.evaluate("() => window.__golfiq.progress.data().jr.current.n") == 30 and pg.evaluate("() => !!window.__golfiq.state.journal.first_week.skipped_at"))
-    pg.goto(URL); pg.wait_for_selector('#loadSample'); check('after skipping, Home has no first-week card', pg.query_selector('#fwHome') is None)
+    pg.goto(URL); pg.wait_for_selector('#main #loadSample'); check('after skipping, Home has no first-week card', pg.query_selector('#fwHome') is None)
     check('skipping earns no points', pg.evaluate("() => window.__golfiq.progress.data().lv.points") == 0)
     ctx.close()
 
@@ -139,7 +149,7 @@ with sync_playwright() as p:
     pg.evaluate("""async () => { const g = window.__golfiq, S = await import('./store.js'); delete g.state.journal.first_week; g.state.journal.results.push({ id: 'old1', game: 'putt-369', date: '2026-10-01', score: 5, mode: 'guided' }); await S.saveJournal(g.state); }""")
     pg.reload(); pg.wait_for_selector('#main'); pg.evaluate("() => { location.hash = '#practice'; }"); pg.wait_for_selector('#jnPath')
     check('a golfer with practice results and no rounds never gets a first week', pg.evaluate("() => window.__golfiq.state.journal.first_week === undefined") and pg.query_selector('#fwSteps') is None)
-    pg.goto(URL); pg.wait_for_selector('#loadSample'); pg.click('#loadSample'); pg.wait_for_timeout(1500)
+    pg.goto(URL); pg.wait_for_selector('#main #loadSample'); pg.click('#main #loadSample'); pg.wait_for_timeout(1500)
     check('with the sample data: no first-week card on Home', pg.query_selector('#fwHome') is None and pg.query_selector('.jn-home') is not None)
     pg.evaluate("() => { location.hash = '#practice'; }"); pg.wait_for_selector('#jnPath')
     check('with the sample data: the road, not the first week', pg.query_selector('#fwSteps') is None and pg.evaluate("() => window.__golfiq.state.journal.first_week === undefined"))
