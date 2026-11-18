@@ -174,7 +174,7 @@ export function parseRoundBundle(bundle) {
     const plat = toDegrees(first(h, 'pinPositionLat')), plon = toDegrees(first(h, 'pinPositionLon'));
     const ok = validPoint(plat, plon); if (ok) pins[n] = [plat, plon];
     holes.push({ round_id, hole: n, par, stroke_index, strokes, putts: h.putts ?? null, penalties: h.penalties ?? null,
-      fairway: fw, pin_lat: ok ? plat : null, pin_lon: ok ? plon : null });
+      fairway: fw, pin_lat: ok ? plat : null, pin_lon: ok ? plon : null, first_putt_m: num(first(h, 'firstPuttMeters')) });
   }
   holes.forEach((h) => { h.putts = int(h.putts); h.penalties = int(h.penalties); });
   if (!holes.length) issue('error', 'holes', 'No played holes in scorecard');
@@ -206,7 +206,9 @@ export function parseRoundBundle(bundle) {
         end_lat: eOk ? elat : null, end_lon: eOk ? elon : null, end_lie: normLie(first(en, 'lie')),
         dist_m: num(first(s, 'meters', 'distance')), shot_time: parseTime(first(s, 'shotTime')),
         shot_type_garmin: first(s, 'shotType'), auto_shot_type: first(s, 'autoShotType'),
-        shot_source: first(s, 'shotSource'), source: 'garmin',
+        shot_source: first(s, 'shotSource'), source: first(s, 'shotSource') === 'BREAKINGPAR' ? 'app' : 'garmin',
+        // tracked in BreakingPar: a weak GPS fix or a club the golfer never chose keeps the shot out of club statistics
+        app_approx: s.appApprox === true, app_club_assumed: s.appClubAssumed === true,
       });
     });
   }
@@ -316,8 +318,12 @@ export function buildBase(state) {
     for (let j = i + 1; j < byTime.length; j++) {
       const b = byTime[j];
       if (ts(b.start_time_local) - ts(a.start_time_local) > T.duplicate_window_minutes * 60000) break;
-      if ((a.course_id ?? a.course_name) === (b.course_id ?? b.course_name)) {
-        const [keep, drop] = (nShots[a.round_id] || 0) >= (nShots[b.round_id] || 0) ? [a, b] : [b, a];
+      // same course; or a round entered / tracked on the phone and one from Garmin starting together – the phone's course
+      // may be named from the map rather than Garmin's id, and nobody starts two rounds within the window
+      const phoneVsGarmin = (a.origin === 'garmin') !== (b.origin === 'garmin');
+      if (phoneVsGarmin || (a.course_id ?? a.course_name) === (b.course_id ?? b.course_name)) {
+        const ga = a.origin === 'garmin', gb = b.origin === 'garmin';
+        const [keep, drop] = ga !== gb ? (ga ? [a, b] : [b, a]) : (nShots[a.round_id] || 0) >= (nShots[b.round_id] || 0) ? [a, b] : [b, a];
         if (drop.duplicate_of === null) drop.duplicate_of = keep.round_id;
         duplicates++;
       }
@@ -332,7 +338,7 @@ export function buildDataset(state, opts = {}) {
   const base = buildBase(state);
   const ov = latestCorrections(state.corrections);
   let rounds = base.rounds.map((r) => applyOverlay({ ...r, weather: null, conditions: null, excluded: null, handicap_index: null, notes: null, is_competition: null }, ov.round.get(r.round_id)));
-  let holes = base.holes.map((h) => applyOverlay({ ...h, gir: null, first_putt_m: null, putts_confirmed: null, excluded: null }, ov.hole.get(holeKey(h.round_id, h.hole))));
+  let holes = base.holes.map((h) => applyOverlay({ ...h, gir: null, first_putt_m: h.first_putt_m ?? null, putts_confirmed: null, excluded: null }, ov.hole.get(holeKey(h.round_id, h.hole))));
   let shots = base.shots.map((s) => applyOverlay({ ...s, excluded: null, shot_category: null }, ov.shot.get(s.shot_key)));
   const clubs = buildClubs(base.clubs);
   if (!rounds.length) return { rounds: [], holes: [], shots: [], clubs, base, issues: base.issues };
@@ -561,6 +567,7 @@ function buildShots(shots, holes, clubs) {
     const nxt = i + 1 < g.length ? g[i + 1].category : null;
     s.ends_in_penalty = ['Water', 'OB'].includes(s.end_lie) || nxt === 'penalty';
     s.full_swing = ['tee', 'approach'].includes(s.category) && !s.excluded && !!s.club_id && s.club_category !== 'putter' && !s.ends_in_penalty && s.dist_m !== null;
+    s.club_stats = s.full_swing && !s.app_approx && !s.app_club_assumed;          // club distances and patterns use only these
     s.on_green_end = s.end_lie !== null ? (s.end_lie === 'Green' ? 1 : 0) : s.end_to_pin !== null ? (s.end_to_pin <= T.assumed_green_radius_m ? 1 : 0) : null;
     s.on_green_source = s.end_lie !== null ? 'garmin lie' : s.end_to_pin !== null ? 'estimated (distance to pin)' : null;
   });
@@ -846,7 +853,7 @@ export function byFirstPuttDistance(holes, source = 'user', unit = 'm') {
 export const sampleLabel = (n) => (n < T.min_shots_club_stats ? 'insufficient' : n < T.min_shots_club_reliable ? 'low' : 'reliable');
 export function referenceFull(shots, clubs) {
   const ref = {};
-  for (const [cid, g] of groupBy(shots.filter((s) => s.full_swing), (s) => s.club_id)) ref[cid] = quantile(g.map((s) => s.dist_m), 0.8);
+  for (const [cid, g] of groupBy(shots.filter((s) => s.full_swing && s.club_stats !== false), (s) => s.club_id)) ref[cid] = quantile(g.map((s) => s.dist_m), 0.8);
   for (const c of clubs || []) {
     const t = c.target_total_m ?? (c.target_carry_m !== null && c.target_carry_m !== undefined ? c.target_carry_m * 1.05 : null);
     if (isNum(t)) ref[c.club_id] = t;
@@ -855,7 +862,7 @@ export function referenceFull(shots, clubs) {
 }
 export function stockShots(shots, clubs) {
   const ref = referenceFull(shots, clubs);
-  return shots.filter((s) => s.full_swing).map((s) => {
+  return shots.filter((s) => s.full_swing && s.club_stats !== false).map((s) => {
     const r = ref[s.club_id] ?? null;
     const intent = s.category === 'approach' && s.start_to_pin !== null && r !== null && s.start_to_pin < 0.8 * r;
     return { ...s, ref_full_m: r, partial_by_intent: intent, partial: !intent && r !== null && s.dist_m < T.partial_shot_ratio * r };

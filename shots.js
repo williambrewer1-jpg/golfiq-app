@@ -181,3 +181,39 @@ export function stateOf(h, { onGreen = false } = {}) {
   if (h?.putting !== false && (onGreen || (s && !s.penalty && s.result === 'green'))) return 'putting';   // false: "Not on the green"
   return 'ready';
 }
+
+// ------------------------------------------------------------------ into the dataset (course-view plan 6.6, phase 4)
+// A tracked hole in the shape Garmin round bundles use (detail.holeShots), so a finished round goes through the same
+// import as a Garmin one. Positions stay on this phone: bundles are stored locally and never uploaded.
+export const APP_SHOT_SOURCE = 'BREAKINGPAR';
+const LIE_OUT = { tee: 'TeeBox', fairway: 'Fairway', rough: 'Rough', bunker: 'Bunker', trees: 'Trees', water: 'Water', green: 'Green', fringe: 'Fringe' };
+// part-swing wedge rows are "w:<club_id>|<length>": the shot is the club's
+export const baseClub = (id) => (id && String(id).startsWith('w:') ? String(id).slice(2).split('|')[0] : id || null);
+const loc = (pt, lie) => (pt ? { lat: pt[0], lon: pt[1], lie: lie ?? null } : { lie: lie ?? null });
+export function toHoleShots(h, n, { pin = null } = {}) {
+  const shots = [];
+  let order = 0;
+  for (const s of h?.shots || []) {
+    order++;
+    const endLie = s.penalty === 'ob' ? 'OutOfBounds' : s.penalty === 'water' && !s.end ? 'Water' : LIE_OUT[s.result] ?? null;
+    const club = baseClub(s.club_id);
+    shots.push({
+      id: `app-${n}-${order}`, shotOrder: order, clubId: club, startLoc: loc(s.start, LIE_OUT[s.lie] ?? null), endLoc: loc(s.end, endLie),
+      shotTime: A.isNum(s.at) ? new Date(s.at).toISOString() : null, shotType: order === 1 ? 'TEE' : null, shotSource: APP_SHOT_SOURCE,
+      appApprox: !!s.approx, appClubAssumed: !!s.club_assumed || !club, appMarked: !!s.marked, appManual: !!s.manual,
+    });
+    // the penalty stroke is its own record, as Garmin's are; the drop is where the next shot starts
+    if (s.penalty) { order++; shots.push({ id: `app-${n}-${order}`, shotOrder: order, clubId: null, startLoc: { lie: null }, endLoc: { lie: null }, shotType: 'PENALTY', shotSource: APP_SHOT_SOURCE, appPenalty: s.penalty }); }
+  }
+  return { holeNumber: n, ...(pin ? { pinPosition: { lat: pin[0], lon: pin[1] } } : {}), shots };
+}
+// A finished round's bundle with its tracked shots added (also used once for rounds tracked before this was built).
+// holes: { n: { shots, first_putt_m } }; pins: { n: [lat, lon] }.
+export function withTrackedShots(bundle, holes, pins = {}) {
+  const b = structuredClone(bundle), hs = Object.entries(holes || {}).filter(([, h]) => h?.shots?.length).map(([n, h]) => toHoleShots(h, Number(n), { pin: pins[n] || null }));
+  b.shots = { ...(b.shots || {}), holeShots: hs };
+  for (const sc of b.detail?.scorecardDetails || []) for (const x of sc.scorecard?.holes || []) {
+    const fp = holes?.[x.number]?.first_putt_m; if (A.isNum(fp)) x.firstPuttMeters = fp;
+  }
+  return b;
+}

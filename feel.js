@@ -412,6 +412,7 @@ export const COPY = {
     shots: 'Shots this hole', addShot: 'Add a missed shot', noShots: 'No shots yet. Tap I\'ve hit after each shot.', penaltyNone: 'No penalty',
     roundOn: 'Shot tracking is on for this round.', roundOff: 'Shot tracking is off for this round.', turnOn: 'Track shots', turnOff: 'Scores only',
     fromBall: 'showing from your ball', approxShot: 'approx.',
+    backfilled: (n) => `Tracked shots added to your stats from ${n} round${n === 1 ? '' : 's'}`,
   },
   course: {
     open: 'Open course view', close: 'Close course view', hole: (n) => `Hole ${n}`, par: (p) => `Par ${p}`, si: (n) => `SI ${n}`,
