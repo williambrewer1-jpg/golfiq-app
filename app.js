@@ -711,6 +711,7 @@ const RENDER = { home: pageHome, stats: pageStats, rounds: pageRounds, data: pag
 
 // ------------------------------------------------------------------ the first-run intro (onboarding.js has the rules; this draws and wires it)
 // Shown full screen to a fresh app, or again from Settings → General → Replay the intro. One decision per screen; Skip on every screen.
+const INTRO_SWIPE_PX = 60, INTRO_SWIPE_RATIO = 1.5;   // a swipe is at least this far sideways, and this many times further sideways than up or down
 let intro = null;                         // { i: screen 0–3, replay, a: answers, err }
 const introOn = () => !!intro || ONB.needsOnboarding({ settings: state.settings, journal: state.journal, rounds: state.bundles });
 const latestHcp = () => [...(state.settings.handicaps || [])].sort((a, b) => a.date.localeCompare(b.date)).pop()?.handicap_index ?? null;
@@ -766,14 +767,30 @@ function wireIntro() {
   const a = intro.a, K = FEEL.COPY.intro;
   $('#obName')?.addEventListener('input', (e) => { a.name = e.target.value; });
   $('#obHcp')?.addEventListener('input', (e) => { a.hcpTxt = e.target.value; if (!a.goalSet) a.goal = null; });
+  // Next and Back are shared by the buttons and by a swipe, so a swipe forward obeys exactly the same checks as the Next button
+  const goNext = () => {
+    if (intro.i >= ONB.INTRO_SCREENS - 1) return;
+    if (intro.i === 1 && !a.noHcp && String(a.hcpTxt).trim() && ONB.parseHandicap(a.hcpTxt) === null) { intro.err = K.about.bad; introRender(); $('#obHcp')?.focus(); return; }
+    intro.err = ''; if (intro.i === 1 && !a.goalSet) a.goal = null;               // the goal is picked again for the level given, until the golfer chooses one
+    intro.i = Math.min(ONB.INTRO_SCREENS - 1, intro.i + 1); introRender(1); scrollTo(0, 0);
+  };
+  const goBack = () => { if (intro.i === 0) return; intro.err = ''; intro.i -= 1; introRender(-1); };
+  // A sideways swipe moves between screens: left for the next, right for the one before. Mostly-vertical drags still scroll the screen,
+  // and a drag that starts in a text field (selecting text) is left alone. The last screen has no "next", so a swipe there does nothing.
+  let sw = null;
+  root.addEventListener('touchstart', (e) => { const t = e.touches[0]; sw = e.touches.length === 1 && !e.target.closest('input') ? { x: t.clientX, y: t.clientY } : null; }, { passive: true });
+  root.addEventListener('touchcancel', () => { sw = null; }, { passive: true });
+  root.addEventListener('touchend', (e) => {
+    const s0 = sw; sw = null; if (!s0 || !intro) return;
+    const t = e.changedTouches[0], dx = t.clientX - s0.x, dy = t.clientY - s0.y;
+    if (Math.abs(dx) < INTRO_SWIPE_PX || Math.abs(dx) < Math.abs(dy) * INTRO_SWIPE_RATIO) return;
+    FEEL.unlock(); if (dx < 0) goNext(); else goBack();
+  }, { passive: true });
   root.addEventListener('click', async (e) => {
     const b = e.target.closest('button'); if (!b) return; const d = b.dataset;
     if (!('obdemo' in d || 'obgarmin' in d || 'obskip' in d)) FEEL.unlock();     // audio starts on a tap that makes a sound; leaving the intro makes none
-    if ('obnext' in d) {
-      if (intro.i === 1 && !a.noHcp && String(a.hcpTxt).trim() && ONB.parseHandicap(a.hcpTxt) === null) { intro.err = K.about.bad; introRender(); $('#obHcp')?.focus(); return; }
-      intro.err = ''; if (intro.i === 1 && !a.goalSet) a.goal = null;             // the goal is picked again for the level given, until the golfer chooses one
-      intro.i = Math.min(ONB.INTRO_SCREENS - 1, intro.i + 1); introRender(1); scrollTo(0, 0);
-    } else if ('obback' in d) { intro.err = ''; intro.i = Math.max(0, intro.i - 1); introRender(-1); }
+    if ('obnext' in d) goNext();
+    else if ('obback' in d) goBack();
     else if ('obnone' in d) { a.noHcp = true; intro.err = ''; introRender(); }
     else if ('obhave' in d) { a.noHcp = false; introRender(); }
     else if ('oblevel' in d) { a.level_choice = d.oblevel; FEEL.play('tap'); introRender(); }
