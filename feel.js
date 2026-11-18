@@ -392,6 +392,27 @@ export const COPY = {
     better: (n, t) => `${n} of ${t} ${t === 1 ? 'skill' : 'skills'} better than last test`, rated: (n) => `${n} ${n === 1 ? 'skill' : 'skills'} rated`, potential: 'Potential now' },
   sound: { on: 'Sound on', off: 'Sound off' },
   // the Course view on Play (course.js)
+  // shot tracking in the Course view (track.js, shots.js)
+  track: {
+    switch: 'Track shots', switchNote: 'Tap "I\'ve hit" after each shot and "At my ball" when you reach it. BreakingPar works out your score, fairways and greens. Switch off to enter scores only.',
+    hit: 'I\'ve hit', atBall: 'At my ball', mark: 'Mark on map', penalty: 'Penalty', onGreen: 'On the green', notGreen: 'Not on the green',
+    holeOut: 'Hole out', next: 'Next hole', undo: 'Undo', edit: 'Edit', done: 'Done', cancel: 'Cancel', del: 'Delete', score: 'Score',
+    walking: (n, club) => `Shot ${n}${club ? ` · ${club}` : ''}. Walk to your ball.`,
+    markPrompt: 'Tap the map where your ball finished.', dropPrompt: 'Take your drop, then tap At my ball by the ball.',
+    penaltyAsk: 'Penalty: which kind?', pen: { water: 'Water', ob: 'Out of bounds or lost', unplayable: 'Unplayable' },
+    results: { fairway: 'Fairway', rough: 'Rough', bunker: 'Bunker', trees: 'Trees', water: 'Water', green: 'Green', fringe: 'Fringe' },
+    whereFinished: 'Where did it finish?', whichClub: 'Which club?', clubGuess: (c) => `${c}?`,
+    side: (v, u, dir) => `${v} ${u} ${dir} of aim`, onLine: 'on line', approx: 'Weak GPS: the distance is approximate.', noFix: 'No GPS fix: mark where it finished on the map.',
+    putts: 'Putts', puttsHint: 'How many putts?', firstPutt: 'First putt', notSet: 'not set', puttMore: '4+',
+    holeDone: (n, s, name) => `Hole ${n}: ${s}${name ? ` · ${name}` : ''}`,
+    fw: { HIT: 'Fairway hit', LEFT: 'Missed left', RIGHT: 'Missed right' }, gir: ['Green missed', 'Green in regulation'],
+    ud: ['Up and down missed', 'Up and down'], sand: ['Sand save missed', 'Sand save'],
+    puttsN: (n) => `${n} putt${n === 1 ? '' : 's'}`, pensN: (n) => `${n} penalt${n === 1 ? 'y' : 'ies'}`, firstPuttV: (v) => `First putt ${v}`,
+    correct: 'If anything is wrong, change it below. Your changes win.',
+    shots: 'Shots this hole', addShot: 'Add a missed shot', noShots: 'No shots yet. Tap I\'ve hit after each shot.', penaltyNone: 'No penalty',
+    roundOn: 'Shot tracking is on for this round.', roundOff: 'Shot tracking is off for this round.', turnOn: 'Track shots', turnOff: 'Scores only',
+    fromBall: 'showing from your ball', approxShot: 'approx.',
+  },
   course: {
     open: 'Open course view', close: 'Close course view', hole: (n) => `Hole ${n}`, par: (p) => `Par ${p}`, si: (n) => `SI ${n}`,
     thru: (tp, n) => (n ? `${tp} thru ${n}` : 'No holes yet'), prev: 'Previous hole', next: 'Next hole',
