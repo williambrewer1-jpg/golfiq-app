@@ -23,6 +23,9 @@ export const SHEET_DRAG_PX = 40;                // dragging the sheet handle thi
 export const MAP_MAX_K = 8;
 export const REZOOM_RATIO = 1.4;                // Shot zoom: rebuild the map when the right scale for where you are now differs by this much
 export const BOTTOM_CLEAR_PX = 34;             // extra room above the sheet so your own dot is never under it                     // pixels per metre: the Green zoom never goes closer than this
+export const NEXT_TEE_M = 40;                   // "Go to hole N?" when the hole has a score and you are this close to the next tee
+export const PINCH_MIN_K = 0.4;                 // pinch and pan: furthest out (pixels per metre; about 1 km across a phone)
+export const PINCH_MAX_K = 16;                  // and closest in (about 25 m across a phone)
 export const SHEETS = ['peek', 'half', 'full'];
 export const TABS = ['club', 'strategy', 'score', 'card'];      // the sheet's height (handle) and its content (tabs) are independent
 
@@ -31,6 +34,8 @@ export function registerCourse(c, P) {
   const T = FEEL.COPY.course, U = () => c.UNIT;
   let L = null, M = null, V = null, wake = null, raf = 0, lastLive = 0, timer = 0, dragging = false, st = null;
   let insets = { t: 128, b: 196, l: 0 };                // measured after the first draw
+  let UV = null;                                        // a view you pinched or panned to: { hole, fr }; kept until Recentre, Zoom or another hole
+  let offer = null, markable = null;                    // the next-hole banner and the mark green / tee buttons, worked out in chrome()
   const active = () => !!document.getElementById('cvRoot');
   const sheet = () => (SHEETS.includes(c.ui.pl_sheet) ? c.ui.pl_sheet : 'peek');
   const tab = () => (TABS.includes(c.ui.pl_stab) ? c.ui.pl_stab : 'club');
@@ -47,9 +52,10 @@ export function registerCourse(c, P) {
   addEventListener('hashchange', () => setTimeout(() => { if (!active()) release(); }, 0));
 
   // ------------------------------------------------------------ the live picture of the hole
+  const marks = (d) => { const k = HM.markKey(d); return (k && c.state.journal.course_marks?.[k]) || {}; };
   function where(d) {
     const fix = P.fix(), known = d.course_id ? F.courseHoles(c.DS, d.course_id) : {}, feats = P.featsFor(d);
-    const gpsPos = fix ? [fix.lat, fix.lon] : null, ht = HM.holeTargets(known[d.hole], feats, d.hole, gpsPos);
+    const gpsPos = fix ? [fix.lat, fix.lon] : null, ht = HM.withMarks(HM.holeTargets(known[d.hole], feats, d.hole, gpsPos), marks(d)[d.hole]);
     const farAway = gpsPos && (ht.green || ht.tee) && A.haversine(gpsPos[0], gpsPos[1], ...(ht.green || ht.tee)) > FAR_AWAY_M;
     // tracking: once a shot has been played, a known ball you are not standing by (marked on the map, a drop, a replay
     // after out of bounds) is where the map measures from
@@ -163,6 +169,8 @@ export function registerCourse(c, P) {
   }
 
   function frameFor() {
+    if (UV && UV.hole === L.hole && UV.usingTee === L.usingTee) return UV.fr;
+    UV = null;
     const root = $('#cvRoot'), ell = M?.pat?.ell90 || M?.pat?.ell50 || M?.pat?.arc || [];
     const zp = HM.zoomPoints(zoom(), { pos: L.pos, aim: L.aim, green: L.green, tee: L.tee, line: L.line, greenPts: L.greenPts, extra: ell.filter((_, i) => i % 6 === 0) });
     const W = root?.clientWidth || innerWidth, H = root?.clientHeight || innerHeight;
@@ -184,10 +192,47 @@ export function registerCourse(c, P) {
     const tip = SV.chip(), tipEl = $('#cvTip'), had = !!tipEl.firstChild;
     if (tipEl.innerHTML !== tip) tipEl.innerHTML = tip;
     if (had !== !!tip && L && measure()) { setTimeout(drawMap, 0); }
+    const had2 = `${offer}|${markable?.green}|${markable?.tee}`;
+    offer = nextOffer(d, w); markable = markOffer(d, w);
+    if (had2 !== `${offer}|${markable?.green}|${markable?.tee}` && L) setTimeout(() => { if (measure()) drawMap(); }, 0);
     const y = yards(), yb = $('#cvYards');
     yb.hidden = !L;
     if (L) yb.innerHTML = `${y.front !== null ? `<div class="f"><span>${T.front}</span><b>${yd(y.front)}</b></div>` : ''}<div class="m"><span>${y.front !== null ? T.middle : T.toGreen}</span><b>${yd(y.mid)}</b></div>${y.back !== null ? `<div class="b"><span>${T.back}</span><b>${yd(y.back)}</b></div>` : ''}`;
     peek();
+  }
+  // "Go to hole 8?": the hole has a score and you are standing by the next tee. One tap, never automatic.
+  function nextOffer(d, w) {
+    const o = P.holeOrder(d), n = o[o.indexOf(d.hole) + 1];
+    if (n === undefined || !(d.holes[d.hole].strokes > 0) || !w.fix || w.fix.acc > NEXT_TEE_M || c.ui.pl_next_off === `${d.id}|${n}`) return null;
+    const tee = HM.withMarks(HM.holeTargets(w.known[n], w.feats, n, w.gpsPos), marks(d)[n]).tee;
+    return tee && A.haversine(w.gpsPos[0], w.gpsPos[1], tee[0], tee[1]) <= NEXT_TEE_M ? n : null;
+  }
+  // Mark this green / tee (plan 4.5): offered only for what is not known. The tee only before the hole has been started.
+  function markOffer(d, w) {
+    const h = d.holes[d.hole], tee = !w.ht.tee && !(h.strokes > 0) && !h.shots?.length;
+    if (w.ht.green && !tee) return null;
+    return { green: !w.ht.green, tee, ready: !!w.fix && w.fix.acc <= SH.POOR_GPS_M };
+  }
+  function bannerHtml(d) {
+    const h = d.holes[d.hole], out = [];
+    if (offer && !(TR.on(d) && h.done)) out.push(`<div class="cv-next" id="cvNext"><button type="button" class="btn cv-big" data-cvnext="${offer}">${esc(T.nextAsk(offer))}</button><button type="button" class="btn sec" data-cvnextno>${esc(T.nextNo)}</button></div>`);
+    if (markable && !TR.marking()) {
+      const btn = (k, label) => `<button type="button" class="btn sec" data-cvmark="${k}"${markable.ready ? '' : ' disabled'}>${esc(label)}</button>`;
+      out.push(`<div class="cv-marks" id="cvMarks"><div class="row">${markable.green ? btn('green', T.markGreen) : ''}${markable.tee ? btn('tee', T.markTee) : ''}</div>
+        <p class="small muted">${esc(markable.ready ? T.markNote : T.markWait(`${yd(SH.POOR_GPS_M)} ${U()}`))}</p></div>`);
+    }
+    return out.join('');
+  }
+  async function markHere(kind) {
+    const d = P.D(), f = P.fix(), key = HM.markKey(d); if (!d || !key || !f || f.acc > SH.POOR_GPS_M) return;
+    const J = c.state.journal; J.course_marks = J.course_marks || {}; J.course_marks[key] = J.course_marks[key] || {};
+    const m = J.course_marks[key][d.hole] = { ...(J.course_marks[key][d.hole] || {}) };
+    m[kind] = [f.lat, f.lon]; m[`${kind}_at`] = new Date().toISOString();
+    await P.saveDraft(); FEEL.play('tap'); toast(kind === 'green' ? T.markedGreen(d.hole) : T.markedTee(d.hole)); L = null; drawMap();
+  }
+  async function forgetMarks() {
+    const d = P.D(), key = HM.markKey(d), all = c.state.journal.course_marks?.[key]; if (!all?.[d.hole]) return;
+    delete all[d.hole]; await P.saveDraft(); toast(T.forgot); L = null; drawMap(); refreshSheet();
   }
   function peek() {
     const d = P.D(), el = $('#cvPeek'); if (!d || !el) return;
@@ -205,7 +250,7 @@ export function registerCourse(c, P) {
       ${missHtml()}
       ${c.ui.pl_plays_open && bits.length ? `<p class="cv-why">${esc(bits.join(' · '))}${L?.wx ? ` · wind ${Math.round(L.wx.wind_kmh)} km/h from ${P.compass(L.wx.wind_from)}` : ''}</p>` : ''}`;
     el.dataset.track = TR.on(d) ? 'on' : '';
-    el.innerHTML = TR.peek(info) ?? info + `<div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`;
+    el.innerHTML = bannerHtml(d) + (TR.peek(info) ?? info + `<div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`);
   }
   const cardSub = (d) => { const t = P.scoreTotals(d); return t.played.length ? T.thruShort(P.toParText(t.toPar), t.played.length) : T.noHoles; };
   const sg = (v) => `${v > 0 ? '+' : '−'}${yd(Math.abs(v))}`;
@@ -217,7 +262,7 @@ export function registerCourse(c, P) {
     const back = `<button type="button" class="btn sec cv-back" data-cvsheet="peek">${esc(T.backToMap)}</button>`;
     const tb = `<div class="seg cv-tabs" role="tablist">${TABS.map((k) => `<button type="button" role="tab" data-cvtab="${k}" class="${tab() === k ? 'on' : ''}">${esc(T.tabs[k])}</button>`).join('')}</div>`;
     if (tab() === 'card') return tb + `<div class="cv-card">${P.scoreSummaryHtml(d)}</div>${P.groupHtml(d)}${back}`;
-    if (tab() === 'score') return tb + TR.scoreTop(d) + `<div class="cv-card cv-score">${P.scoreEntryHtml(d)}</div>` + TR.scoreBottom(d) + `<button type="button" class="btn sec cv-tocard" data-cvtab="card">${esc(T.toCard)}</button>${back}`;
+    if (tab() === 'score') { const top = TR.scoreTop(d); return tb + top + `<div class="cv-card cv-score">${P.scoreEntryHtml(d, { chip: !top })}</div>` + TR.scoreBottom(d) + `<button type="button" class="btn sec cv-tocard" data-cvtab="card">${esc(T.toCard)}</button>${back}`; }
     if (tab() === 'strategy') return tb + SV.tab() + back;
     const seg = (key, opts, val) => `<div class="seg">${opts.map(([v, l]) => `<button type="button" data-${key}="${v}" class="${val === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
     const hasMap = L?.feats.some((f) => f.kind !== 'hole');
@@ -227,7 +272,12 @@ export function registerCourse(c, P) {
     return tb + how + (L && M ? `<div id="plRec" class="cv-card">${P.recHtml(L, M)}</div>` : `<p class="small muted">${esc(T.noGreen)}</p>`)
       + `<div class="cv-card"><label class="f">${esc(T.from)}</label>${seg('cvpos', [['gps', T.fromGps], ['tee', T.fromTee]], c.ui.pl_pos === 'tee' ? 'tee' : 'gps')}
         ${hasMap ? `<label class="f">${esc(T.style)}</label>${seg('cvstyle', [['map', T.styleMap], ['sat', T.styleSat]], c.ui.pl_style === 'sat' ? 'sat' : 'map')}` : ''}
-        ${P.osmHint(d, L?.pos || null)}</div>${back}`;
+        ${P.osmHint(d, L?.pos || null)}${markedHtml(d)}</div>${back}`;
+  }
+  function markedHtml(d) {
+    const m = marks(d)[d.hole], w = m ? where(d) : null; if (!w || (!w.ht.marked.green && !w.ht.marked.tee)) return '';
+    const what = w.ht.marked.green && w.ht.marked.tee ? 'green and tee' : w.ht.marked.green ? 'green' : 'tee';
+    return `<p class="small muted" style="margin-top:10px">${esc(T.marks(what))}</p><button type="button" class="btn sec" data-cvforget>${esc(T.forgetMarks)}</button>`;
   }
   // Redraw the sheet. A change inside the same tab (a stepper, Fairway, Par) keeps the scroll position; a new tab starts at the top.
   let shown = '';
@@ -253,14 +303,14 @@ export function registerCourse(c, P) {
     const d = P.D(); if (!active() || !d) return;
     const w = where(d);
     // the picture itself changes (first fix, switched to/from the tee view, walked out of the frame): rebuild the map
-    if (!L || !w.pos || !w.green || w.usingTee !== L.usingTee || (!w.usingTee && !HM.inView2(L.fr, w.pos, VIEW_MARGIN_PX))) { drawMap(); return; }
+    if (!L || !w.pos || !w.green || w.usingTee !== L.usingTee || (!w.usingTee && !UV && !HM.inView2(L.fr, w.pos, VIEW_MARGIN_PX))) { drawMap(); return; }
     if (!w.usingTee) {
       L.pos = w.pos;
       L.onTee = !!(L.tee && A.haversine(L.pos[0], L.pos[1], L.tee[0], L.tee[1]) < ON_TEE_M);
       if (!L.custom) L.aim = P.defaultAim(L.pos, L.green, L.line, L.onTee);
       remodel();
       // Shot zoom follows you: once you have walked on far enough that the picture is much too wide (or tight), rebuild it
-      if (zoom() === 'shot') { const k = frameFor().k / L.fr.k; if (k > REZOOM_RATIO || k < 1 / REZOOM_RATIO) { drawMap(); return; } }
+      if (zoom() === 'shot' && !UV) { const k = frameFor().k / L.fr.k; if (k > REZOOM_RATIO || k < 1 / REZOOM_RATIO) { drawMap(); return; } }
     }
     $('#hmDyn').innerHTML = dynHtml();
     chrome(w);
@@ -286,11 +336,12 @@ export function registerCourse(c, P) {
   }
   async function recentre() {
     const d = P.D(); if (d?.aim) delete d.aim[d.hole];
-    c.ui.pl_club = null; c.saveUi(); await P.saveDraft(); L = null; drawMap();
+    c.ui.pl_club = null; c.saveUi(); await P.saveDraft(); L = null; UV = null; zoomLabel(); drawMap();
   }
+  function zoomLabel() { const b = $('[data-cvzoom]'); if (b) b.innerHTML = `<small>${esc(T.zoomLabel)}</small>${esc(T.zoom(UV ? 'free' : zoom()))}`; }
   async function goHole(n) {
     const d = P.D(); if (!d || !d.holes[n]) return;
-    d.hole = n; if (d.aim) delete d.aim[n]; c.ui.pl_club = null; c.saveUi(); L = null;
+    d.hole = n; if (d.aim) delete d.aim[n]; c.ui.pl_club = null; c.saveUi(); L = null; UV = null;
     await P.saveDraft(); c.rerender();
   }
   function stepHole(dir) {
@@ -313,7 +364,7 @@ export function registerCourse(c, P) {
       </div>
       <div class="cv-yards" id="cvYards" hidden></div>
       <div class="cv-sheet" id="cvSheet">
-        <div class="cv-tools"><button type="button" class="cv-tbtn" data-cvzoom aria-label="${esc(T.zoomLabel)}"><small>${esc(T.zoomLabel)}</small>${esc(T.zoom(zoom()))}</button>
+        <div class="cv-tools"><button type="button" class="cv-tbtn" data-cvzoom aria-label="${esc(T.zoomLabel)}"><small>${esc(T.zoomLabel)}</small>${esc(T.zoom(UV && UV.hole === d.hole ? 'free' : zoom()))}</button>
           <button type="button" class="cv-tbtn" data-cvrecentre>${esc(T.recentre)}</button></div>
         <button type="button" class="cv-handle" id="cvHandle" aria-label="${esc(T.sheet)}" aria-expanded="${sheet() !== 'peek'}"><i></i></button>
         <div class="cv-peek" id="cvPeek"></div>
@@ -342,6 +393,10 @@ export function registerCourse(c, P) {
       if (b.hasAttribute('data-cvpeekclub')) { open('club'); return; }
       if (b.hasAttribute('data-cvscore')) { open('score'); return; }
       if (b.hasAttribute('data-cvcard')) { open('card'); return; }
+      if (b.dataset.cvnext) { FEEL.play('tap'); goHole(Number(b.dataset.cvnext)); return; }
+      if (b.hasAttribute('data-cvnextno')) { const o = P.holeOrder(dh); c.ui.pl_next_off = `${dh.id}|${o[o.indexOf(dh.hole) + 1]}`; c.saveUi(); offer = null; peek(); if (measure()) drawMap(); return; }
+      if (b.dataset.cvmark) { if (!b.disabled) markHere(b.dataset.cvmark); return; }
+      if (b.hasAttribute('data-cvforget')) { forgetMarks(); return; }
       if (b.hasAttribute('data-cvplays')) { c.ui.pl_plays_open = !c.ui.pl_plays_open; c.saveUi(); peek(); return; }
       if (b.hasAttribute('data-cvout')) { c.ui.pl_out_open = !c.ui.pl_out_open; c.saveUi(); peek(); return; }
       if (b.hasAttribute('data-cvshots')) { toggleShots(); refreshSheet(); return; }
@@ -381,8 +436,9 @@ export function registerCourse(c, P) {
       const b = e.target.closest('button'); if (!b) return;
       if (b.hasAttribute('data-cvrecentre')) { recentre(); return; }
       if (b.hasAttribute('data-cvzoom')) {
-        const z = HM.ZOOMS[(HM.ZOOMS.indexOf(zoom()) + 1) % HM.ZOOMS.length]; c.ui.pl_zoom = z; c.saveUi();
-        b.innerHTML = `<small>${esc(T.zoomLabel)}</small>${esc(T.zoom(z))}`; drawMap();
+        // after a pinch, the first tap goes back to the preset you were on; after that it steps through them
+        if (!UV) { c.ui.pl_zoom = HM.ZOOMS[(HM.ZOOMS.indexOf(zoom()) + 1) % HM.ZOOMS.length]; c.saveUi(); }
+        UV = null; zoomLabel(); drawMap();
       }
     });
     wireMap($('#cvMap'));
@@ -398,35 +454,69 @@ export function registerCourse(c, P) {
     return changed;
   }
 
-  // Tap the map to move the aim there; press near the handle (or the aim ring) and drag to fine-tune.
+  // Tap the map to move the aim there; press near the handle (or the aim ring) and drag to fine-tune. A drag that starts
+  // anywhere else pans the map; two fingers pinch-zoom it. While the fingers move only the picture is stretched (cheap);
+  // when they lift, the map is drawn again for the new view so text and lines are their proper size.
   function wireMap(el) {
     if (!el) return;
     const toXY = (ev) => { const s = el.querySelector('svg'), r = (s || el).getBoundingClientRect(); return [(ev.clientX - r.left) * (L?.fr.w || r.width) / r.width, (ev.clientY - r.top) * (L?.fr.h || r.height) / r.height]; };
     const set = (x, y) => { L.aim = L.fr.fromXY(x, y); L.custom = true; L.adjusted = false; L.club = null; };
     const move = (p) => { st.last = p; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; if (!st || !L) return; set(st.last[0], st.last[1] - st.off); aimMoved(); }); };
+    const pts = new Map();                                     // fingers on the map: pointerId -> [x, y] in map units
+    let gs = null;                                             // a pan or pinch in progress: { s, vx, vy, ... }
+    const clampS = (s) => Math.max(PINCH_MIN_K / L.fr.k, Math.min(PINCH_MAX_K / L.fr.k, s));
+    const view = () => { const svg = el.querySelector('svg'); if (!svg || !gs || !L) return; svg.setAttribute('viewBox', `${gs.vx.toFixed(1)} ${gs.vy.toFixed(1)} ${(L.fr.w / gs.s).toFixed(1)} ${(L.fr.h / gs.s).toFixed(1)}`); };
+    let vraf = 0; const paint = () => { if (!vraf) vraf = requestAnimationFrame(() => { vraf = 0; view(); }); };
+    // (re)start the gesture from the fingers now down, keeping the current stretch: the map point under them stays put
+    const regrip = () => {
+      const g = gs || { s: 1, vx: 0, vy: 0 }, ps = [...pts.values()];
+      const m = ps.length > 1 ? [(ps[0][0] + ps[1][0]) / 2, (ps[0][1] + ps[1][1]) / 2] : ps[0];
+      gs = { s: g.s, vx: g.vx, vy: g.vy, s0: g.s, d0: ps.length > 1 ? Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]) || 1 : null, q: [m[0] / g.s + g.vx, m[1] / g.s + g.vy], two: ps.length > 1 || g.two };
+    };
+    const startGesture = () => { clearTimeout(st?.hold); dragging = true; P.setDragging(true); regrip(); };
+    const finishGesture = () => {
+      const g = gs; gs = null; dragging = false; P.setDragging(false);
+      if (!L || !g || (g.s === 1 && Math.abs(g.vx) < 0.5 && Math.abs(g.vy) < 0.5)) { const svg = el.querySelector('svg'); if (svg && L) svg.setAttribute('viewBox', `0 0 ${L.fr.w} ${L.fr.h}`); return; }
+      UV = { hole: L.hole, usingTee: L.usingTee, fr: L.fr.scaled(g.s, g.vx, g.vy) };
+      if (g.two) FEEL.play('step');
+      zoomLabel(); drawMap();
+    };
     el.addEventListener('pointerdown', (ev) => {
       if (!L || ev.target.closest('.hmcredit')) return;
-      const p = toXY(ev), [ax, ay] = L.fr.xy(...L.aim), off = L.padOff ?? HM.padOffset(ay, viewBottom());
+      const p = toXY(ev); pts.set(ev.pointerId, p);
+      try { el.setPointerCapture(ev.pointerId); } catch { /* old Safari, or a synthetic pointer */ }
+      ev.preventDefault();
+      if (pts.size > 1) {                                       // a second finger: pinch (unless the first one is moving the aim)
+        if (st?.near && st.moved) return;
+        if (st) { clearTimeout(st.hold); if (st.near) { L.padOff = null; } st = null; }
+        startGesture(); return;
+      }
+      const [ax, ay] = L.fr.xy(...L.aim), off = L.padOff ?? HM.padOffset(ay, viewBottom());
       const near = Math.hypot(p[0] - ax, p[1] - (ay + off)) < HANDLE_GRAB_PX || Math.hypot(p[0] - ax, p[1] - ay) < HANDLE_GRAB_PX * 0.7;
       st = { start: p, last: p, near, moved: false, off: near ? (Math.hypot(p[0] - ax, p[1] - ay) < HANDLE_GRAB_PX * 0.7 ? p[1] - ay : off) : 0, id: ev.pointerId };
       if (near) { dragging = true; P.setDragging(true); L.padOff = off; }
       // tap and hold (not on the aim): a marker with the distance from you and on to the green, until the next tap
       else if (!TR.marking()) { const s0 = st; s0.hold = setTimeout(() => { if (st === s0 && !s0.moved && L) { s0.held = true; SV.setMeasure(L.fr.fromXY(s0.start[0], s0.start[1])); $('#hmDyn').innerHTML = dynHtml(); } }, HOLD_MS); }
-      try { el.setPointerCapture(ev.pointerId); } catch { /* old Safari */ }
-      ev.preventDefault();
     });
     el.addEventListener('pointermove', (ev) => {
-      if (!st || !L) return; const p = toXY(ev);
+      if (!L || !pts.has(ev.pointerId)) return; const p = toXY(ev); pts.set(ev.pointerId, p);
+      if (gs) {
+        const ps = [...pts.values()];
+        if (ps.length > 1 && gs.d0) gs.s = clampS(gs.s0 * Math.hypot(ps[0][0] - ps[1][0], ps[0][1] - ps[1][1]) / gs.d0);
+        const m = ps.length > 1 ? [(ps[0][0] + ps[1][0]) / 2, (ps[0][1] + ps[1][1]) / 2] : ps[0];
+        gs.vx = gs.q[0] - m[0] / gs.s; gs.vy = gs.q[1] - m[1] / gs.s; paint(); return;
+      }
+      if (!st) return;
       if (!st.moved && Math.hypot(p[0] - st.start[0], p[1] - st.start[1]) > TAP_SLOP_PX) {
         st.moved = true; clearTimeout(st.hold);
-        if (!st.near) {                                   // a drag that starts away from the handle: the aim sits just above the thumb, as before
-          st.off = ev.pointerType === 'mouse' ? 0 : (p[1] - HM.PAD >= (L.fr.view?.t || 0) + 14 ? HM.PAD : -HM.PAD);
-          L.padOff = st.off; dragging = true; P.setDragging(true);
-        }
+        if (!st.near) { if (st.held) return; pts.set(ev.pointerId, st.start); startGesture(); pts.set(ev.pointerId, p); st = null; gs.vx = gs.q[0] - p[0] / gs.s; gs.vy = gs.q[1] - p[1] / gs.s; paint(); return; }
       }
       if (dragging) move(p);
     });
     const end = async (ev) => {
+      if (!pts.has(ev.pointerId)) return;
+      pts.delete(ev.pointerId);
+      if (gs) { if (pts.size) regrip(); else finishGesture(); return; }
       if (!st || !L) { st = null; return; }
       const s = st; st = null; clearTimeout(s.hold);
       if (s.held) return;                                        // the hold placed a measure marker; nothing else
@@ -443,7 +533,7 @@ export function registerCourse(c, P) {
       dragging = false; P.setDragging(false); L.padOff = null; aimMoved(); await saveAim();
     };
     el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
-    // iOS: no double-tap zoom, pinch or page scroll on the map (pointer events still arrive)
+    // iOS: no double-tap zoom, page pinch or page scroll on the map (pointer events still arrive)
     for (const t of ['touchstart', 'touchmove', 'touchend']) el.addEventListener(t, (ev) => { if (ev.cancelable) ev.preventDefault(); }, { passive: false });
     for (const t of ['gesturestart', 'gesturechange', 'dblclick']) el.addEventListener(t, (ev) => ev.preventDefault());
   }
@@ -470,10 +560,11 @@ export function registerCourse(c, P) {
     peek: () => peek(), refreshSheet: () => refreshSheet(), dyn: () => { if (L && $('#hmDyn')) $('#hmDyn').innerHTML = dynHtml(); },
     remeasure: () => { if (measure()) drawMap(); },
     // after a shot is closed, a penalty or an undo: aim and club start again from where the ball is now
-    reset: () => { const d = P.D(); if (d?.aim) delete d.aim[d.hole]; c.ui.pl_club = null; c.saveUi(); L = null; drawMap(); peek(); },
+    reset: () => { const d = P.D(); if (d?.aim) delete d.aim[d.hole]; c.ui.pl_club = null; c.saveUi(); L = null; UV = null; zoomLabel(); drawMap(); peek(); },
+    roundLine: (d) => P.challengeHtml(d) + P.paceHtml(d),
     onGreen: () => !!(L && !L.usingTee && L.greenPts && P.fix() && P.fix().acc <= SH.POOR_GPS_M && F.pointInPolygon(L.pos[0], L.pos[1], L.greenPts)),
     nearGreen: (m) => !!(L && L.green && A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) <= m),
   });
 
-  return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, V, insets, wake: !!wake }), _sv: () => SV };
+  return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, V, insets, wake: !!wake, UV, offer, markable }), _sv: () => SV };
 }

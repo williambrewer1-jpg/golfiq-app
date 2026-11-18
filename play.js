@@ -225,7 +225,7 @@ export function registerPlay(c) {
   function liveCard(d) {
     const U = c.UNIT, hole = d.hole, known = d.course_id ? F.courseHoles(c.DS, d.course_id) : {}, feats = featsFor(d);
     const mode = segVal('pl_pos', 'gps'), gpsPos = fix ? [fix.lat, fix.lon] : null;
-    const ht = HM.holeTargets(known[hole], feats, hole, gpsPos), par = d.holes[hole].par;
+    const ht = HM.withMarks(HM.holeTargets(known[hole], feats, hole, gpsPos), J().course_marks?.[HM.markKey(d)]?.[hole]), par = d.holes[hole].par;
     // more than ~1.5 km from the hole (e.g. planning at home): show it from the tee instead of a line across town
     const farAway = gpsPos && (ht.green || ht.tee) && A.haversine(gpsPos[0], gpsPos[1], ...(ht.green || ht.tee)) > 1500;
     const usingTee = mode === 'tee' || !fix || farAway;
@@ -378,11 +378,21 @@ export function registerPlay(c) {
   }
   const toParText = (v) => (v === 0 ? 'E' : `${v > 0 ? '+' : ''}${v}`);
   // the steppers for the current hole (classic page, and the Score tab of the Course view)
-  function scoreEntryHtml(d) {
+  // the on-course challenge chip, as it stands after the holes played so far
+  function challengeHtml(d) {
+    const cs = d.challenge ? CH.status(d.challenge, holeOrder(d).map((n) => d.holes[n]), d.n) : null;
+    return cs ? `<div class="chal ${cs.state}" id="plChal"><b>${esc(cs.title)}</b><span>${cs.state === 'failed' ? 'missed' : cs.state === 'achieved' ? 'done ✓' : esc(cs.text)}</span></div>` : '';
+  }
+  // "On pace for 85, predicted 86": only when a prediction was saved when this round started (payoff.js)
+  function paceHtml(d) {
+    const pred = (J().predictions || []).find((p) => p.round_id === `garmin-${d.id}`);
+    const p = PO.pace(pred, holeOrder(d).map((n) => d.holes[n])); if (!p) return '';
+    return `<p class="pl-pace" id="plPace">${esc(FEEL.COPY.course.pace(p.pace, p.predicted))}</p>`;
+  }
+  function scoreEntryHtml(d, opt = {}) {
     const h = d.holes[d.hole], order = holeOrder(d), idx = order.indexOf(d.hole);
     const step = (key, label, val) => `<div class="step"><span>${label}</span><div><button type="button" data-step="${key}" data-d="-1" aria-label="less">−</button><b>${val ?? '–'}</b><button type="button" data-step="${key}" data-d="1" aria-label="more">+</button></div></div>`;
-    const cs = d.challenge ? CH.status(d.challenge, order.map((n) => d.holes[n]), d.n) : null;
-    const chip = cs ? `<div class="chal ${cs.state}" id="plChal"><b>${esc(cs.title)}</b><span>${cs.state === 'failed' ? 'missed' : cs.state === 'achieved' ? 'done ✓' : esc(cs.text)}</span></div>` : '';
+    const chip = opt.chip === false ? '' : challengeHtml(d);
     return `${chip}<div class="seg" id="plPar">${[3, 4, 5].map((p) => `<button data-par="${p}" class="${h.par === p ? 'on' : ''}">Par ${p}</button>`).join('')}</div>
       <div class="steps2">${step('strokes', 'Score', h.strokes || null)}${step('putts', 'Putts', h.putts)}${step('penalties', 'Penalties', h.penalties)}</div>
       ${h.par >= 4 ? `<label class="f">Fairway</label><div class="seg" id="plFw">${[['LEFT', 'Missed left'], ['HIT', 'Hit'], ['RIGHT', 'Missed right']].map(([v, l]) => `<button data-fw="${v}" class="${h.fairway === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
@@ -513,7 +523,7 @@ export function registerPlay(c) {
   CV = registerCourse(c, {
     fix: () => fix, gpsErr: () => gpsErr, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
     strategyHtml, stratPick, labelOf, reach: reachM, wedgeRows, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
-    scoreEntryHtml, scoreSummaryHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
+    scoreEntryHtml, scoreSummaryHtml, challengeHtml, paceHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
   });
   return { pages: { play: ['Play', 'flag'] }, render: { play: pagePlay }, wire: { play: wirePlay }, noData: ['play'], standingsHtml: FR.standingsHtml, _setFix: (f) => { fix = f; }, course: CV };
 }

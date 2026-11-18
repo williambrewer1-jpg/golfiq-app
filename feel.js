@@ -55,6 +55,8 @@ export const EVENTS = {
   tier: [...FANFARE, tone(0.5, 0.8, E7, 0.22), tone(0.5, 0.8, E7 * 1.006, 0.22)],                              // the fanfare plus a shimmering high note
   pb: up(FANFARE, 2),                                                                                        // the fanfare one step higher
   unlock: [tone(0, 0.26, hz(-14), 0.45, 'sine', hz(7)), tone(0.2, 0.18, G6, 0.55)],                           // low-to-high sweep under a chime
+  shot: [noise(0, 0.05, 1100, 0.5, 0.9), tone(0.03, 0.12, G5, 0.4)],                                         // Course view: a shot marked – a soft knock and one light note
+  hole: [noise(0, 0.06, 320, 0.4, 0.7), tone(0, 0.08, 110, 0.45, 'sine', 80), tone(0.09, 0.12, C5, 0.6), tone(0.17, 0.18, G5, 0.6)],   // Course view: hole finished – into the cup, then a fifth up
 };
 export const EVENT_NAMES = Object.keys(EVENTS);
 export const lengthOf = (name) => Math.max(0, ...(EVENTS[name] || []).map((v) => v.t + v.d));
@@ -436,7 +438,12 @@ export const COPY = {
     front: 'Front', middle: 'Middle', back: 'Back', toGreen: 'To green',
     gps: { good: (a) => `GPS ±${a}`, weak: (a) => `GPS weak ±${a}`, none: 'No GPS', tip: (a) => `GPS accurate to about ${a}.` },
     missing: { gps: 'Waiting for GPS', declined: 'Location is off', map: 'no course map', terrain: 'no slope or weather yet', tee: 'showing the view from the tee', far: (km) => `${km} km away – showing the tee`, green: 'This green is not mapped yet' },
-    recentre: 'Recentre', zoom: (z) => ({ shot: 'Shot', hole: 'Hole', green: 'Green' })[z] || z, zoomLabel: 'Zoom',
+    recentre: 'Recentre', zoom: (z) => ({ shot: 'Shot', hole: 'Hole', green: 'Green', free: 'Pinched' })[z] || z, zoomLabel: 'Zoom',
+    pace: (p, pr) => `On pace for ${p}, predicted ${pr}`,
+    nextAsk: (n) => `Go to hole ${n}?`, nextNo: 'Not now',
+    markGreen: 'Mark this green', markTee: 'Mark this tee', markWait: (a) => `waiting for GPS within ${a}`, markNote: 'Stand in the middle of it, then tap.',
+    markedGreen: (n) => `Green ${n} marked. BreakingPar uses it here from now on.`, markedTee: (n) => `Tee ${n} marked. BreakingPar uses it here from now on.`,
+    marks: (what) => `You marked this ${what} yourself.`, forgetMarks: 'Forget my marks for this hole', forgot: 'Marks for this hole removed.',
     tabs: { club: 'Club', strategy: 'Strategy', score: 'Score', card: 'Card' }, backToMap: 'Back to the map', sheet: 'Open or close the panel',
     thruShort: (tp, n) => `${tp} thru ${n}`, noHoles: 'totals', toCard: 'Scorecard: totals and finish',
     score: 'Score', scoreHole: (s, tp) => `Score ${s} (${tp})`, toAim: (d) => `${d} to aim`, plays: (d) => `plays ${d}`, playsFlat: 'plays as it measures', trouble: (p) => `${p}% trouble`, noTrouble: 'trouble: no map',
@@ -454,6 +461,6 @@ export const COPY = {
     sound: 'Sound', soundNote: 'Short sounds as you play in BreakingPar. They follow your phone\'s silent switch.',
     motion: 'Motion', motionNote: 'Small animations and confetti. Off, or with Reduce Motion on your phone, they become a quick fade.',
     try: 'Try the sounds', tryOff: 'Sound is off. Switch it on to hear them.', tryNone: 'No sound available on this device.',
-    names: { tap: 'Tap', good: 'Good result', miss: 'Miss', step: 'Next ball', streak: 'Streak', target: 'Target passed', finish: 'Game finished', win: 'Target met', tier: 'New tier', pb: 'Personal best', unlock: 'Potential credit' },
+    names: { tap: 'Tap', good: 'Good result', miss: 'Miss', step: 'Next ball', streak: 'Streak', target: 'Target passed', finish: 'Game finished', win: 'Target met', tier: 'New tier', pb: 'Personal best', unlock: 'Potential credit', shot: 'Shot marked', hole: 'Hole finished' },
   },
 };

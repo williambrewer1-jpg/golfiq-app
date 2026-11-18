@@ -25,15 +25,21 @@ export function makeFrame(pos, up, include, w = W, h = H, opt = {}) {
   const I = { t: 0, b: 0, l: 0, r: 0, ...(opt.inset || {}) }, vw = Math.max(40, w - I.l - I.r), vh = Math.max(40, h - I.t - I.b);
   const k = Math.min(vw / (c1 - c0), vh / (a1 - a0), opt.maxK ?? Infinity);
   const cm = (c0 + c1) / 2, am = (a0 + a1) / 2, cx = I.l + vw / 2, cy = I.t + vh / 2;   // centre the content in the clear area; the spare room goes to the sides
+  return buildFrame({ pos, b, kx, ky, toAC, fromAC, k, cm, am, cx, cy, w, h, view: { l: I.l, t: I.t, w: vw, h: vh } });
+}
+function buildFrame(p) {
+  const { pos, b, kx, ky, toAC, fromAC, k, cm, am, cx, cy } = p, cb = Math.cos(b), sb = Math.sin(b);
   const sx = (c) => (c - cm) * k + cx, sy = (a) => cy - (a - am) * k;
   return {
-    k, w, h, bearing: b / RAD, toAC, fromAC, view: { l: I.l, t: I.t, w: vw, h: vh },
+    k, w: p.w, h: p.h, bearing: b / RAD, toAC, fromAC, view: p.view,
     xy: (la, lo) => { const [c, a] = toAC(la, lo); return [sx(c), sy(a)]; },
     acXY: (c, a) => [sx(c), sy(a)],
     fromXY: (x, y) => fromAC((x - cx) / k + cm, am - (y - cy) / k),
     // affine matrix taking (east m, -north m) around pos to screen pixels – used to place the photo tiles
     matrix: [k * cb, -k * sb, k * sb, k * cb, cx - k * cm, cy + k * am],
     toEN: (la, lo) => [(lo - pos[1]) * kx, (la - pos[0]) * ky],
+    // the same map seen through a pinch or a pan: the part from (vx, vy) on, s times larger (same rotation)
+    scaled: (s, vx, vy) => buildFrame({ ...p, k: k * s, cx: (cx - vx) * s, cy: (cy - vy) * s }),
   };
 }
 // Is a point inside the clear part of the frame (with a margin in pixels)?
@@ -213,6 +219,14 @@ export function holeTargets(known, feats, holeNo, pos) {
   if (!green && line) { green = snapToGreen(line.pts[line.pts.length - 1], feats); src = 'osm-hole'; }
   const tee = known?.tee || (line ? line.pts[0] : null);
   return { green, tee, line: line?.pts || null, par: line?.par || null, src };
+}
+// A green or tee the golfer marked by standing on it, for a course with no map data (plan 4.5). Stored per course and hole
+// in J().course_marks; it only fills what nothing better knows – a learned position or a downloaded outline always wins.
+export const markKey = (d) => d?.course_id || (d?.course_name ? `name:${String(d.course_name).trim().toLowerCase()}` : null);
+export function withMarks(ht, mark) {
+  if (!mark) return { ...ht, marked: { green: false, tee: false } };
+  const green = !ht.green && mark.green ? mark.green : ht.green, tee = !ht.tee && mark.tee ? mark.tee : ht.tee;
+  return { ...ht, green, tee, src: green !== ht.green ? 'mark' : ht.src, marked: { green: green !== ht.green, tee: tee !== ht.tee } };
 }
 function snapToGreen(p, feats) {
   const g = (feats || []).find((f) => f.kind === 'green' && F.pointInPolygon(p[0], p[1], f.pts));
