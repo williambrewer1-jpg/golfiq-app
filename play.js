@@ -300,7 +300,7 @@ export function registerPlay(c) {
     if (!res.length) return `<p class="muted">Needs clubs with at least ${A.T.min_shots_dispersion} tracked shots with direction.</p>`;
     const U = c.UNIT;
     return `<p>Expected strokes to finish the hole if you hit each club from here, aimed along the hole (or at the green when it gets there), using your own shot patterns, the mapped outline and ${c.E.personal ? 'your' : 'the tour'} strokes-gained baseline.</p>
-      <div class="recs">${res.slice(0, 6).map((r, i) => `<button type="button" class="recrow" data-usestrat="${i}"><span class="rc">${i ? '' : '★ '}${esc(r.club)}${r.goes_for_green ? ' <em>at green</em>' : ''}</span><span class="rp">${fmt(r.expected, 2)} <small>strokes</small></span><span class="rd small muted">${i ? `+${fmt(r.vs_best, 2)} vs best` : 'best option'}</span>${r.out ? `<span class="pill ${r.out.trouble >= 25 ? 'bad' : r.out.trouble >= 10 ? 'mid' : 'good'}">trouble ${fmt(r.out.trouble, 0)}%</span>` : ''}</button>`).join('')}</div>
+      <div class="recs">${res.slice(0, 6).map((r, i) => `<button type="button" class="recrow" data-usestrat="${i}"><span class="rc">${i ? '' : '★ '}${esc(r.club)}${r.goes_for_green ? ' <em>at green</em>' : ''}</span><span class="rp">${fmt(r.expected, 2)} <small>strokes</small></span><span class="rd small muted">${i ? `+${fmt(r.vs_best, 2)} vs best` : 'best option'}</span>${r.out ? `<span class="pill ${r.out.trouble >= 25 ? 'bad' : r.out.trouble >= 10 ? 'mid' : 'good'}">trouble ${fmt(r.out.trouble, 0)}%</span>` : ''}<span class="use">Use</span></button>`).join('')}</div>
       <p class="small muted" style="margin:6px 0 0">Tap a club to aim with it.</p>
       <p class="muted">Differences under ~0.05 strokes are within the noise. Based on ${res[0].n} ${esc(res[0].club)} shots. Water counts a penalty and a drop; trees play as a recovery shot.</p>`;
   }
@@ -309,6 +309,7 @@ export function registerPlay(c) {
     const near = L.feats.filter((f) => f.kind !== 'hole'), pl = conditions(L, L.green);
     return ST.predict({ ds: c.DS, patternOf, pos: L.pos, green: L.green, line: L.line, feats: near, E: c.E, clubs: L.clubs, factor: pl.factor })[i] || null;
   }
+  const reachM = () => Math.max(0, ...playClubs().map((x) => { const p = patternOf(x.club_id); return p.p90_m ?? p.median_m ?? 0; }).filter(A.isNum)) || null;
   const inFrame = (fr, pts) => pts.some(([la, lo]) => { const [x, y] = fr.xy(la, lo); return x > 0 && x < fr.w && y > 0 && y < fr.h; });
   function osmHint(d, pos) {
     const have = osmEntry(d);
@@ -511,7 +512,7 @@ export function registerPlay(c) {
   }
   CV = registerCourse(c, {
     fix: () => fix, gpsErr: () => gpsErr, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
-    strategyHtml, stratPick, labelOf, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
+    strategyHtml, stratPick, labelOf, reach: reachM, wedgeRows, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
     scoreEntryHtml, scoreSummaryHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
   });
   return { pages: { play: ['Play', 'flag'] }, render: { play: pagePlay }, wire: { play: wirePlay }, noData: ['play'], standingsHtml: FR.standingsHtml, _setFix: (f) => { fix = f; }, course: CV };

@@ -7,6 +7,7 @@ import * as ST from './strategy.js';
 import * as FEEL from './feel.js';
 import * as SH from './shots.js';
 import { registerTrack } from './track.js';
+import { registerStrategy, HOLD_MS } from './strategyview.js';
 
 // ---- tunable numbers (plan section 10 and 4.x)
 export const CV_AUTO_OPEN = true;               // opens by itself whenever a round is in progress
@@ -82,8 +83,8 @@ export function registerCourse(c, P) {
   function dynHtml() {
     const [, ay] = L.fr.xy(...L.aim);
     const quiet = TR.quiet();
-    return TR.shotsSvg(L.fr, L.d) + HM.dynamicSvg(L.fr, { pos: L.pos, aim: L.aim, green: L.green, pat: quiet ? null : V || M.pat, cv: c.cv, unit: U(), clubName: quiet ? null : M.club?.name, big: true,
-      pad: L.padOff ?? HM.padOffset(ay, viewBottom()), live: { rings: M ? A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) + 40 : 0, acc: L.usingTee ? null : P.fix()?.acc } });
+    return SV.labelsSvg(L.fr) + TR.shotsSvg(L.fr, L.d) + HM.dynamicSvg(L.fr, { pos: L.pos, aim: L.aim, green: L.green, pat: quiet ? null : V || M.pat, cv: c.cv, unit: U(), clubName: quiet ? null : M.club?.name, big: true,
+      pad: L.padOff ?? HM.padOffset(ay, viewBottom()), live: { rings: M ? A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) + 40 : 0, acc: L.usingTee ? null : P.fix()?.acc } }) + SV.measureSvg(L.fr);
   }
 
   // ------------------------------------------------------------ the shot pattern as drawn in the Course view (plan section 5)
@@ -180,6 +181,9 @@ export function registerCourse(c, P) {
     $('#cvSub').innerHTML = `${holeLen ? `<span>${yd(holeLen)} ${U()}</span>` : ''}<span>${esc(T.thru(P.toParText(t.toPar), t.played.length))}</span>
       <button type="button" class="cv-gps ${gq}" data-cvgps aria-label="GPS accuracy"><i></i>${esc(gq === 'none' ? T.gps.none : gq === 'good' ? T.gps.good(acc) : T.gps.weak(acc))}</button>`;
     const msg = missingLine(w); $('#cvMsg').textContent = msg; $('#cvMsg').hidden = !msg;
+    const tip = SV.chip(), tipEl = $('#cvTip'), had = !!tipEl.firstChild;
+    if (tipEl.innerHTML !== tip) tipEl.innerHTML = tip;
+    if (had !== !!tip && L && measure()) { setTimeout(drawMap, 0); }
     const y = yards(), yb = $('#cvYards');
     yb.hidden = !L;
     if (L) yb.innerHTML = `${y.front !== null ? `<div class="f"><span>${T.front}</span><b>${yd(y.front)}</b></div>` : ''}<div class="m"><span>${y.front !== null ? T.middle : T.toGreen}</span><b>${yd(y.mid)}</b></div>${y.back !== null ? `<div class="b"><span>${T.back}</span><b>${yd(y.back)}</b></div>` : ''}`;
@@ -214,7 +218,7 @@ export function registerCourse(c, P) {
     const tb = `<div class="seg cv-tabs" role="tablist">${TABS.map((k) => `<button type="button" role="tab" data-cvtab="${k}" class="${tab() === k ? 'on' : ''}">${esc(T.tabs[k])}</button>`).join('')}</div>`;
     if (tab() === 'card') return tb + `<div class="cv-card">${P.scoreSummaryHtml(d)}</div>${P.groupHtml(d)}${back}`;
     if (tab() === 'score') return tb + TR.scoreTop(d) + `<div class="cv-card cv-score">${P.scoreEntryHtml(d)}</div>` + TR.scoreBottom(d) + `<button type="button" class="btn sec cv-tocard" data-cvtab="card">${esc(T.toCard)}</button>${back}`;
-    if (tab() === 'strategy') return tb + `<div class="cv-card small" id="cvStrat">${esc(T.working)}</div>${back}`;
+    if (tab() === 'strategy') return tb + SV.tab() + back;
     const seg = (key, opts, val) => `<div class="seg">${opts.map(([v, l]) => `<button type="button" data-${key}="${v}" class="${val === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
     const hasMap = L?.feats.some((f) => f.kind !== 'hole');
     const sure = sureText(), own = kindOf(M?.pt) === 'own';
@@ -305,6 +309,7 @@ export function registerCourse(c, P) {
           <button type="button" class="cv-ibtn" data-cvstep="1" aria-label="${esc(T.next)}">›</button></div>
         <div class="cv-sub" id="cvSub"></div>
         <p class="cv-msg" id="cvMsg" hidden></p>
+        <div id="cvTip"></div>
       </div>
       <div class="cv-yards" id="cvYards" hidden></div>
       <div class="cv-sheet" id="cvSheet">
@@ -329,6 +334,7 @@ export function registerCourse(c, P) {
     sh.addEventListener('click', async (e) => {
       const b = e.target.closest('button,a'); if (!b) return;
       if (b.dataset.tr) { if (!b.disabled) TR.click(b); return; }
+      if (b.dataset.sgclub) { SV.click(b); return; }
       const dh = P.D(), hh = dh?.holes[dh.hole];
       if (TR.on(dh) && hh?.shots?.length && (b.dataset.step || b.dataset.fw)) SH.correct(hh, b.dataset.step || 'fairway');
       if (b.dataset.cvtab) { open(b.dataset.cvtab); return; }
@@ -364,6 +370,7 @@ export function registerCourse(c, P) {
     const top = $('#cvTop'); let sx = null;
     top.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
+      if (b.hasAttribute('data-cvtip') || b.dataset.cvtipx) { SV.click(b); return; }
       if (b.hasAttribute('data-cvclose')) { c.ui.pl_cv_off = d.id; c.saveUi(); release(); c.rerender(); scrollTo(0, 0); return; }
       if (b.dataset.cvstep) { stepHole(Number(b.dataset.cvstep)); return; }
       if (b.hasAttribute('data-cvgps')) { const f = P.fix(); toast(f ? T.gps.tip(`${yd(f.acc)} ${U()}`) : (P.gpsErr() || T.missing.gps)); }
@@ -385,6 +392,7 @@ export function registerCourse(c, P) {
     const r = $('#cvRoot').getBoundingClientRect(), t = Math.round(top.getBoundingClientRect().bottom - r.top) + 8;
     const b = Math.round(r.bottom - ($('#cvPeek').getBoundingClientRect().top - 22));
     const yb = $('#cvYards'), l = yb && !yb.hidden ? Math.round(yb.getBoundingClientRect().right - r.left) + 4 : 0;   // keep the hole clear of the yardages
+    if ($('#cvYards')) $('#cvYards').style.top = `${t - 4}px`;
     const changed = Math.abs(t - insets.t) > 8 || Math.abs(b - insets.b) > 8 || Math.abs(l - insets.l) > 8;
     if (changed) insets = { t, b, l };
     return changed;
@@ -402,13 +410,15 @@ export function registerCourse(c, P) {
       const near = Math.hypot(p[0] - ax, p[1] - (ay + off)) < HANDLE_GRAB_PX || Math.hypot(p[0] - ax, p[1] - ay) < HANDLE_GRAB_PX * 0.7;
       st = { start: p, last: p, near, moved: false, off: near ? (Math.hypot(p[0] - ax, p[1] - ay) < HANDLE_GRAB_PX * 0.7 ? p[1] - ay : off) : 0, id: ev.pointerId };
       if (near) { dragging = true; P.setDragging(true); L.padOff = off; }
+      // tap and hold (not on the aim): a marker with the distance from you and on to the green, until the next tap
+      else if (!TR.marking()) { const s0 = st; s0.hold = setTimeout(() => { if (st === s0 && !s0.moved && L) { s0.held = true; SV.setMeasure(L.fr.fromXY(s0.start[0], s0.start[1])); $('#hmDyn').innerHTML = dynHtml(); } }, HOLD_MS); }
       try { el.setPointerCapture(ev.pointerId); } catch { /* old Safari */ }
       ev.preventDefault();
     });
     el.addEventListener('pointermove', (ev) => {
       if (!st || !L) return; const p = toXY(ev);
       if (!st.moved && Math.hypot(p[0] - st.start[0], p[1] - st.start[1]) > TAP_SLOP_PX) {
-        st.moved = true;
+        st.moved = true; clearTimeout(st.hold);
         if (!st.near) {                                   // a drag that starts away from the handle: the aim sits just above the thumb, as before
           st.off = ev.pointerType === 'mouse' ? 0 : (p[1] - HM.PAD >= (L.fr.view?.t || 0) + 14 ? HM.PAD : -HM.PAD);
           L.padOff = st.off; dragging = true; P.setDragging(true);
@@ -418,11 +428,13 @@ export function registerCourse(c, P) {
     });
     const end = async (ev) => {
       if (!st || !L) { st = null; return; }
-      const s = st; st = null;
+      const s = st; st = null; clearTimeout(s.hold);
+      if (s.held) return;                                        // the hold placed a measure marker; nothing else
       if (!s.moved && ev.type === 'pointerup') {                // a tap: on the pattern shows or hides your shots; elsewhere moves the aim
         dragging = false; P.setDragging(false); L.padOff = null;
         const at = L.fr.fromXY(s.start[0], s.start[1]);
         if (TR.marking()) { TR.mapTap(at); return; }
+        if (SV.measuring()) { SV.setMeasure(null); $('#hmDyn').innerHTML = dynHtml(); return; }   // the next tap clears the marker
         if (V?.kind === 'own' && V.inner && F.pointInPolygon(at[0], at[1], V.inner)) { toggleShots(); if ($('[data-cvshots]')) refreshSheet(); return; }
         if (s.near) { aimMoved(); return; }
         set(s.start[0], s.start[1]); FEEL.play('tap'); aimMoved(); await saveAim(); return;
@@ -439,6 +451,20 @@ export function registerCourse(c, P) {
 
   // ------------------------------------------------------------ shot tracking (track.js)
   const nextHole = () => { const d = P.D(), o = P.holeOrder(d), i = o.indexOf(d.hole); if (i < o.length - 1) goHole(o[i + 1]); else open('card'); };
+  const SV = registerStrategy(c, {
+    D: P.D, L: () => L, M: () => M, V: () => V, yards, reach: P.reach, wedgeRows: P.wedgeRows, save: P.saveDraft, open, compass: P.compass,
+    si: () => { const d = P.D(); return d.holes[d.hole].si || where(d).known[d.hole]?.si || null; },
+    quiet: () => TR.quiet(), chrome: () => chrome(),
+    // what a hazard label must not cover: the aim with its club label, and the two distance tags (as holemap draws them)
+    obstacles: (fr) => {
+      if (!L) return [];
+      const [px, py] = fr.xy(...L.pos), [ax, ay] = fr.xy(...L.aim), [gx, gy] = fr.xy(...L.green), TS = 28, tw = TS / 1.5 * 4, th = TS * 1.45;
+      const off = L.padOff ?? HM.padOffset(ay, viewBottom());
+      return [{ x: ax - 75, y: ay - 40, w: 150, h: 54 }, { x: ax - 30, y: ay + off - 30, w: 60, h: 60 }, { x: px - 16, y: py - 16, w: 32, h: 32 }, { x: (px + ax) / 2 + TS * 1.45 - tw / 2, y: (py + ay) / 2 - th / 2, w: tw, h: th },
+        { x: (ax + gx) / 2 + TS * 1.45 - tw / 2, y: (ay + gy) / 2 - th / 2, w: tw, h: th }];
+    },
+    useClub: async (id) => { if (!L) return; L.club = id; await saveAim(); aimMoved(); open('club'); },
+  });
   const TR = registerTrack(c, {
     D: P.D, L: () => L, M: () => M, where, fix: P.fix, clubs: P.playClubs, label: P.labelOf, save: P.saveDraft, open, next: nextHole,
     peek: () => peek(), refreshSheet: () => refreshSheet(), dyn: () => { if (L && $('#hmDyn')) $('#hmDyn').innerHTML = dynHtml(); },
@@ -449,5 +475,5 @@ export function registerCourse(c, P) {
     nearGreen: (m) => !!(L && L.green && A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) <= m),
   });
 
-  return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, V, insets, wake: !!wake }) };
+  return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, V, insets, wake: !!wake }), _sv: () => SV };
 }

@@ -392,6 +392,22 @@ export const COPY = {
     better: (n, t) => `${n} of ${t} ${t === 1 ? 'skill' : 'skills'} better than last test`, rated: (n) => `${n} ${n === 1 ? 'skill' : 'skills'} rated`, potential: 'Potential now' },
   sound: { on: 'Sound on', off: 'Sound off' },
   // the Course view on Play (course.js)
+  // strategy on the Course view (strategyview.js, caddie.js)
+  caddie: {
+    dismiss: 'Hide this tip for this hole', open: 'Open Strategy',
+    forShot: 'For this shot', noTips: 'Nothing to add from your history yet. Tips appear once there is enough data behind them.',
+    best: 'Best option from here', history: 'This hole, your history', safer: 'Safer play', green: 'The green', conditions: 'Conditions', use: 'Use',
+    played: (n, avg, best) => `Played ${n} times · average ${avg} · best ${best}`,
+    fw: (h, n) => `Fairways ${h}/${n}`, gir: (h, n) => `Greens ${h}/${n}`, missSide: (s) => `Usual miss off the tee: ${s}`,
+    fewPlays: (n) => (n ? `Played ${n} time${n === 1 ? '' : 's'}: your history shows from 3 plays.` : 'You have not played this hole before.'),
+    saferText: (club, t, other, t2) => `${club}: ${t}% trouble, against ${t2}% with ${other}.`,
+    fmb: (f, m, b, u) => `Front ${f} · middle ${m} · back ${b} ${u}`, depth: (d, u) => `${d} ${u} deep`,
+    sides: { left: 'left', right: 'right', short: 'short', long: 'long' }, besideNone: 'No bunkers or water beside the green.',
+    kinds: { bunker: 'Bunker', water: 'Water' }, noGreenMap: 'The green is not mapped: front and back are not known.',
+    cond: { elev: (v) => `Slope: ${v}`, wind: (v, kmh, from) => `Wind ${kmh} km/h from ${from}: ${v}`, temp: (c, v) => `${c}°C: ${v}`, alt: (v) => `Altitude: ${v}` },
+    condNone: 'No slope or weather yet.', condFlat: 'Plays as it measures today.',
+    fromYou: 'from you', toGreen: 'to green', measureHint: 'Tap anywhere to clear.',
+  },
   // shot tracking in the Course view (track.js, shots.js)
   track: {
     switch: 'Track shots', switchNote: 'Tap "I\'ve hit" after each shot and "At my ball" when you reach it. BreakingPar works out your score, fairways and greens. Switch off to enter scores only.',
