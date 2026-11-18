@@ -22,7 +22,7 @@ const reset = () => { made.osc.length = 0; made.noise.length = 0; made.gains.len
 const tones = (name) => F.EVENTS[name].filter((v) => !v.noise), noises = (name) => F.EVENTS[name].filter((v) => v.noise);
 
 t('every event in the plan has a definition', () => {
-  assert.deepEqual([...F.EVENT_NAMES].sort(), ['finish', 'good', 'miss', 'pb', 'step', 'streak', 'tap', 'target', 'tier', 'unlock', 'win']);
+  assert.deepEqual([...F.EVENT_NAMES].sort(), ['finish', 'good', 'hole', 'miss', 'pb', 'shot', 'step', 'streak', 'tap', 'target', 'tier', 'unlock', 'win']);
   for (const name of F.EVENT_NAMES) assert.ok(F.EVENTS[name].length > 0, name);
 });
 t('every voice is well formed', () => {

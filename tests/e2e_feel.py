@@ -42,9 +42,9 @@ with sync_playwright() as p:
     pg.evaluate("() => { window.__feelLog = []; window.__feelHeard = []; }")
     pg.click('#feelTry'); pg.wait_for_function("() => window.__feelLog.length >= 1"); 
     check('the Try the sounds button wakes audio and plays the first sound at once', pg.evaluate("async () => (await import('./feel.js')).ready()") is True and pg.inner_text('#feelTryOut') == 'Tap')
-    pg.wait_for_function("() => window.__feelLog.length >= 11", timeout=30000)
+    pg.wait_for_function("() => window.__feelLog.length >= 13", timeout=40000)
     log = pg.evaluate("() => window.__feelLog"); names = pg.evaluate("async () => (await import('./feel.js')).EVENT_NAMES")
-    check('Try the sounds plays every event once, in order', log[:11] == names and len(names) == 11, log)
+    check('Try the sounds plays every event once, in order', log[:len(names)] == names and len(names) == 13, log)
     check('and every one was actually scheduled on the audio engine', pg.evaluate("() => window.__feelHeard") == names)
     exp = pg.evaluate("async () => { const F = await import('./feel.js'); const all = Object.values(F.EVENTS).flat(); return { tones: all.filter((v) => !v.noise).length, noise: all.filter((v) => v.noise).length }; }")
     got = pg.evaluate("() => ({ tones: window.__osc, noise: window.__noise })")

@@ -45,6 +45,17 @@ export function predictionResult(p, gross) {
   return { beat: diff < 0, by: diff < 0 ? -diff : 0, diff, level: diff === 0, within: gross >= p.lo && gross <= p.hi };
 }
 
+// On-course pace (course view plan 6.4): the prediction spread evenly over the holes against their par, so each hole played
+// moves it by how far that hole was from its share. pred: the saved prediction ({ predicted, n }); holes: every hole of the
+// round in playing order ({ par, strokes }). Null until a hole is scored, or when the prediction was made for another length.
+export function pace(pred, holes = []) {
+  if (!pred || !isNum(pred.predicted) || !holes.length || pred.n !== holes.length || holes.some((h) => !isNum(h?.par))) return null;
+  const share = (pred.predicted - A.sum(holes.map((h) => h.par))) / holes.length;
+  const played = holes.filter((h) => isNum(h.strokes) && h.strokes > 0); if (!played.length) return null;
+  const v = pred.predicted + A.sum(played.map((h) => h.strokes - h.par - share));
+  return { pace: Math.round(v), predicted: pred.predicted, played: played.length, diff: Math.round(v) - pred.predicted };
+}
+
 // Every round's prediction, oldest first: the one saved when it started, else one worked out from the rounds before that date (imported rounds).
 export function predictionHistory({ rounds = [], predictions = [] } = {}) {
   const saved = new Map((predictions || []).filter(Boolean).map((p) => [p.round_id, p])), all = [...rounds].filter((r) => r && r.date).sort(byTime), out = [];

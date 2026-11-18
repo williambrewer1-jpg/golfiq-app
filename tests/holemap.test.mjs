@@ -248,4 +248,29 @@ t('patternSvg: three clearly different styles; trouble hatched where it is; shot
   assert.ok(classic.includes('rgba(232,74,58') && !classic.includes('hm-zone50'), 'the classic card keeps its look');
 });
 
+// ---- phase 6: pinch and pan, marks
+t('a pinched frame shows the chosen part of the map larger, same rotation, and round-trips', () => {
+  const fr = HM.makeFrame(ll(0, 0), ll(0, 300), [ll(0, 300)], 390, 844, { inset: { t: 120, b: 200, l: 0, r: 0 } });
+  const s = 2.5, vx = 60, vy = 200, z = fr.scaled(s, vx, vy), p = ll(10, 140);
+  const [x0, y0] = fr.xy(...p), [x1, y1] = z.xy(...p);
+  near(x1, (x0 - vx) * s, 1e-6, 'x'); near(y1, (y0 - vy) * s, 1e-6, 'y');
+  near(z.k, fr.k * s, 1e-9, 'k'); near(z.bearing, fr.bearing, 1e-9, 'bearing');
+  const back = z.fromXY(x1, y1); near(back[0], p[0], 1e-9); near(back[1], p[1], 1e-9);
+  const z2 = z.scaled(0.5, -40, 10), [x2, y2] = z2.xy(...p); near(x2, (x1 + 40) * 0.5, 1e-6); near(y2, (y1 - 10) * 0.5, 1e-6);
+  assert.deepEqual(z.view, fr.view); assert.equal(z.w, 390);
+  // the tile matrix moves with it: (east, -north) metres around pos map to the same screen point as xy()
+  const [e, nn] = fr.toEN(...p), m = z.matrix; near(m[0] * e + m[2] * -nn + m[4], x1, 1e-6); near(m[1] * e + m[3] * -nn + m[5], y1, 1e-6);
+});
+t('marks fill only what is not known; learned positions and the outline win', () => {
+  assert.equal(HM.markKey({ course_id: 'osm-12', course_name: 'X' }), 'osm-12');
+  assert.equal(HM.markKey({ course_id: null, course_name: '  Testwood Links ' }), 'name:testwood links');
+  assert.equal(HM.markKey({}), null);
+  const mk = { green: ll(0, 300), tee: ll(0, 0) };
+  const none = HM.withMarks({ green: null, tee: null, line: null, src: null }, mk);
+  assert.deepEqual(none.green, mk.green); assert.deepEqual(none.tee, mk.tee); assert.equal(none.src, 'mark'); assert.deepEqual(none.marked, { green: true, tee: true });
+  const learned = HM.withMarks({ green: ll(5, 310), tee: null, src: 'garmin' }, mk);
+  assert.deepEqual(learned.green, ll(5, 310)); assert.equal(learned.src, 'garmin'); assert.deepEqual(learned.marked, { green: false, tee: true });
+  assert.deepEqual(HM.withMarks({ green: null, tee: null }, undefined).marked, { green: false, tee: false });
+});
+
 console.log(`${n} tests passed`);

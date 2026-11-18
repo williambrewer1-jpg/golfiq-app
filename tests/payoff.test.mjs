@@ -113,5 +113,27 @@ t('payoff: not enough history, or a part round, gives nothing and says why', () 
   const { round, hs } = dataset(4, 0); assert.equal(P.roundPayoff({ round, holes: hs, history: base(3), results: lagResults(4), games }).reason, 'history');
   assert.equal(P.roundPayoff({ round: { ...round, format: 'partial', holes_played: 5 }, holes: hs, history: base(10), games }).reason, 'holes');
 });
+// ---- on-course pace (course view plan 6.4)
+const holes9 = (strokes) => [4, 4, 3, 5, 4, 4, 3, 4, 5].map((par, i) => ({ par, strokes: strokes[i] ?? null }));   // par 36
+t('pace: predicted 45 over a par-36 nine is one stroke a hole; on that share the pace stays at the prediction', () => {
+  const pred = { predicted: 45, n: 9 };
+  assert.equal(P.pace(pred, holes9([])), null, 'nothing played yet');
+  assert.deepEqual(P.pace(pred, holes9([5])), { pace: 45, predicted: 45, played: 1, diff: 0 });
+  assert.equal(P.pace(pred, holes9([4, 4])).pace, 43, 'two pars: two better than the share');
+  assert.equal(P.pace(pred, holes9([7])).pace, 47, 'a triple: two worse');
+  const all = holes9([5, 6, 4, 6, 5, 5, 4, 5, 6]); assert.equal(P.pace(pred, all).pace, 46, 'every hole played: the pace is the score');
+  assert.equal(all.reduce((t, h) => t + h.strokes, 0), 46);
+});
+t('pace: a fractional share rounds only at the end, and the holes can be played in any order', () => {
+  const pred = { predicted: 86, n: 18 }, h = Array.from({ length: 18 }, () => ({ par: 4, strokes: null }));   // par 72: 14/18 a hole
+  h[9].strokes = 5; h[10].strokes = 4;
+  assert.equal(P.pace(pred, h).pace, Math.round(86 + 1 - 14 / 18 + 0 - 14 / 18));
+});
+t('pace: no prediction, another length or missing pars → nothing shown', () => {
+  assert.equal(P.pace(null, holes9([5])), null);
+  assert.equal(P.pace({ predicted: 90, n: 18 }, holes9([5])), null);
+  assert.equal(P.pace({ predicted: 45, n: 9 }, holes9([5]).map((x, i) => (i === 3 ? { strokes: null } : x))), null);
+  assert.equal(P.pace({ predicted: 45, n: 9 }, []), null);
+});
 t('payoff: junk input never throws', () => { P.roundPayoff({}); P.predict({}); P.predictionHistory({}); P.predictionRun([]); });
 console.log(`payoff: ${n} tests passed`);

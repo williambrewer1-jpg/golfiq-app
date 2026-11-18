@@ -80,7 +80,7 @@ export function registerTrack(c, X) {
     const r = SH.close(h, { gps: f ? [f.lat, f.lon] : null, acc: f?.acc ?? null, marked, feats: w.feats });
     if (!r) return;
     if (r.kind === 'end') { if (r.shot.result === null) editor = { i: h.shots.indexOf(r.shot), mode: 'result' }; else showStrip(); }
-    FEEL.play('tap');
+    FEEL.play('shot');
     await save('map');
   }
   async function click(btn) {
@@ -110,7 +110,7 @@ export function registerTrack(c, X) {
       if (putt.n === null) return true;
       const w = X.where(d);
       SH.holeOut(h, { putts: putt.n, first_putt_m: putt.k === null ? null : fpFt(putt.k) * SH.FT, par: h.par, line: w.ht.line, green: w.green });
-      delete h.putting; putt = { n: null, k: null }; FEEL.play('tap');
+      delete h.putting; putt = { n: null, k: null }; FEEL.play('hole');
       await X.save(); X.open('score'); X.peek(); X.remeasure(); return true;
     }
     if (act === 'next') { X.next(); return true; }
@@ -160,7 +160,7 @@ export function registerTrack(c, X) {
     if (A.isNum(h.first_putt_m)) chips.push([T.firstPuttV(U() === 'yd' ? `${Math.round(h.first_putt_m / SH.FT)} ft` : `${h.first_putt_m.toFixed(1)} m`), null]);
     return `<div class="tr-sum" id="trSum"><div class="tr-sc"><b>${h.strokes}</b><span>${esc(SH.scoreName(h.strokes, h.par))}</span></div>
       <div class="tr-sumchips">${chips.map(([t, good]) => `<span class="tr-chip ${good === true ? 'good' : good === false ? 'miss' : ''}">${good === true ? '✓ ' : good === false ? '✗ ' : ''}${esc(t)}</span>`).join('')}</div>
-      <p class="small muted">${esc(T.correct)}</p></div>`;
+      ${X.roundLine?.(d) || ''}<p class="small muted">${esc(T.correct)}</p></div>`;
   }
   function shotListHtml(d) {
     const h = holeOf(d), shots = h.shots || [], clubs = X.clubs();
