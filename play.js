@@ -66,6 +66,7 @@ export function registerPlay(c) {
       <div class="row"><div><label class="f">Holes</label><select name="n"><option value="18">18</option><option value="9">9</option></select></div><div><label class="f">Starting hole</label><select name="first"><option>1</option><option>10</option></select></div></div>
       ${FR.startFields()}
       <p class="small" id="plPred" style="margin:4px 0 8px">${esc(predText(predictFor(sel, { rating: last?.course_rating, slope: last?.slope, n: 18, first: 1 })))}</p>
+      <label class="sw"><input type="checkbox" name="track" ${c.ui.pl_track === false ? '' : 'checked'}><span><b>${esc(FEEL.COPY.track.switch)}</b><small>${esc(FEEL.COPY.track.switchNote)}</small></span></label>
       ${challengeOffer()}
       <p><button class="btn">Start round</button></p></form>
       ${note('Rating and slope are on the scorecard; they are needed for your handicap and Stableford. Courses near you come from OpenStreetMap, which has names and outlines but not ratings or stroke indexes – add those once from the scorecard. If you also track this round on a Garmin watch, the synced Garmin round replaces this one automatically.')}</div>`;
@@ -97,7 +98,8 @@ export function registerPlay(c) {
     // a course you've played before inherits an outline downloaded for the same course from the map
     if (ex && !c.state.osm[cid]) { const m = Object.entries(c.state.osm).find(([k, v]) => k.startsWith('osm-') && v?.name && norm(v.name) === norm(ex.course_name)); if (m) c.state.osm[cid] = m[1]; }
     J().draft = { id: `m${Date.now()}`, start: localNow(), course_id: ex || osmPick ? cid : null, course_name: ex ? ex.course_name : osmPick ? osmPick.name : String(f.get('name')).trim(), courseGlobalId: ex && cid.startsWith('garmin-') ? cid.slice(7) : null,
-      tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f), challenge: CH.byKey(f.get('chal')) ? f.get('chal') : null };
+      tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f), challenge: CH.byKey(f.get('chal')) ? f.get('chal') : null, track: f.get('track') === 'on' };
+    c.ui.pl_track = J().draft.track; c.saveUi();
     // the prediction is saved when the round starts, so it cannot shift later (plan 10.1)
     const pr = predictFor(cid, { rating: f.get('rating'), slope: f.get('slope'), n: f.get('n'), first: f.get('first') });
     if (pr) (J().predictions = J().predictions || []).push({ round_id: `garmin-${J().draft.id}`, predicted: pr.predicted, lo: pr.lo, hi: pr.hi, made_at: new Date().toISOString(), n: pr.holes });
@@ -440,6 +442,9 @@ export function registerPlay(c) {
       const o = CH.outcome(d.challenge, order.map((x) => d.holes[x]), d.n), ch = CH.byKey(d.challenge);
       if (o) { J().course_challenges = J().course_challenges || []; J().course_challenges.push({ round_id: rid, date: d.start.slice(0, 10), key: o.key, sub: ch.sub, goal: o.goal, value: o.value, n: o.n, achieved: o.achieved }); msg = `Round saved – ${CH.titleFor(ch, d.n)}: ${o.achieved ? 'done ✓ (counts as a hit)' : 'not this time'}`; }
     }
+    // tracked shots stay on this phone with the round (phase 4 turns them into dataset shots); positions are never sent anywhere
+    const tracked = Object.fromEntries(order.filter((x) => d.holes[x].shots?.length).map((x) => [x, { shots: d.holes[x].shots, first_putt_m: d.holes[x].first_putt_m ?? null, derived: d.holes[x].derived || null, corrected: d.holes[x].corrected || [] }]));
+    if (Object.keys(tracked).length) (J().tracked_rounds = J().tracked_rounds || []).push({ round_id: rid, draft_id: d.id, course_id: d.course_id, date: d.start.slice(0, 10), holes: tracked });
     J().draft = null; stopGps(); CV.release(); await saveDraft(); c.ui.rd_open = rid; c.saveUi(); c.done(msg); location.hash = '#rounds';
   }
 
@@ -483,7 +488,7 @@ export function registerPlay(c) {
   }
   CV = registerCourse(c, {
     fix: () => fix, gpsErr: () => gpsErr, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
-    strategyHtml, stratPick, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
+    strategyHtml, stratPick, labelOf, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
     scoreEntryHtml, scoreSummaryHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
   });
   return { pages: { play: ['Play', 'flag'] }, render: { play: pagePlay }, wire: { play: wirePlay }, noData: ['play'], standingsHtml: FR.standingsHtml, _setFix: (f) => { fix = f; }, course: CV };

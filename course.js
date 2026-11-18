@@ -5,6 +5,8 @@ import * as F from './features.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
 import * as FEEL from './feel.js';
+import * as SH from './shots.js';
+import { registerTrack } from './track.js';
 
 // ---- tunable numbers (plan section 10 and 4.x)
 export const CV_AUTO_OPEN = true;               // opens by itself whenever a round is in progress
@@ -48,18 +50,23 @@ export function registerCourse(c, P) {
     const fix = P.fix(), known = d.course_id ? F.courseHoles(c.DS, d.course_id) : {}, feats = P.featsFor(d);
     const gpsPos = fix ? [fix.lat, fix.lon] : null, ht = HM.holeTargets(known[d.hole], feats, d.hole, gpsPos);
     const farAway = gpsPos && (ht.green || ht.tee) && A.haversine(gpsPos[0], gpsPos[1], ...(ht.green || ht.tee)) > FAR_AWAY_M;
-    const usingTee = c.ui.pl_pos === 'tee' || !fix || !!farAway;
-    const pos = usingTee ? ht.tee : gpsPos;
+    // tracking: once a shot has been played, a known ball you are not standing by (marked on the map, a drop, a replay
+    // after out of bounds) is where the map measures from
+    const h = d.holes[d.hole], ball = d.track && h.shots?.length ? SH.ballPos(h, ht.tee) : null;
+    const usingBall = !!ball && c.ui.pl_pos !== 'tee' && (!fix || fix.acc > SH.POOR_GPS_M || A.haversine(gpsPos[0], gpsPos[1], ball[0], ball[1]) > SH.BALL_NEAR_M);
+    const usingTee = usingBall || c.ui.pl_pos === 'tee' || !fix || !!farAway;
+    const pos = usingBall ? ball : usingTee ? ht.tee : gpsPos;
     let green = ht.green;
     if (!green && pos && feats.length) { const alts = F.nearestGreens(pos[0], pos[1], feats); if (alts.length) green = alts[0].pin; }
-    return { fix, known, feats, gpsPos, ht, farAway, usingTee, pos, green };
+    return { fix, known, feats, gpsPos, ht, farAway, usingTee, usingBall, pos, green };
   }
   // what is missing, in one short line
   function missingLine(w) {
     const bits = [], err = P.gpsErr();
     if (!w.fix) bits.push(/declined/i.test(err) ? T.missing.declined : T.missing.gps);
     else if (w.farAway) bits.push(T.missing.far((A.haversine(w.gpsPos[0], w.gpsPos[1], ...(w.ht.green || w.ht.tee)) / 1000).toFixed(1)));
-    if (!w.fix && w.pos) bits.push(T.missing.tee);
+    if (w.usingBall) bits.push(FEEL.COPY.track.fromBall);
+    else if (!w.fix && w.pos) bits.push(T.missing.tee);
     if (!w.feats.some((f) => f.kind !== 'hole')) bits.push(T.missing.map);
     else if (L && !L.grid && !L.wx) bits.push(T.missing.terrain);
     const s = bits.slice(0, 2).join(' · ');
@@ -74,7 +81,8 @@ export function registerCourse(c, P) {
   const viewBottom = () => (L?.fr?.view ? L.fr.view.t + L.fr.view.h : innerHeight);
   function dynHtml() {
     const [, ay] = L.fr.xy(...L.aim);
-    return HM.dynamicSvg(L.fr, { pos: L.pos, aim: L.aim, green: L.green, pat: V || M.pat, cv: c.cv, unit: U(), clubName: M.club?.name, big: true,
+    const quiet = TR.quiet();
+    return TR.shotsSvg(L.fr, L.d) + HM.dynamicSvg(L.fr, { pos: L.pos, aim: L.aim, green: L.green, pat: quiet ? null : V || M.pat, cv: c.cv, unit: U(), clubName: quiet ? null : M.club?.name, big: true,
       pad: L.padOff ?? HM.padOffset(ay, viewBottom()), live: { rings: M ? A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) + 40 : 0, acc: L.usingTee ? null : P.fix()?.acc } });
   }
 
@@ -185,14 +193,15 @@ export function registerCourse(c, P) {
     const parts = pl?.parts, bits = !parts ? [] : [Math.abs(parts.elev) >= 0.9 ? `${parts.elev > 0 ? 'uphill' : 'downhill'} ${sg(parts.elev)}` : null, Math.abs(parts.wind) >= 0.9 ? `wind ${sg(parts.wind)}` : null,
       Math.abs(parts.temp) >= 0.9 ? `${Math.round(L.wx?.temp_c)}°C ${sg(parts.temp)}` : null, Math.abs(parts.alt) >= 0.9 ? `altitude ${sg(parts.alt)}` : null].filter(Boolean);
     const sc = h.strokes > 0 ? T.scoreHole(h.strokes, P.toParText(h.strokes - h.par)) : T.score;
-    el.innerHTML = `<div class="cv-prow">
+    const info = `<div class="cv-prow">
         <button type="button" class="cv-club" data-cvpeekclub aria-label="${esc(T.pickClub)}"><b>${esc(M?.club?.name || T.noClub)}</b><span>▾</span></button>
         <div class="cv-pnum">${M ? `<b>${yd(aimD)}</b><span>${esc(U())} to aim</span>` : ''}</div>${!plays && rangeText() ? `<span class="cv-range">${esc(rangeText())}</span>` : ''}</div>
       ${plays ? `<div class="cv-prow2"><button type="button" class="cv-plays" data-cvplays>${esc(plays)}</button>${rangeText() ? `<span class="cv-range">${esc(rangeText())}</span>` : ''}</div>` : ''}
       ${M?.out ? outcomeHtml() : M ? `<p class="cv-sure">${esc(sureText() || tr)}</p>` : ''}
       ${missHtml()}
-      ${c.ui.pl_plays_open && bits.length ? `<p class="cv-why">${esc(bits.join(' · '))}${L?.wx ? ` · wind ${Math.round(L.wx.wind_kmh)} km/h from ${P.compass(L.wx.wind_from)}` : ''}</p>` : ''}
-      <div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`;
+      ${c.ui.pl_plays_open && bits.length ? `<p class="cv-why">${esc(bits.join(' · '))}${L?.wx ? ` · wind ${Math.round(L.wx.wind_kmh)} km/h from ${P.compass(L.wx.wind_from)}` : ''}</p>` : ''}`;
+    el.dataset.track = TR.on(d) ? 'on' : '';
+    el.innerHTML = TR.peek(info) ?? info + `<div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`;
   }
   const cardSub = (d) => { const t = P.scoreTotals(d); return t.played.length ? T.thruShort(P.toParText(t.toPar), t.played.length) : T.noHoles; };
   const sg = (v) => `${v > 0 ? '+' : '−'}${yd(Math.abs(v))}`;
@@ -204,7 +213,7 @@ export function registerCourse(c, P) {
     const back = `<button type="button" class="btn sec cv-back" data-cvsheet="peek">${esc(T.backToMap)}</button>`;
     const tb = `<div class="seg cv-tabs" role="tablist">${TABS.map((k) => `<button type="button" role="tab" data-cvtab="${k}" class="${tab() === k ? 'on' : ''}">${esc(T.tabs[k])}</button>`).join('')}</div>`;
     if (tab() === 'card') return tb + `<div class="cv-card">${P.scoreSummaryHtml(d)}</div>${P.groupHtml(d)}${back}`;
-    if (tab() === 'score') return tb + `<div class="cv-card cv-score">${P.scoreEntryHtml(d)}</div><button type="button" class="btn sec cv-tocard" data-cvtab="card">${esc(T.toCard)}</button>${back}`;
+    if (tab() === 'score') return tb + TR.scoreTop(d) + `<div class="cv-card cv-score">${P.scoreEntryHtml(d)}</div>` + TR.scoreBottom(d) + `<button type="button" class="btn sec cv-tocard" data-cvtab="card">${esc(T.toCard)}</button>${back}`;
     if (tab() === 'strategy') return tb + `<div class="cv-card small" id="cvStrat">${esc(T.working)}</div>${back}`;
     const seg = (key, opts, val) => `<div class="seg">${opts.map(([v, l]) => `<button type="button" data-${key}="${v}" class="${val === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
     const hasMap = L?.feats.some((f) => f.kind !== 'hole');
@@ -319,6 +328,9 @@ export function registerCourse(c, P) {
     P.wireScore(sh, d, { re: async () => { await P.saveDraft(); refreshSheet(); }, go: goHole, end: () => open('card') });
     sh.addEventListener('click', async (e) => {
       const b = e.target.closest('button,a'); if (!b) return;
+      if (b.dataset.tr) { if (!b.disabled) TR.click(b); return; }
+      const dh = P.D(), hh = dh?.holes[dh.hole];
+      if (TR.on(dh) && hh?.shots?.length && (b.dataset.step || b.dataset.fw)) SH.correct(hh, b.dataset.step || 'fairway');
       if (b.dataset.cvtab) { open(b.dataset.cvtab); return; }
       if (b.dataset.cvsheet) { setSheet(b.dataset.cvsheet); return; }
       if (b.hasAttribute('data-cvpeekclub')) { open('club'); return; }
@@ -338,6 +350,7 @@ export function registerCourse(c, P) {
         L.aim = r.aim; L.custom = true; L.club = r.club_id; await saveAim(); setSheet('peek'); aimMoved();
       }
     });
+    for (const ev of ['input', 'change']) sh.addEventListener(ev, (e) => { TR.change(e.target); });
     // the sheet handle: a tap opens or closes the panel; drag up for full height, down to close
     const hd = $('#cvHandle'); let hy = null;
     hd.addEventListener('pointerdown', (e) => { hy = e.clientY; try { hd.setPointerCapture(e.pointerId); } catch { /* old Safari */ } });
@@ -409,6 +422,7 @@ export function registerCourse(c, P) {
       if (!s.moved && ev.type === 'pointerup') {                // a tap: on the pattern shows or hides your shots; elsewhere moves the aim
         dragging = false; P.setDragging(false); L.padOff = null;
         const at = L.fr.fromXY(s.start[0], s.start[1]);
+        if (TR.marking()) { TR.mapTap(at); return; }
         if (V?.kind === 'own' && V.inner && F.pointInPolygon(at[0], at[1], V.inner)) { toggleShots(); if ($('[data-cvshots]')) refreshSheet(); return; }
         if (s.near) { aimMoved(); return; }
         set(s.start[0], s.start[1]); FEEL.play('tap'); aimMoved(); await saveAim(); return;
@@ -422,6 +436,18 @@ export function registerCourse(c, P) {
     for (const t of ['gesturestart', 'gesturechange', 'dblclick']) el.addEventListener(t, (ev) => ev.preventDefault());
   }
   addEventListener('resize', () => { if (active()) { measure(); drawMap(); } });
+
+  // ------------------------------------------------------------ shot tracking (track.js)
+  const nextHole = () => { const d = P.D(), o = P.holeOrder(d), i = o.indexOf(d.hole); if (i < o.length - 1) goHole(o[i + 1]); else open('card'); };
+  const TR = registerTrack(c, {
+    D: P.D, L: () => L, M: () => M, where, fix: P.fix, clubs: P.playClubs, label: P.labelOf, save: P.saveDraft, open, next: nextHole,
+    peek: () => peek(), refreshSheet: () => refreshSheet(), dyn: () => { if (L && $('#hmDyn')) $('#hmDyn').innerHTML = dynHtml(); },
+    remeasure: () => { if (measure()) drawMap(); },
+    // after a shot is closed, a penalty or an undo: aim and club start again from where the ball is now
+    reset: () => { const d = P.D(); if (d?.aim) delete d.aim[d.hole]; c.ui.pl_club = null; c.saveUi(); L = null; drawMap(); peek(); },
+    onGreen: () => !!(L && !L.usingTee && L.greenPts && P.fix() && P.fix().acc <= SH.POOR_GPS_M && F.pointInPolygon(L.pos[0], L.pos[1], L.greenPts)),
+    nearGreen: (m) => !!(L && L.green && A.haversine(L.pos[0], L.pos[1], L.green[0], L.green[1]) <= m),
+  });
 
   return { active, render, wire, onFix, redraw: () => { if (active()) drawMap(); }, release, _state: () => ({ L, M, V, insets, wake: !!wake }) };
 }

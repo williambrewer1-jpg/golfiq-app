@@ -660,6 +660,30 @@ body:has(#cvRoot) #toast{bottom:auto;top:calc(env(safe-area-inset-top) + 6px);z-
 .cv-miss{display:flex;align-items:center;gap:10px;margin:6px 0 0;font:600 15px/1.3 var(--sans)}.cv-miss span{flex:1;min-width:0}.cv .cv-miss .btn{flex:none;min-height:48px;margin:0;font-size:15px;padding:0 14px}
 p.cv-miss{display:block;color:var(--good)}
 .cv-how p{margin:0 0 8px;font-size:15px}.cv-how .btn{min-height:48px;margin:0 0 6px}
+/* ---- shot tracking in the Course view (track.js) */
+.tr-line{margin:4px 0 0;font:600 16px/1.35 var(--sans)}.tr-line b{font-family:var(--serif);font-size:20px}
+.tr-prompt{padding:10px 12px;border-radius:12px;background:var(--tint);font-weight:700}
+.cv .tr-btns .btn{font-size:16px}.cv .tr-btns .cv-big{flex:1.4}
+.tr-strip{margin-top:4px;padding:8px 10px;border-radius:14px;background:var(--chip);border-left:4px solid var(--gold)}
+.tr-res{margin:0;font:700 18px/1.3 var(--sans)}.tr-warn{margin:2px 0 0;font:600 15px var(--sans);color:var(--bad)}
+.tr-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.cv .tr-acts .btn{flex:1 1 auto;min-height:48px;margin:0;font-size:15px;padding:0 10px}
+.tr-ed{margin-top:4px}.tr-q{margin:0 0 6px;font:700 16px var(--sans)}.tr-q small{display:block;font-weight:600;color:var(--muted)}
+.tr-chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px}.cv .tr-chips .btn{flex:1 1 30%;min-height:48px;margin:0;font-size:15px;padding:0 8px}
+.tr-scroll{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}.cv .tr-scroll .btn{flex:0 0 auto}
+.tr-putt{margin-top:2px}.tr-pn{display:flex;gap:6px;margin:6px 0}.cv .tr-pn .btn{flex:1;min-height:56px;margin:0;font:700 24px var(--serif);padding:0}
+.tr-fp{display:block;margin:4px 0 2px;font:600 15px var(--sans)}.tr-fp span{display:block}.tr-fp b{font-family:var(--serif)}
+.tr-fp input{width:100%;height:48px;margin:0;accent-color:var(--good)}.tr-fp input.unset{opacity:.45}
+.tr-donel{padding:4px 0}
+.cv .tr-btns2{margin-top:6px}.cv .tr-btns2 .btn{flex:1 1 auto;min-height:48px;font-size:15px;padding:0 10px}
+.tr-sum{margin:0 0 12px;padding:12px;border-radius:16px;background:var(--chip);border-top:3px solid var(--gold)}
+.tr-sc{display:flex;align-items:baseline;gap:12px}.tr-sc b{font:700 56px/1 var(--serif)}.tr-sc span{font:700 22px var(--serif)}
+.tr-sumchips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 6px}
+.tr-chip{display:inline-flex;align-items:center;min-height:32px;padding:4px 10px;border-radius:10px;background:var(--card);border:1px solid var(--line);font:600 15px var(--sans)}
+.tr-chip.good{border-color:var(--good);color:var(--good)}.tr-chip.miss{border-color:var(--bad);color:var(--bad)}
+.tr-list h3{margin:4px 0 8px;font:700 17px var(--serif)}.tr-list ol{list-style:none;margin:0 0 8px;padding:0;display:flex;flex-direction:column;gap:6px}
+.cv .tr-srow{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;margin:0;text-align:left;font:600 15px var(--sans);padding:6px 12px;white-space:normal}
+.tr-srow b{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--head);color:#fff;font:700 15px var(--sans)}
+.tr-led{padding:8px 4px 4px}.tr-led select{width:100%;min-height:48px;font-size:16px;margin-bottom:6px}.cv .tr-del{color:var(--bad)}
 .cv-open{margin:0 0 12px}.cv-open .btn{width:100%;min-height:52px}
 @media (max-width:360px){.cv-range{display:none}}
 @media (max-height:700px){.cv-peek{padding-top:24px}.cv-pbtns{margin-top:2px}.cv-sheet{padding-bottom:calc(env(safe-area-inset-bottom) + 6px)}.cv-out{margin-top:0;padding:2px}.cv-prow2{margin-top:2px}.cv .cv-pbtns .btn{min-height:48px}.cv-yards .m b{font-size:40px}.cv-yards{padding:4px 8px;gap:2px}.cv-yards b{font-size:28px}.cv-trow h2{font-size:21px}}
