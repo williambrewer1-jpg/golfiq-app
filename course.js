@@ -21,7 +21,7 @@ export const MAP_MAX_K = 8;
 export const REZOOM_RATIO = 1.4;                // Shot zoom: rebuild the map when the right scale for where you are now differs by this much
 export const BOTTOM_CLEAR_PX = 34;             // extra room above the sheet so your own dot is never under it                     // pixels per metre: the Green zoom never goes closer than this
 export const SHEETS = ['peek', 'half', 'full'];
-export const TABS = ['club', 'strategy', 'score'];
+export const TABS = ['club', 'strategy', 'score', 'card'];      // the sheet's height (handle) and its content (tabs) are independent
 
 export function registerCourse(c, P) {
   const { A, $, $$, esc, toast } = c;
@@ -192,18 +192,20 @@ export function registerCourse(c, P) {
       ${M?.out ? outcomeHtml() : M ? `<p class="cv-sure">${esc(sureText() || tr)}</p>` : ''}
       ${missHtml()}
       ${c.ui.pl_plays_open && bits.length ? `<p class="cv-why">${esc(bits.join(' · '))}${L?.wx ? ` · wind ${Math.round(L.wx.wind_kmh)} km/h from ${P.compass(L.wx.wind_from)}` : ''}</p>` : ''}
-      <div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button></div>`;
+      <div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`;
   }
+  const cardSub = (d) => { const t = P.scoreTotals(d); return t.played.length ? T.thruShort(P.toParText(t.toPar), t.played.length) : T.noHoles; };
   const sg = (v) => `${v > 0 ? '+' : '−'}${yd(Math.abs(v))}`;
 
   // ------------------------------------------------------------ the sheet body (half: tabs; full: the scorecard)
   function sheetBody() {
     const d = P.D(); if (!d) return '';
-    if (sheet() === 'full') return `<div class="cv-card">${P.scoreSummaryHtml(d)}</div>${P.groupHtml(d)}<button type="button" class="btn sec cv-back" data-cvsheet="peek">${esc(T.backToMap)}</button>`;
-    if (sheet() !== 'half') return '';
+    if (sheet() === 'peek') return '';
+    const back = `<button type="button" class="btn sec cv-back" data-cvsheet="peek">${esc(T.backToMap)}</button>`;
     const tb = `<div class="seg cv-tabs" role="tablist">${TABS.map((k) => `<button type="button" role="tab" data-cvtab="${k}" class="${tab() === k ? 'on' : ''}">${esc(T.tabs[k])}</button>`).join('')}</div>`;
-    if (tab() === 'score') return tb + `<div class="cv-card cv-score">${P.scoreEntryHtml(d)}</div>`;
-    if (tab() === 'strategy') return tb + `<div class="cv-card small" id="cvStrat">${esc(T.working)}</div>`;
+    if (tab() === 'card') return tb + `<div class="cv-card">${P.scoreSummaryHtml(d)}</div>${P.groupHtml(d)}${back}`;
+    if (tab() === 'score') return tb + `<div class="cv-card cv-score">${P.scoreEntryHtml(d)}</div><button type="button" class="btn sec cv-tocard" data-cvtab="card">${esc(T.toCard)}</button>${back}`;
+    if (tab() === 'strategy') return tb + `<div class="cv-card small" id="cvStrat">${esc(T.working)}</div>${back}`;
     const seg = (key, opts, val) => `<div class="seg">${opts.map(([v, l]) => `<button type="button" data-${key}="${v}" class="${val === v ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
     const hasMap = L?.feats.some((f) => f.kind !== 'hole');
     const sure = sureText(), own = kindOf(M?.pt) === 'own';
@@ -212,15 +214,18 @@ export function registerCourse(c, P) {
     return tb + how + (L && M ? `<div id="plRec" class="cv-card">${P.recHtml(L, M)}</div>` : `<p class="small muted">${esc(T.noGreen)}</p>`)
       + `<div class="cv-card"><label class="f">${esc(T.from)}</label>${seg('cvpos', [['gps', T.fromGps], ['tee', T.fromTee]], c.ui.pl_pos === 'tee' ? 'tee' : 'gps')}
         ${hasMap ? `<label class="f">${esc(T.style)}</label>${seg('cvstyle', [['map', T.styleMap], ['sat', T.styleSat]], c.ui.pl_style === 'sat' ? 'sat' : 'map')}` : ''}
-        ${P.osmHint(d, L?.pos || null)}</div>`;
+        ${P.osmHint(d, L?.pos || null)}</div>${back}`;
   }
+  // Redraw the sheet. A change inside the same tab (a stepper, Fairway, Par) keeps the scroll position; a new tab starts at the top.
+  let shown = '';
   function refreshSheet() {
     const root = $('#cvRoot'), body = $('#cvBody'); if (!root || !body) return;
+    const view = `${sheet()}|${tab()}|${P.D()?.hole}`, keep = view === shown ? body.scrollTop : 0; shown = view;
     root.dataset.sheet = sheet();
     $('#cvHandle')?.setAttribute('aria-expanded', String(sheet() !== 'peek'));
-    body.innerHTML = sheetBody(); body.scrollTop = 0;
-    if (sheet() === 'full') P.wireGroup(P.D(), async () => { await P.saveDraft(); c.rerender(); });
-    if (sheet() === 'half' && tab() === 'strategy') setTimeout(strategy, 30);
+    body.innerHTML = sheetBody(); body.scrollTop = keep;
+    if (sheet() !== 'peek' && tab() === 'card') P.wireGroup(P.D(), async () => { await P.saveDraft(); c.rerender(); });
+    if (sheet() !== 'peek' && tab() === 'strategy') setTimeout(strategy, 30);
     chrome();
   }
   function strategy() {
@@ -228,6 +233,7 @@ export function registerCourse(c, P) {
     try { el.innerHTML = L ? P.strategyHtml() : esc(T.noGreen); } catch (e) { el.textContent = `Could not compare: ${e.message}`; }
   }
   function setSheet(s, t = null) { c.ui.pl_sheet = s; if (t) c.ui.pl_stab = t; c.saveUi(); refreshSheet(); }
+  const open = (t) => setSheet(sheet() === 'full' ? 'full' : 'half', t);        // a tab keeps the height you chose
 
   // ------------------------------------------------------------ live updates (GPS) and aim changes: moving layer only
   function live() {
@@ -306,16 +312,18 @@ export function registerCourse(c, P) {
     measure(); drawMap();
     // the real top bar and peek heights (safe areas differ by phone): redraw once if the guess was off
     if (measure()) drawMap();
-    if (sheet() === 'full') P.wireGroup(d, async () => { await P.saveDraft(); c.rerender(); });
-    if (sheet() === 'half' && tab() === 'strategy') setTimeout(strategy, 30);
+    shown = `${sheet()}|${tab()}|${d.hole}`;
+    if (sheet() !== 'peek' && tab() === 'card') P.wireGroup(d, async () => { await P.saveDraft(); c.rerender(); });
+    if (sheet() !== 'peek' && tab() === 'strategy') setTimeout(strategy, 30);
     const sh = $('#cvSheet');
-    P.wireScore(sh, d, { re: async () => { await P.saveDraft(); refreshSheet(); }, go: goHole, end: () => setSheet('full') });
+    P.wireScore(sh, d, { re: async () => { await P.saveDraft(); refreshSheet(); }, go: goHole, end: () => open('card') });
     sh.addEventListener('click', async (e) => {
       const b = e.target.closest('button,a'); if (!b) return;
-      if (b.dataset.cvtab) { setSheet('half', b.dataset.cvtab); return; }
+      if (b.dataset.cvtab) { open(b.dataset.cvtab); return; }
       if (b.dataset.cvsheet) { setSheet(b.dataset.cvsheet); return; }
-      if (b.hasAttribute('data-cvpeekclub')) { setSheet('half', 'club'); return; }
-      if (b.hasAttribute('data-cvscore')) { setSheet('half', 'score'); return; }
+      if (b.hasAttribute('data-cvpeekclub')) { open('club'); return; }
+      if (b.hasAttribute('data-cvscore')) { open('score'); return; }
+      if (b.hasAttribute('data-cvcard')) { open('card'); return; }
       if (b.hasAttribute('data-cvplays')) { c.ui.pl_plays_open = !c.ui.pl_plays_open; c.saveUi(); peek(); return; }
       if (b.hasAttribute('data-cvout')) { c.ui.pl_out_open = !c.ui.pl_out_open; c.saveUi(); peek(); return; }
       if (b.hasAttribute('data-cvshots')) { toggleShots(); refreshSheet(); return; }
@@ -330,12 +338,12 @@ export function registerCourse(c, P) {
         L.aim = r.aim; L.custom = true; L.club = r.club_id; await saveAim(); setSheet('peek'); aimMoved();
       }
     });
-    // the sheet handle: tap steps up (peek → half → full → peek); drag up or down to change height
+    // the sheet handle: a tap opens or closes the panel; drag up for full height, down to close
     const hd = $('#cvHandle'); let hy = null;
     hd.addEventListener('pointerdown', (e) => { hy = e.clientY; try { hd.setPointerCapture(e.pointerId); } catch { /* old Safari */ } });
     hd.addEventListener('pointerup', (e) => {
       if (hy === null) return; const dy = e.clientY - hy, i = SHEETS.indexOf(sheet()); hy = null;
-      if (Math.abs(dy) < SHEET_DRAG_PX) setSheet(SHEETS[(i + 1) % SHEETS.length]);
+      if (Math.abs(dy) < SHEET_DRAG_PX) setSheet(sheet() === 'peek' ? 'half' : 'peek');
       else setSheet(SHEETS[Math.max(0, Math.min(2, i + (dy < 0 ? 1 : -1) * (Math.abs(dy) > 220 ? 2 : 1)))]);
     });
     hd.addEventListener('pointercancel', () => { hy = null; });

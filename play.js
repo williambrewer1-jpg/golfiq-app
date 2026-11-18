@@ -388,7 +388,7 @@ export function registerPlay(c) {
   function scoreSummaryHtml(d) {
     const order = holeOrder(d), { played, tot, toPar } = scoreTotals(d);
     const putts = played.map((n) => d.holes[n].putts).filter(A.isNum), fw = played.filter((n) => d.holes[n].par >= 4 && d.holes[n].fairway);
-    return `<h2>${esc(d.course_name)}</h2><div class="kpis"><div class="kpi"><div class="l">Thru ${played.length}</div><div class="v">${played.length ? tot : '–'} <span class="small ${toPar > 0 ? '' : 'bad'}">${played.length ? toParText(toPar) : ''}</span></div></div>
+    return `<h2>${esc(d.course_name)}</h2><div class="kpis"><div class="kpi"><div class="l">Thru ${played.length}</div><div class="v">${played.length ? tot : '–'} <span class="small ${toPar > 0 ? 'bad' : toPar < 0 ? 'good' : ''}">${played.length ? toParText(toPar) : ''}</span></div></div>
       <div class="kpi"><div class="l">Putts</div><div class="v">${putts.length ? A.sum(putts) : '–'}</div></div><div class="kpi"><div class="l">Fairways</div><div class="v">${fw.length ? `${fw.filter((n) => d.holes[n].fairway === 'HIT').length}/${fw.length}` : '–'}</div></div>
       <div class="kpi"><div class="l">Penalties</div><div class="v">${A.sum(played.map((n) => d.holes[n].penalties || 0))}</div></div></div>
       <div class="strip">${order.map((n) => { const x = d.holes[n], tp = x.strokes ? x.strokes - x.par : null; return `<button type="button" data-goto="${n}" class="${n === d.hole ? 'cur' : ''} ${tp === null ? '' : tp < 0 ? 'under' : tp === 0 ? 'even' : tp === 1 ? 'bogey' : 'worse'}"><i>${n}</i>${x.strokes || '·'}</button>`; }).join('')}</div>
@@ -462,7 +462,8 @@ export function registerPlay(c) {
     return `<p class="cv-open"><button type="button" class="btn" id="cvOpen">${esc(FEEL.COPY.course.open)}</button></p>` + liveCard(d) + scoreCard(d) + FR.groupCard(d) + (J().joined ? FR.joinCard() : '');
   }
   function wirePlay() {
-    const d = D(), re = async () => { await saveDraft(); c.rerender(); };
+    // a score change redraws the page; keep it where it was so the form does not jump
+    const d = D(), re = async () => { const y = scrollY; await saveDraft(); c.rerender(); scrollTo(0, y); requestAnimationFrame(() => scrollTo(0, y)); };
     $('#plStart')?.addEventListener('submit', start);
     const upd = () => { const fm = $('#plStart'), el = $('#plPred'); if (!fm || !el) return; const f = new FormData(fm); el.textContent = predText(predictFor($('[data-sel=pl_course]')?.value, { rating: f.get('rating'), slope: f.get('slope'), n: f.get('n'), first: f.get('first') })); };
     $('#plStart')?.addEventListener('input', upd); $('#plStart')?.addEventListener('change', upd);
@@ -475,7 +476,7 @@ export function registerPlay(c) {
     FR.wireGroup(d, re);
     if (cvOn(d)) { CV.wire(d); return; }
     $('#cvOpen')?.addEventListener('click', () => { c.ui.pl_cv_off = null; c.saveUi(); c.rerender(); scrollTo(0, 0); });
-    const go = (n) => { d.hole = n; re().then(() => scrollTo(0, 0)); };
+    const go = async (n) => { d.hole = n; await saveDraft(); c.rerender(); scrollTo(0, 0); };
     wireScore($('#plScore'), d, { re, go, end: () => $('#plFinish').scrollIntoView({ behavior: 'smooth' }) });
     wireMap();
     $('#plOsmHere')?.addEventListener('click', osmHere);
