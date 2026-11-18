@@ -8,6 +8,7 @@ import * as PO from './payoff.js';
 import * as FEEL from './feel.js';
 import { registerFriends } from './friends.js';
 import { registerCourse, CV_AUTO_OPEN } from './course.js';
+import * as SH from './shots.js';
 
 export function registerPlay(c) {
   const { A, S, $, $$, esc, fmt, note, plot, seg, segVal, select, toast, COLORS } = c;
@@ -424,6 +425,27 @@ export function registerPlay(c) {
       if (b.id === 'plFinish') finish(d);
     });
   }
+  // the green each tracked hole was played to, as the Course view placed it: the pin for the dataset's shots
+  function pinsFor(d, ns) {
+    const feats = featsFor(d), known = d.course_id ? F.courseHoles(c.DS, d.course_id) : {};
+    return Object.fromEntries(ns.map((n) => [n, HM.holeTargets(known[n], feats, n, null).green]).filter(([, g]) => g));
+  }
+  // Rounds tracked before shots went into the dataset kept them in J().tracked_rounds: add them to their saved round, once.
+  let backfilled = false;
+  async function backfillTracked() {
+    if (backfilled) return; backfilled = true;
+    const todo = (J().tracked_rounds || []).filter((t) => !t.imported); if (!todo.length) return;
+    const out = [];
+    for (const t of todo) {
+      const b = (c.state.bundles || []).find((x) => String(x.scorecard_id) === String(t.draft_id));
+      if (!b) continue;
+      if (!b.shots?.holeShots?.length) out.push(SH.withTrackedShots(b, t.holes, pinsFor({ course_id: t.course_id }, Object.keys(t.holes).map(Number))));
+      t.imported = true;
+    }
+    if (out.length) await S.mergeBundles(c.state, out, 'tracked shots added');
+    await saveDraft();
+    if (out.length) c.done(FEEL.COPY.track.backfilled(out.length));
+  }
   async function discard() {
     if (!confirm('Discard this round? The scores entered so far will be lost.')) return;
     J().predictions = (J().predictions || []).filter((p) => p.round_id !== `garmin-${J().draft?.id}`); J().draft = null; stopGps(); CV.release(); await saveDraft(); c.rerender();
@@ -431,7 +453,10 @@ export function registerPlay(c) {
   async function finish(d) {
     const order = holeOrder(d), n = order.filter((x) => d.holes[x].strokes > 0).length;
     if (n < d.n && !confirm(`Only ${n} of ${d.n} holes have a score. Save the round with ${n} holes?`)) return;
-    const res = await S.mergeBundles(c.state, [F.manualBundle(d)], 'entered on phone');
+    // tracked shots go in the round bundle in Garmin's shape, so the round is imported exactly like a Garmin one
+    const tracked = Object.fromEntries(order.filter((x) => d.holes[x].shots?.length).map((x) => [x, d.holes[x]]));
+    const bundle = Object.keys(tracked).length ? SH.withTrackedShots(F.manualBundle(d), tracked, pinsFor(d, Object.keys(tracked).map(Number))) : F.manualBundle(d);
+    const res = await S.mergeBundles(c.state, [bundle], Object.keys(tracked).length ? 'tracked on phone' : 'entered on phone');
     if (res.failed) { toast(`Could not save: ${res.errors[0]}`); return; }
     const rid = `garmin-${d.id}`;
     if (d.side) { J().sideResults = J().sideResults || []; J().sideResults.push({ round_id: rid, date: d.start.slice(0, 10), course: d.course_name, game: FR.gameOf(d, d.side, Object.fromEntries(order.filter((x) => d.holes[x].strokes > 0).map((x) => [x, d.holes[x].strokes]))) }); }
@@ -442,9 +467,6 @@ export function registerPlay(c) {
       const o = CH.outcome(d.challenge, order.map((x) => d.holes[x]), d.n), ch = CH.byKey(d.challenge);
       if (o) { J().course_challenges = J().course_challenges || []; J().course_challenges.push({ round_id: rid, date: d.start.slice(0, 10), key: o.key, sub: ch.sub, goal: o.goal, value: o.value, n: o.n, achieved: o.achieved }); msg = `Round saved – ${CH.titleFor(ch, d.n)}: ${o.achieved ? 'done ✓ (counts as a hit)' : 'not this time'}`; }
     }
-    // tracked shots stay on this phone with the round (phase 4 turns them into dataset shots); positions are never sent anywhere
-    const tracked = Object.fromEntries(order.filter((x) => d.holes[x].shots?.length).map((x) => [x, { shots: d.holes[x].shots, first_putt_m: d.holes[x].first_putt_m ?? null, derived: d.holes[x].derived || null, corrected: d.holes[x].corrected || [] }]));
-    if (Object.keys(tracked).length) (J().tracked_rounds = J().tracked_rounds || []).push({ round_id: rid, draft_id: d.id, course_id: d.course_id, date: d.start.slice(0, 10), holes: tracked });
     J().draft = null; stopGps(); CV.release(); await saveDraft(); c.ui.rd_open = rid; c.saveUi(); c.done(msg); location.hash = '#rounds';
   }
 
@@ -477,6 +499,7 @@ export function registerPlay(c) {
     // first visit with location already allowed: look up nearby courses straight away
     if ($('#plNear') && !nearby() && !autoNear && navigator.permissions?.query) { autoNear = true; navigator.permissions.query({ name: 'geolocation' }).then((p) => { if (p.state === 'granted') findNearby($('#plNearMsg')).then(() => c.rerender()).catch(() => {}); }).catch(() => {}); }
     FR.wireJoin();
+    backfillTracked().catch(() => { backfilled = false; });
     if (!d) return;
     FR.wireGroup(d, re);
     if (cvOn(d)) { CV.wire(d); return; }

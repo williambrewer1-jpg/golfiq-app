@@ -198,11 +198,31 @@ with sync_playwright() as p:
     rid = 'garmin-' + draft(pg)['id']
     (pg.click('#cvHandle') if sheet(pg) == 'peek' else None); pg.wait_for_timeout(200); pg.click('[data-cvtab="card"]'); pg.wait_for_selector('#cvBody #plFinish')
     pg.click('#cvBody #plFinish'); pg.wait_for_timeout(1500)
-    tr = pg.evaluate("(id) => { const t = (window.__golfiq.state.journal.tracked_rounds || []).find(x => x.round_id === id); return t ? Object.fromEntries(Object.entries(t.holes).map(([k, v]) => [k, v.shots.length])) : null; }", rid)
     r = pg.evaluate("(id) => window.__golfiq.ds.holes.filter(h => h.round_id === id).map(h => [h.hole, h.strokes, h.putts, h.penalties])", rid)
     check('finishing saves the worked-out scores as a round', [x[1] for x in r[:3]] == [5, 6, 3] and r[0][3] == 1, r)
-    check('and keeps the tracked shots with it on the phone', tr == {'1': 2, '2': 4, '3': 2, '4': 3}, tr)
+    sh = pg.evaluate("(id) => { const s = window.__golfiq.ds.shots.filter(x => x.round_id === id); return { n: s.length, app: s.every(x => x.source === 'app'), byHole: Object.fromEntries([1,2,3,4].map(h => [h, s.filter(x => x.hole === h).length])), pens: s.filter(x => x.category === 'penalty').length, stock: window.__golfiq.A.stockShots(window.__golfiq.ds.shots, window.__golfiq.ds.clubs).filter(x => x.round_id === id).length, approxOut: s.filter(x => x.app_approx).every(x => !x.club_stats) }; }", rid)
+    check('the tracked shots are in your stats, as app shots, with a penalty record for each penalty', sh['app'] and sh['byHole'] == {'1': 3, '2': 5, '3': 2, '4': 3} and sh['pens'] == 2, sh)
+    check('weak-GPS and assumed-club shots stay out of club statistics', sh['approxOut'] and 0 < sh['stock'] < sh['n'], sh)
+    check('nothing set aside any more: the shots went straight into the round', not pg.evaluate("() => (window.__golfiq.state.journal.tracked_rounds || []).length"))
     check('no script errors (390 x 844)', not errs, errs[:3])
+    ctx.close()
+
+    # ------------------------------------------------------------ a round tracked before shots went into the dataset: added once
+    ctx, pg, errs = new_page(b, 390, 844)
+    start_round(pg, track=True)
+    tap(pg, 'hit'); move(ctx, pg, point(1, 236, 4)); tap(pg, 'ball', wait=900); tap(pg, 'hit'); move(ctx, pg, point(1, 352)); tap(pg, 'ball', wait=900); tap(pg, 'putts', 2); tap(pg, 'holeout', wait=500)
+    pg.evaluate("""async () => { const g = window.__golfiq, d = g.state.journal.draft, F = await import('./features.js'), S = await import('./store.js');
+      // what #49 did on Finish: a plain round, and the shots kept aside
+      await S.mergeBundles(g.state, [F.manualBundle(d)], 'entered on phone');
+      g.state.journal.tracked_rounds = [{ round_id: 'garmin-' + d.id, draft_id: d.id, course_id: d.course_id, date: d.start.slice(0, 10), holes: { 1: { shots: d.holes[1].shots, first_putt_m: null } } }];
+      g.state.journal.draft = null; await S.saveJournal(g.state); }""")
+    rid = 'garmin-' + pg.evaluate("() => window.__golfiq.state.journal.tracked_rounds[0].draft_id")
+    pg.goto(URL + '#rounds'); pg.reload(); pg.wait_for_timeout(1200)
+    check('before Play opens, the old round has no shots', pg.evaluate("(id) => window.__golfiq.ds.shots.filter(s => s.round_id === id).length", rid) == 0)
+    pg.goto(URL + '#play'); pg.wait_for_timeout(2000)
+    check('opening Play adds the kept shots to that round', pg.evaluate("(id) => window.__golfiq.ds.shots.filter(s => s.round_id === id && s.source === 'app').length", rid) == 2)
+    check('and only once', pg.evaluate("() => window.__golfiq.state.journal.tracked_rounds[0].imported") is True)
+    check('no script errors (backfill)', not errs, errs[:3])
     ctx.close()
 
     # ------------------------------------------------------------ 320 x 568: every tracking state fits
