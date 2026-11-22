@@ -217,6 +217,26 @@ export function courseBBox(ds, courseId, marginDeg = 0.002) {
 export const OSM_VERSION = 2;
 export const overpassQuery = (b) => { const bb = b.map((x) => x.toFixed(5)).join(',');
   return `[out:json][timeout:25];(way["golf"~"^(fairway|green|bunker|tee|water_hazard|lateral_water_hazard|rough|hole)$"](${bb});way["natural"~"^(water|wood|scrub|tree_row)$"](${bb});way["landuse"="forest"](${bb});relation["natural"="wood"](${bb});relation["landuse"="forest"](${bb});node["natural"="tree"](${bb}););out geom;`; };
+// The public OpenStreetMap query servers, tried in this order, once each. Since mid-2026 the main one often refuses
+// requests (406 or 429) under load, and bans clients that keep retrying, so a busy server is never asked twice in one
+// download: the next one is tried instead. Only the query (a box around the course) is sent.
+export const OVERPASS_HOSTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+export const OVERPASS_WAIT_MS = 30000;                // give up on one server after this long and try the next
+export async function overpass(query, { fetchFn = globalThis.fetch, hosts = OVERPASS_HOSTS, waitMs = OVERPASS_WAIT_MS } = {}) {
+  const fails = [];
+  for (const host of hosts) {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = ctl ? setTimeout(() => ctl.abort(), waitMs) : null;
+    try {
+      const r = await fetchFn(host, { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl?.signal });
+      if (!r.ok) { fails.push(r.status); continue; }
+      const json = await r.json();
+      if (!json || !Array.isArray(json.elements)) { fails.push('bad reply'); continue; }
+      return json;
+    } catch (e) { fails.push(e?.name === 'AbortError' ? 'timeout' : 'offline'); }
+    finally { if (timer) clearTimeout(timer); }
+  }
+  const err = new Error(`the map server is busy (${fails.join(', ')})`); err.busy = true; err.fails = fails; throw err;
+}
 const r6 = (v) => Math.round(v * 1e6) / 1e6;
 function osmKind(t = {}) {
   const g = t.golf;

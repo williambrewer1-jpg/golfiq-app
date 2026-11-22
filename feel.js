@@ -441,6 +441,7 @@ export const COPY = {
     recentre: 'Recentre', zoom: (z) => ({ shot: 'Shot', hole: 'Hole', green: 'Green', free: 'Pinched' })[z] || z, zoomLabel: 'Zoom',
     pace: (p, pr) => `On pace for ${p}, predicted ${pr}`,
     nextAsk: (n) => `Go to hole ${n}?`, nextNo: 'Not now',
+    mapLoading: 'Downloading the course map…', mapFailed: 'Course map unavailable – the map server is busy.', mapRetry: 'Try again',
     markGreen: 'Mark this green', markTee: 'Mark this tee', markWait: (a) => `waiting for GPS within ${a}`, markNote: 'Stand in the middle of it, then tap.',
     markedGreen: (n) => `Green ${n} marked. BreakingPar uses it here from now on.`, markedTee: (n) => `Tee ${n} marked. BreakingPar uses it here from now on.`,
     marks: (what) => `You marked this ${what} yourself.`, forgetMarks: 'Forget my marks for this hole', forgot: 'Marks for this hole removed.',

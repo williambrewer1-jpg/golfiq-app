@@ -77,19 +77,29 @@ export function registerPlay(c) {
     say('Finding your location…');
     const pos = fix ? [fix.lat, fix.lon] : await new Promise((res, rej) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude]), (e) => rej(new Error(e.code === 1 ? 'Location permission declined' : 'No location yet')), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }) : rej(new Error('No location service')));
     say('Looking for golf courses…');
-    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(F.nearbyQuery(pos[0], pos[1])) });
-    if (!r.ok) throw new Error(`OpenStreetMap is busy (${r.status}) – try again in a minute`);
-    c.state.osm.__nearby = { at: new Date().toISOString(), lat: pos[0], lon: pos[1], list: F.parseNearby(await r.json(), pos[0], pos[1]) };
+    const json = await F.overpass(F.nearbyQuery(pos[0], pos[1])).catch((e) => { throw new Error(`OpenStreetMap is busy (${e.fails?.join(', ') || e.message}) – try again in a minute`); });
+    c.state.osm.__nearby = { at: new Date().toISOString(), lat: pos[0], lon: pos[1], list: F.parseNearby(json, pos[0], pos[1]) };
     await S.saveOsm(c.state);
   }
   // Download the outline (fairways, greens, trees, hole lines with pars) for a course picked from the map
   async function fetchOutline(id) {
     const n = (nearby()?.list || []).find((x) => x.id === id); if (!n) return null;
     const b = n.bbox || [n.lat - 0.012, n.lon - 0.012, n.lat + 0.012, n.lon + 0.012], pad = 0.002;
-    const r = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', body: 'data=' + encodeURIComponent(F.overpassQuery([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])) });
-    if (!r.ok) throw new Error(`outline download failed (${r.status})`);
-    c.state.osm[id] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), name: n.name, features: F.parseOverpass(await r.json()) };
+    const json = await F.overpass(F.overpassQuery([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]));
+    c.state.osm[id] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), name: n.name, features: F.parseOverpass(json) };
     await S.saveOsm(c.state); return c.state.osm[id];
+  }
+  // The course map for a round being downloaded right now, or the last download that failed: { id, state: 'loading'|'failed', msg }.
+  // Not saved – a reload simply offers to try again.
+  let mapDl = null;
+  const mapStatus = (d) => (d && mapDl && mapDl.id === d.course_id && !c.state.osm[d.course_id]?.features?.length ? mapDl : null);
+  async function loadOutline(cid) {
+    mapDl = { id: cid, state: 'loading' }; if (CV.active()) CV.redraw();
+    try {
+      const o = await fetchOutline(cid), d = J().draft, pars = F.osmPars(o?.features); mapDl = null;
+      if (d && d.course_id === cid) { for (const [h, p] of Object.entries(pars)) if (!d.holes[h].strokes) d.holes[h].par = p; await saveDraft(); }
+      toast(o?.features?.length ? `Course outline loaded${Object.keys(pars).length ? ` – pars for ${Object.keys(pars).length} holes` : ''}` : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
+    } catch (err) { mapDl = { id: cid, state: 'failed', msg: err.message }; toast(`Playing without the outline: ${err.message}`); c.rerender(); }
   }
   async function start(e) {
     e.preventDefault(); const f = new FormData(e.target), cid = $('[data-sel=pl_course]').value, ex = courses().find((x) => x.course_id === cid);
@@ -107,11 +117,7 @@ export function registerPlay(c) {
     await saveDraft(); c.rerender();
     if (J().draft.side?.wantLive && c.state.cloud?.group) $('#liveStart')?.click();
     if (osmPick && !c.state.osm[cid]?.features?.length) {
-      try {
-        const o = await fetchOutline(cid), d = J().draft, pars = F.osmPars(o?.features);
-        if (d && d.course_id === cid) { for (const [h, p] of Object.entries(pars)) if (!d.holes[h].strokes) d.holes[h].par = p; await saveDraft(); }
-        toast(`Course outline loaded${Object.keys(pars).length ? ` – pars for ${Object.keys(pars).length} holes` : ''}`); c.rerender();
-      } catch (err) { toast(`Playing without the outline: ${err.message}`); }
+      await loadOutline(cid);
     }
   }
 
@@ -484,10 +490,10 @@ export function registerPlay(c) {
   async function osmHere(e) {
     const p = fix ? [fix.lat, fix.lon] : null; if (!p) return; e.target.disabled = true; $('#plOsmMsg').textContent = 'Downloading…';
     try { const m = 0.012, bb = [p[0] - m, p[1] - m / Math.cos(p[0] * Math.PI / 180), p[0] + m, p[1] + m / Math.cos(p[0] * Math.PI / 180)];
-      const r = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(F.overpassQuery(bb))}`); if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      c.state.osm.__live = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: F.parseOverpass(await r.json()) }; await S.saveOsm(c.state);
+      const json = await F.overpass(F.overpassQuery(bb));
+      c.state.osm.__live = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: F.parseOverpass(json) }; await S.saveOsm(c.state);
       toast(c.state.osm.__live.features.length ? 'Course outlines downloaded' : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
-    } catch (err) { $('#plOsmMsg').textContent = `Map service unavailable (${err.message})`; e.target.disabled = false; }
+    } catch (err) { $('#plOsmMsg').textContent = `Course map unavailable – ${err.message}`; e.target.disabled = false; }
   }
   // Course view: opens by itself while a round is in progress; the classic page stays one tap away (plan 4.1)
   const cvOn = (d) => CV_AUTO_OPEN && c.ui.pl_cv_off !== d.id;
@@ -521,7 +527,7 @@ export function registerPlay(c) {
     $('#plOsmHere')?.addEventListener('click', osmHere);
   }
   CV = registerCourse(c, {
-    fix: () => fix, gpsErr: () => gpsErr, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
+    fix: () => fix, gpsErr: () => gpsErr, mapStatus, retryMap: () => { const d = D(); if (d?.course_id?.startsWith('osm-') && mapStatus(d)?.state !== 'loading') loadOutline(d.course_id); }, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
     strategyHtml, stratPick, labelOf, reach: reachM, wedgeRows, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
     scoreEntryHtml, scoreSummaryHtml, challengeHtml, paceHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
   });
