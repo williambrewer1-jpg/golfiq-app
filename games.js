@@ -27,19 +27,19 @@ export function steps(game, { seed = 1, unitM = YD } = {}) {
   const r = rng(seed), id = game.id, u = unitName(unitM), n = (k, f) => Array.from({ length: k }, (_, i) => f(i));
   const hm = (prompt, sub) => ({ prompt, sub, input: 'hit_miss' });
   switch (id) {
-    case 'putt-par18': return shuffle(P18, r).map((d, i) => ({ prompt: `Hole ${i + 1} of 9`, sub: `${d} ft · hole out`, input: 'strokes', par: 2 }));
-    case 'putt-369': return n(9, (i) => { const d = [3, 6, 9][Math.floor(i / 3)]; return hm(`${d} ft`, `Ball ${(i % 3) + 1} of 3 · holed?`); });
-    case 'putt-lag': return shuffle([20, 24, 28, 32, 35, 38, 42, 45, 48, 50], r).map((d, i) => hm(`${d} ft`, `Putt ${i + 1} of 10 · finish inside 3 ft?`));
-    case 'putt-streak': return n(40, (i) => hm('4 ft', `Putt ${i + 1} · the streak ends on a miss`));
-    case 'chip-updown': return shuffle(LIES, r).map((l, i) => hm(l, `Lie ${i + 1} of 9 · up and down?`));
-    case 'chip-par18': return shuffle(LIES, r).map((l, i) => ({ prompt: `Hole ${i + 1} of 9`, sub: `${l} · chip and putt out`, input: 'strokes', par: 2 }));
-    case 'chip-zone': return n(10, (i) => hm('Land it on the towel', `Chip ${i + 1} of 10 · on the towel?`));
-    case 'range-fairways': return n(14, (i) => hm(`Tee shot ${i + 1} of 14`, 'Finished between your two targets?'));
-    case 'range-greens': return shuffle([80, 90, 100, 110, 120, 130, 140, 150, 160], r).map((d, i) => hm(`${dist(d, unitM)} ${u}`, `Shot ${i + 1} of 9 · inside ${Math.max(1, Math.round(dist(d, unitM) * 0.1))} ${u}? ${CLUBS_HINT}`));
-    case 'range-wedge': return n(10, () => 0).map((_, i) => hm(`${dist(40 + Math.floor(r() * 13) * 5, unitM)} ${u}`, `Shot ${i + 1} of 10 · finish within ${isYd(unitM) ? '5 yd' : '4.5 m'}?`));
-    case 'range-driver': return n(DRIVER_TEST.balls, (i) => ({ prompt: `Ball ${i + 1} of ${DRIVER_TEST.balls}`, sub: 'How far did it go, and where did it finish?', input: 'distance', results: true }));
+    case 'putt-par18': return shuffle(P18, r).map((d, i) => ({ prompt: `Hole ${i + 1} of 9`, sub: `${d} ft · putt until it's in`, input: 'strokes', par: 2 }));
+    case 'putt-369': return n(9, (i) => { const d = [3, 6, 9][Math.floor(i / 3)]; return hm(`${d} ft`, `Ball ${(i % 3) + 1} of 3 from ${d} ft`); });
+    case 'putt-lag': return shuffle([20, 24, 28, 32, 35, 38, 42, 45, 48, 50], r).map((d, i) => hm(`${d} ft`, `Putt ${i + 1} of 10 · one putt, don't hole out`));
+    case 'putt-streak': return n(40, (i) => hm('4 ft', `Putt ${i + 1} · the first miss ends the game`));
+    case 'chip-updown': return shuffle(LIES, r).map((l, i) => hm(l, `Spot ${i + 1} of 9 · chip, then putt out`));
+    case 'chip-par18': return shuffle(LIES, r).map((l, i) => ({ prompt: `Hole ${i + 1} of 9`, sub: `${l} · chip, then putt out`, input: 'strokes', par: 2 }));
+    case 'chip-zone': return n(10, (i) => hm('Land it on the towel', `Chip ${i + 1} of 10 · same club every time`));
+    case 'range-fairways': return n(14, (i) => hm(`Tee shot ${i + 1} of 14`, 'Your normal tee club, full routine'));
+    case 'range-greens': return shuffle([80, 90, 100, 110, 120, 130, 140, 150, 160], r).map((d, i) => hm(`${dist(d, unitM)} ${u}`, `Shot ${i + 1} of 9 to a target this far away. ${CLUBS_HINT}`));
+    case 'range-wedge': return n(10, () => 0).map((_, i) => hm(`${dist(40 + Math.floor(r() * 13) * 5, unitM)} ${u}`, `Shot ${i + 1} of 10 · hit a wedge to this number`));
+    case 'range-driver': return n(DRIVER_TEST.balls, (i) => ({ prompt: `Ball ${i + 1} of ${DRIVER_TEST.balls}`, sub: 'Full routine, aim between your two markers', input: 'distance', results: true }));
     case 'range-speed': return n(DRIVER_TEST.speed_balls, (i) => ({ prompt: `Ball ${i + 1} of ${DRIVER_TEST.speed_balls}`, sub: 'Swing for maximum distance', input: 'distance', results: false }));
-    case 'range-round': return n(18, (i) => hm(i % 2 ? `Hole ${(i + 1) >> 1} approach` : `Hole ${(i >> 1) + 1} tee shot`, 'Would it have worked?'));
+    case 'range-round': return n(18, (i) => hm(i % 2 ? `Hole ${(i + 1) >> 1} approach` : `Hole ${(i >> 1) + 1} tee shot`, i % 2 ? 'Your approach into the green' : 'The club you would hit off this tee'));
     default: return null;
   }
 }

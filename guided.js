@@ -11,6 +11,7 @@ import * as FEEL from './feel.js';
 import * as LV from './level.js';
 import * as P from './party.js';
 import * as FW from './firstweek.js';
+import * as H from './howto.js';
 import { icon, shotArt } from './icons.js';
 
 export function registerGuided(c) {
@@ -55,12 +56,38 @@ export function registerGuided(c) {
     : (d?.welcome_back || d?.boss || d?.duel) && Number.isFinite(d.target) ? { ...inf, target: d.target } : inf);
   const tierChip = (t) => (t ? `<span class="tier ${t.key}">${esc(t.name)}</span>` : '');
 
+  // ------------------------------------------------------------ how to play: a sheet over the game, opened by the ? button at any time,
+  // and opened by itself before ball 1 the first HOW_AUTO times a golfer plays a game guided. (Automated browsers, i.e. the tests, skip the automatic opening unless they set window.__howTest.)
+  const HOW_AUTO = 2;
+  const guidedPlays = (id) => (J().results || []).filter((r) => r.game === id && r.mode === 'guided').length;
+  const howFirst = (id) => H.hasHow(id) && guidedPlays(id) < HOW_AUTO && !((globalThis.navigator?.webdriver || globalThis.__feelTest) && !globalThis.__howTest);
+  const helpBtn = () => `<button type="button" class="gp-x gp-help" data-gphelp aria-label="How to play" title="How to play">${icon('help', 22)}</button>`;
+  function howRows(g, u) {
+    const h = H.howTo(g, u); if (!h) return '';
+    return `<p class="gp-haim">${esc(h.aim)}</p><ol class="gp-hrows">${h.rows.map((x, k) => `<li><span class="gp-hn">${k + 1}</span><div><b>${esc(x.label)}</b><span>${esc(x.text)}</span></div></li>`).join('')}</ol>`;
+  }
+  function howLayer(g, d, inf, i) {
+    if (!view.how) return '';
+    const lower = g.better === 'lower', tgt = Number.isFinite(inf?.target) ? `${sc(inf.target)}${lower ? ' or fewer' : ' or more'}` : null;
+    const why = d?.first_week ? (Number.isFinite(d.target) ? 'your mark from last time' : null) : d?.boss ? 'the boss target' : d?.welcome_back ? 'your usual score' : Number.isFinite(inf?.skill_h) ? `what a ${inf.skill_h} handicapper scores` : null;
+    return `<div class="gp-how" id="gpHow" role="dialog" aria-modal="true" aria-labelledby="gpHowT"><div class="gp-hcard">
+      <div class="gp-hkick">How to play · about ${G.minutesFor(g.id)} min</div><h2 id="gpHowT">${esc(g.name)}</h2>
+      ${howRows(g, d?.unitM ?? unitM())}
+      ${tgt ? `<p class="gp-htgt">${icon('flag', 16)}<span>Your target: <b>${esc(tgt)}</b>${why ? ` · ${esc(why)}` : ''}</span></p>` : d?.first_week && !Number.isFinite(d.target) ? `<p class="gp-htgt">${icon('flag', 16)}<span>No target this time. This first go sets your mark to beat.</span></p>` : ''}
+      ${d?.pressure ? `<p class="gp-htgt">${icon('flame', 16)}<span>Pressure finish is on: ${esc(G.pressureRule(g))}.</span></p>` : ''}
+      <button type="button" class="btn gp-hgo" data-gphowclose>${i ? `Back to the game` : 'Start'}</button></div></div>`;
+  }
+  async function openHow() { view.how = true; FEEL.play('tap'); render(); $('#gpHow [data-gphowclose]')?.focus(); }
+  function closeHow() { if (!view.how) return; view.how = false; render(); }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && view.how && $('#gpHow')) closeHow(); });
+
   // ------------------------------------------------------------ starting, stepping, finishing
   async function start(id, opts = {}) {
     seq++; busy = false; view.banner = null; timers.forEach(clearTimeout); timers = [];
     const g = gameOf(id); if (!g || !canGuide(id)) { c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.saveUi(); c.rerender(); return; }
     J().game_draft = G.newDraft(g, { unitM: opts.unitM || unitM(), pressure: !!opts.pressure || !!opts.boss, boss: opts.boss || null, session_id: opts.session_id || null, ghost: opts.ghost || null, seed: opts.seed ?? opts.ghost?.seed, adj: c.state.settings?.range_ball_adj, welcome_back: !!opts.welcome_back, target: opts.target, duel: opts.duel || null, first_week: opts.first_week || null });
     if (opts.party) J().game_draft.party = opts.party;
+    view.how = !!J().game_draft && howFirst(id);
     if (opts.first_week && opts.fw_swapped && J().game_draft) J().game_draft.fw_swapped = true;
     c.ui.pr_tab = 'games'; c.ui.pg_game = id; c.ui.game_result = null; c.ui.session_gap = null; c.saveUi(); await save();
     if (location.hash !== '#practice') location.hash = '#practice'; else c.rerender();
@@ -84,7 +111,7 @@ export function registerGuided(c) {
   // The answer is saved the moment the button is pressed. Only the screen waits (FEEL.feedbackMs, about 450 ms) so the verdict can be read; taps in that
   // window are ignored, so a double tap can never answer two balls.
   let busy = false, seq = 0, timers = [], posting = null;     // posting: the score being shared with the group, so the league chip waits for it
-  const view = { banner: null };                                                 // the mid-game banner, kept across the re-render so it does not restart
+  const view = { banner: null, how: false };  // how: the how-to-play sheet is open over the game                                                 // the mid-game banner, kept across the re-render so it does not restart
   const later = (ms, f) => { const t = seq; timers.push(setTimeout(() => { if (t === seq) f(); }, ms)); };
   const word = (key) => FEEL.COPY.verdict[key] || key;
   const artFor = (g, step) => ({ 'putt-lag': 'lag', 'chip-updown': 'chip', 'chip-par18': 'chip', 'chip-zone': 'zone', 'range-greens': 'target', 'range-wedge': 'target', 'range-fairways': 'fairway', 'range-driver': 'drive', 'range-speed': 'long' })[g.id]
@@ -151,7 +178,7 @@ export function registerGuided(c) {
     const ball = { d: Math.round(dist), r: result, a: d.premium ? 0 : d.adj || 0 };
     await answer(G.ballValue(ball, d.unitM), ball, btn);
   }
-  async function quit() { if (busy) return; if (!confirm(draft0()?.duel ? FEEL.COPY.duels.quit : run()?.kind === 'boss' ? FEEL.COPY.boss.quit(run().results.length) : run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
+  async function quit() { if (busy) return; if (!confirm(draft0()?.duel ? FEEL.COPY.duels.quit : run()?.kind === 'boss' ? FEEL.COPY.boss.quit(run().results.length) : run() ? 'Stop this session? Games you finished are kept.' : 'Stop this game? Nothing is saved.')) return; seq++; timers.forEach(clearTimeout); timers = []; J().game_draft = null; view.how = false; if (draft0()?.session_id || run()) endSession(true); await save(); c.rerender(); }
   // a saved result's tier: benchmark games use the handicap table, own-history games judge it against the scores before it
   const tierOf = (g, r) => (G.isOwn(g) ? G.tierFor(g, r.score, unitM(), G.scoresBefore(g, J().results || [], r.id)) : G.tierFor(g, r.score, unitM()));
   async function finish(opts = {}) {
@@ -190,27 +217,27 @@ export function registerGuided(c) {
         <label class="f" for="gpDtype">Or type the exact number (launch monitor)</label><input type="number" id="gpDtype" inputmode="decimal" min="1" placeholder="${un}">
         ${d.adj > 0 ? `<label class="gp-prem"><input type="checkbox" id="gpPrem" ${d.premium ? 'checked' : ''}> <span>Premium ball: skip the ${d.adj}% range-ball adjustment</span></label>` : ''}</div>`;
     }
-    const X = icon('cross', 22), T = icon('tick', 22);
+    const X = icon('cross', 22), T = icon('tick', 22), ask = H.askOf(g, step, d.unitM);
     const btns = isD
       ? (step.results ? `<button class="gp-b hit" data-gpball="f">${T}<span>Fairway</span></button><button class="gp-b" data-gpball="m">${X}<span>Missed</span></button><button class="gp-b miss" data-gpball="w">${X}<span>Wide</span></button>` : `<button class="gp-b hit" data-gpball="f">Save ball</button>`)
       : step.input === 'strokes'
       ? [1, 2, 3, 4, 5].map((n) => `<button class="gp-b ${n <= (step.par || 2) ? 'good' : ''}" data-gp="${n}">${n === 5 ? '5+' : n}</button>`).join('')
-      : `<button class="gp-b miss" data-gp="0">${X}<span>Miss</span></button><button class="gp-b hit" data-gp="1">${T}<span>${/holed|Holed/.test(step.sub) ? 'Holed' : 'Hit'}</span></button>`;
+      : `<button class="gp-b miss" data-gp="0">${X}<span>${esc(ask.no || 'Miss')}</span></button><button class="gp-b hit" data-gp="1">${T}<span>${esc(ask.yes || 'Hit')}</span></button>`;
     const gh = d.ghost && i > 0 ? LG.compareAt(g, a, d.ghost.detail, i) : null;
     const ghostLine = d.ghost ? `<div class="gp-ghost ${gh ? gh.state : 'level'}">${esc(d.ghost.nick)}${gh ? ` had ${sc(gh.ghost)} after ${i} · ${gh.state === 'level' ? 'you are level' : `you are ${gh.state} by ${sc(Math.abs(gh.diff))}`}` : `'s ${sc(d.ghost.score)} to beat`}</div>` : '';
     const tgt = d.first_week ? (Number.isFinite(d.target) ? FEEL.COPY.firstWeek.beatMark(sc(d.target), lower) : FEEL.COPY.firstWeek.setMark) : d.boss && Number.isFinite(d.target) ? FEEL.COPY.boss.target(sc(d.target)) : d.welcome_back && Number.isFinite(d.target) ? FEEL.COPY.welcome.target(sc(d.target)) : inf.target !== undefined && inf.target !== null ? FEEL.COPY.target(sc(inf.target), inf.skill_h, lower) : '';
     const streak = G.streakOf(g, list, a, bl), prog = barOf(g, list, a, sc0.score, inf), ban = view.banner && Date.now() - view.banner.t0 < 1450 ? view.banner : null;
     return `<div class="gp gp-full${pr ? ' gp-pr' : ''}${d.boss ? ' gp-boss' : ''}" id="gpRoot"${busy ? ' data-busy="1"' : ''}>
       <div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button>
-        <div class="gp-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(prog * 100)}"><i id="gpBar" class="fx-fill" style="--p:${prog}"></i></div>${soundBtn()}</div>
+        <div class="gp-bar" role="progressbar" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(prog * 100)}"><i id="gpBar" class="fx-fill" style="--p:${prog}"></i></div>${H.hasHow(g.id) ? helpBtn() : ''}${soundBtn()}</div>
       ${d0.party ? whoRow(d0, ci, g, list) : ''}${d.boss ? bossBar(d.boss, i < list.length ? d.game : null) : ''}<div class="gp-strip"><div class="gp-sc"><div class="gp-name">${esc(g.name)}</div><b id="gpScore">${scoreText(g, sc0.score, i)}</b><span id="gpScoreLbl">${scoreLabel(g, i, list.length)}</span></div>
         <div class="gp-side"><span class="gp-streak" id="gpStreak" ${streak >= 2 ? '' : 'hidden'}>${icon('flame', 18)}<b>${streak}</b></span><span class="gp-tgt">${esc(tgt)}</span></div>
         <div class="gp-banner" id="gpBanner" ${ban ? `style="animation-delay:-${Date.now() - ban.t0}ms"` : 'hidden'}>${ban ? esc(ban.text) : ''}</div></div>
       ${d0.party ? board(d0, g, list, ci) : ''}<div class="gp-dots">${dots}</div>
       ${ghostLine}${pr ? `<div class="gp-pressure">${esc(G.pressureBanner(g))}</div>` : ''}
       <div class="gp-main" id="gpMain"><div class="gp-art">${shotArt(artFor(g, step))}</div><div class="gp-prompt">${esc(step.prompt)}</div><div class="gp-sub">${esc(step.sub || '')}</div><div class="gp-verdict" id="gpVerdict" aria-live="polite"></div></div>
-      <div class="gp-sheet${busy ? ' gp-locked' : ''}" id="gpSheet">${dist}<div class="gp-btns ${isD ? (step.results ? 'three' : 'one') : step.input === 'strokes' ? 'five' : 'two'}">${btns}</div>
-        <div class="gp-foot"><button class="btn sec" data-gpundo ${(d0.party ? d0.party.log.length : i) ? '' : 'disabled'}>Undo</button></div></div></div>`;
+      <div class="gp-sheet${busy ? ' gp-locked' : ''}" id="gpSheet">${ask.q ? `<div class="gp-ask" id="gpAsk">${esc(ask.q)}</div>` : ''}${dist}<div class="gp-btns ${isD ? (step.results ? 'three' : 'one') : step.input === 'strokes' ? 'five' : 'two'}">${btns}</div>
+        <div class="gp-foot"><button class="btn sec" data-gpundo ${(d0.party ? d0.party.log.length : i) ? '' : 'disabled'}>Undo</button>${H.hasHow(g.id) ? `<button type="button" class="gp-rules" data-gphelp>How to play</button>` : ''}</div></div>${howLayer(g, d, inf, d0.party ? d0.party.log.length : i)}</div>`;
   }
   // ------------------------------------------------------------ practice with a friend: whose turn, the scoreboard, the hand-over and the set-up sheet
   function whoRow(d0, ci, g, list) {
@@ -224,10 +251,10 @@ export function registerGuided(c) {
   }
   function handoverScreen(d0, g, list) {
     const t = P.turn(d0.party, g, list), pl = d0.party.players[t.player], st = P.stationInfo(d0.party, g, list), K = FEEL.COPY.party;
-    return `<div class="gp gp-full gp-hand" id="gpRoot"><div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button><div class="gp-hname">${esc(g.name)}</div>${soundBtn()}</div>
+    return `<div class="gp gp-full gp-hand" id="gpRoot"><div class="gp-top"><button type="button" class="gp-x" data-gpquit aria-label="Close game" title="Close">${icon('cross', 22)}</button><div class="gp-hname">${esc(g.name)}</div>${H.hasHow(g.id) ? helpBtn() : ''}${soundBtn()}</div>
       <div class="gp-hmain"><div class="gp-hk">${esc(K.pass)}</div><div class="gp-who big ${pillCls(pl)}"><span class="gp-pill">${esc(pl.name)}</span></div><div class="gp-hsub">${esc(K.left(st.left, st.prompt, st.open))}</div></div>
       ${board(d0, g, list, t.player)}
-      <div class="gp-sheet"><div class="gp-btns one"><button class="gp-b hit" data-gphand>${esc(K.ready(pl.name))}</button></div><div class="gp-foot"><button class="btn sec" data-gpundo ${d0.party.log.length ? '' : 'disabled'}>${esc(K.undoHand)}</button></div></div></div>`;
+      <div class="gp-sheet"><div class="gp-btns one"><button class="gp-b hit" data-gphand>${esc(K.ready(pl.name))}</button></div><div class="gp-foot"><button class="btn sec" data-gpundo ${d0.party.log.length ? '' : 'disabled'}>${esc(K.undoHand)}</button></div></div>${howLayer(g, d0, { target: null }, d0.party.log.length)}</div>`;
   }
   async function handedOver() { const d = draft(); if (!d?.party) return; const g = gameOf(d.game); d.party = P.handedOver(d.party, g, G.steps(g, { seed: d.seed, unitM: d.unitM })); await save(); render(); }
   // ---- the result of a game with friends (phase C2): a podium in the hero, then the day's series, the record against each friend, and a share button.
@@ -470,7 +497,7 @@ export function registerGuided(c) {
     const ladder = st.ladder ? `<div class="tiers">${st.ladder.map((t) => `<span class="tier ${t.key} ${st.tier && rk(st.tier) >= rk(t) ? 'on' : ''}">${t.name} <b>${sc(t.score)}</b></span>`).join('')}</div>
       <p class="small muted" style="margin:4px 0 8px">${note}${st.next ? ` Next tier: ${st.next.name} at ${sc(st.next.score)}.` : ''}</p>`
       : st.own ? `<p class="small muted" style="margin:4px 0 8px">Play ${st.need} more time${st.need === 1 ? '' : 's'} and BreakingPar will set your own tiers from your scores.</p>` : '';
-    const beat = inf.target !== undefined && inf.target !== null ? `<p class="small" style="margin:0 0 8px">Beat the ${inf.skill_h}-handicapper: <b>${sc(inf.target)}${g.better === 'lower' ? ' or fewer' : '+'}</b> (${esc(inf.sub)}).</p>` : '';
+    const beat = inf.target !== undefined && inf.target !== null ? `<p class="small" style="margin:0 0 8px">Your target: <b>${sc(inf.target)}${g.better === 'lower' ? ' or fewer' : ' or more'}</b>, what a ${inf.skill_h} handicapper scores (${esc(inf.sub)}).</p>` : '';
     if (!canGuide(g.id)) return '';
     return `${ladder}${beat}<label class="f gp-prlabel" style="display:flex;gap:8px;align-items:center;margin:4px 0 10px;min-height:44px;cursor:pointer"><input type="checkbox" id="gpPressure" style="width:22px;height:22px;flex:0 0 auto"> <span>Pressure finish: ${esc(G.pressureRule(g))}</span></label>
       ${c.compete.groupOn() ? `<div id="gpGhost" data-ghostgame="${esc(g.id)}"></div>` : ''}
@@ -569,7 +596,7 @@ export function registerGuided(c) {
       <div class="gp-hero"><div class="gp-rname">${esc(test ? K.session.test : K.session.name)}</div>
         <div class="gp-rverdict" id="gpGapN">${esc(K.progress(done, n))}</div>
         <div class="gp-gbar" role="progressbar" aria-valuemin="0" aria-valuemax="${n}" aria-valuenow="${done}"><i id="gpGapBar" data-to="${done / n}" style="--p:${anim ? (done - 1) / n : done / n}"></i></div>
-        <div class="gp-rnext">${esc(K.next)}</div><div class="gp-gname">${esc(nx.name)}</div>
+        <div class="gp-rnext">${esc(K.next)}</div><div class="gp-gname">${esc(nx.name)}</div>${H.howTo(nx, unitM()) ? `<div class="gp-gaim">${esc(H.howTo(nx, unitM()).aim)}</div>` : ''}
         ${r.group ? `<div class="gp-rlevel" id="gpGapWith">${esc(FEEL.COPY.party.with(r.group.players.filter((p) => !p.owner).map((p) => p.name)))}</div>` : `<div class="gp-rlevel">about ${G.minutesFor(nx.id)} min${inf.target !== undefined && inf.target !== null ? ` · Target ${sc(inf.target)}${lower ? ' or fewer' : '+'}` : ''}</div>`}</div>
       <div class="gp-rbody"><div class="row"><button class="btn" data-gpgapgo>${esc(K.session.start(nx.name))}</button><button class="btn sec" data-gpsesend>${esc(test ? K.session.finishTest : K.session.finish)}</button></div></div></div>`;
   }
@@ -786,6 +813,7 @@ export function registerGuided(c) {
     sl?.addEventListener('input', () => { num.textContent = sl.value; if (ty) ty.value = ''; });
     ty?.addEventListener('input', () => { num.textContent = ty.value !== '' ? ty.value : sl.value; });
     $('#gpPrem')?.addEventListener('change', (e) => { const d = draft(); if (d) { d.premium = e.target.checked; save(); } });
+    $$('[data-gphelp]').forEach((b) => b.addEventListener('click', openHow)); $('[data-gphowclose]')?.addEventListener('click', closeHow);
     $('[data-gpundo]')?.addEventListener('click', undo); $('[data-gpquit]')?.addEventListener('click', quit); $('#gpSound')?.addEventListener('click', toggleSound);
     $$('[data-gpstart]').forEach((b) => b.addEventListener('click', () => start(b.dataset.gpstart, { pressure: !!$('#gpPressure')?.checked })));
     $$('[data-gpparty]').forEach((b) => b.addEventListener('click', () => partySetup(b.dataset.gpparty, !!$('#gpPressure')?.checked))); $$('[data-gphand]').forEach((b) => b.addEventListener('click', handedOver));
