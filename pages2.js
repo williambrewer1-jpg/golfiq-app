@@ -1,6 +1,7 @@
 // BreakingPar pages: caddie, post-round review, handicap, conditions, before/after, playbook, personal bests,
 // practice (games, log, wedge matrix), coach hub (priorities, notes from Claude, swing thoughts), share card, course maps.
 import * as F from './features.js';
+import * as HT from './howto.js';
 import * as B from './bench.js';
 import * as HM from './holemap.js';
 import * as ST from './strategy.js';
@@ -365,13 +366,15 @@ export function registerPages(c) {
   function practiceGames() {
     const games = F.gameStats(allGames(), J().results), entry = games.filter((x) => !x.auto), gid = segVal('pg_game', entry[0].id), g = games.find((x) => x.id === gid) || entry[0];
     const cats = [...new Set(entry.map((x) => x.cat))], uM = c.UNIT === 'yd' ? 0.9144 : 1, L = (s) => c.compete.lvlText(c.compete.lvl(g.id, s));
-    const bench = B.hasLevel(g.id) ? `<p class="small muted" style="margin:6px 0">Handicap benchmarks: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 hcp ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 hcp ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
+    const bench = B.hasLevel(g.id) ? `<details class="small muted" style="margin:4px 0 8px"><summary>Handicap benchmarks</summary><p style="margin:6px 0">What golfers score: scratch ${fmt(B.expectedFor(g.id, 0, uM), 1)} · 10 handicap ${fmt(B.expectedFor(g.id, 10, uM), 1)} · 20 handicap ${fmt(B.expectedFor(g.id, 20, uM), 1)}. ${esc(B.NOTES[g.id] || '')}</p></details>` : B.NO_LEVEL[g.id] ? `<p class="small muted" style="margin:6px 0">${esc(B.NO_LEVEL[g.id])}</p>` : '';
+    const ht = HT.howTo(g, uM), howHtml = ht && HT.hasHow(g.id) ? `<div class="gp-howc"><p class="gp-haim">${esc(ht.aim)}</p><ol class="gp-hrows">${ht.rows.map((x, k) => `<li><span class="gp-hn">${k + 1}</span><div><b>${esc(x.label)}</b><span>${esc(x.text)}</span></div></li>`).join('')}</ol></div>`
+      : `<p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>`;
     if (c.guided?.screen()) return c.guided.screen();
     const picker = select('pg_game', cats.flatMap((cat) => entry.filter((x) => x.cat === cat).map((x) => [x.id, `${cat} · ${x.name}`])), g.id, 'Game');
     const shortcuts = c.guided ? c.guided.testCard() + c.guided.sessionCard() + c.guided.dailyCard() : '';
     const gridCard = c.guided ? `<div class="card"><h2>Games</h2>${c.guided.gameCards(entry, g.id)}<details class="gp-pick"><summary class="small">Pick from a list</summary>${picker}</details></div>` : '';
     return `${shortcuts}${gridCard}<div class="card" id="gpPlay"><h2>${c.guided ? esc(g.name) : 'Play a game'}</h2>${c.guided ? '' : picker}
-      <p class="small" style="margin:8px 0"><b>How to play:</b> ${esc(g.how || '')} <span class="muted">(${g.better === 'lower' ? 'lower is better' : 'higher is better'})</span></p>${bench}${c.guided ? c.guided.launcher(g) : ''}
+      ${howHtml}${c.guided ? c.guided.launcher(g) : ''}${bench}
       <details id="pgQuick"><summary><b>Quick entry</b> <span class="small muted">type in a score you already played</span></summary><form id="pgForm" style="margin-top:8px">
       <div class="row"><div><label class="f">Date</label><input name="date" type="date" value="${today()}" required></div><div><label class="f">Score (${esc(F.unitOf(g, c.UNIT) || '')})</label><input name="score" type="number" inputmode="decimal" step="any" ${g.max ? `max="${g.max}"` : ''} min="0" required></div></div>
       <label class="f">Note (optional)</label><input name="note" style="width:100%" placeholder="conditions, feel, club used…"><p><button class="btn">Save score</button></p></form></details></div>
