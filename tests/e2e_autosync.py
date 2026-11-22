@@ -51,6 +51,13 @@ with sync_playwright() as p:
         st.sync.last_sync = '2020-01-01T00:00:00Z'; await S.saveSync(st); }""")
     hits.clear(); pg.goto(URL + '#play'); pg.reload(); pg.wait_for_function('window.__golfiq && window.__golfiq.state'); pg.wait_for_timeout(800)
     assert not hits, hits
+    # a saved repo but no token: the home sync line says so and links straight to the Garmin sync settings
+    pg.evaluate("""async () => { const S = await import('./store.js'); const st = window.__golfiq.state;
+        st.sync.token = ''; await S.saveSync(st); }""")
+    hits.clear(); pg.goto(URL + '#home'); pg.reload(); pg.wait_for_selector('#syncMsg a[data-sttab="sync"]', state='attached')
+    assert 'No token saved' in pg.inner_text('#syncMsg'); assert not hits, hits
+    pg.eval_on_selector('#syncNow', 'b => b.click()'); pg.wait_for_function("document.querySelector('#syncMsg').textContent.includes('fine-grained token')")
+    pg.reload(); pg.wait_for_selector('#syncMsg a[data-sttab="sync"]', state='attached'); pg.eval_on_selector('#syncMsg a[data-sttab="sync"]', 'a => a.click()'); pg.wait_for_selector('#syncForm input[name="token"]', state='attached')
     assert not errs, errs
     b.close()
-print(f'autosync: {want} round(s) pulled on open without tapping Sync, throttled, skipped on Play – passed')
+print(f'autosync: {want} round(s) pulled on open without tapping Sync, throttled, skipped on Play, missing token flagged – passed')
