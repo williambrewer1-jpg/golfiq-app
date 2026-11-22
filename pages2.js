@@ -256,16 +256,9 @@ export function registerPages(c) {
   // ================================================================ 7. Course maps (OpenStreetMap)
   async function fetchCourseMap(courseId) {
     const bb = F.courseBBox(c.DS, courseId); if (!bb) throw new Error('Not enough GPS points for this course');
-    const q = F.overpassQuery(bb); let lastErr = '';
-    for (const host of ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter']) {
-      try {
-        const r = await fetch(`${host}?data=${encodeURIComponent(q)}`); if (!r.ok) { lastErr = `HTTP ${r.status}`; continue; }
-        const feats = F.parseOverpass(await r.json());
-        c.state.osm[courseId] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: feats }; await S.saveOsm(c.state);
-        return feats;
-      } catch (e) { lastErr = e.message; }
-    }
-    throw new Error(`Map service unavailable (${lastErr})`);
+    const feats = F.parseOverpass(await F.overpass(F.overpassQuery(bb)));
+    c.state.osm[courseId] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), features: feats }; await S.saveOsm(c.state);
+    return feats;
   }
   function osmCard(courseId) {
     const o = c.state.osm[courseId], n = (k) => o?.features.filter((f) => f.kind === k).length || 0;
@@ -281,7 +274,7 @@ export function registerPages(c) {
     $$('[data-osm]').forEach((b) => b.addEventListener('click', async () => {
       const m = b.parentElement.querySelector('[data-osmmsg]'); b.disabled = true; if (m) m.textContent = 'Downloading…';
       try { const f = await fetchCourseMap(b.dataset.osm); toast(f.length ? `${f.length} course features downloaded` : 'This course is not mapped in OpenStreetMap yet'); c.rerender(); }
-      catch (e) { if (m) m.textContent = e.message; b.disabled = false; }
+      catch (e) { if (m) m.textContent = `Course map unavailable – ${e.message}`; b.disabled = false; }
     }));
   }
 

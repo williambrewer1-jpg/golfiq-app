@@ -147,7 +147,8 @@ export function registerCourse(c, P) {
     const w = where(d);
     if (!w.pos || !w.green) {
       L = null; M = null; V = null; P.setLive(null);
-      box.innerHTML = `<div class="cv-empty"><p>${esc(w.pos ? T.missing.green : T.noPos)}</p></div>`;
+      const ms = P.mapStatus(d);
+      box.innerHTML = `<div class="cv-empty"><p>${esc(!w.pos ? T.noPos : ms?.state === 'loading' ? T.mapLoading : ms?.state === 'failed' ? T.mapFailed : T.missing.green)}</p></div>`;
       chrome(w); return;
     }
     const saved = d.aim?.[d.hole], onTee = w.usingTee || (w.ht.tee && A.haversine(w.pos[0], w.pos[1], w.ht.tee[0], w.ht.tee[1]) < ON_TEE_M);
@@ -209,12 +210,14 @@ export function registerCourse(c, P) {
   }
   // Mark this green / tee (plan 4.5): offered only for what is not known. The tee only before the hole has been started.
   function markOffer(d, w) {
+    if (P.mapStatus(d)) return null;                     // still downloading, or the map server was busy: the map may know this hole
     const h = d.holes[d.hole], tee = !w.ht.tee && !(h.strokes > 0) && !h.shots?.length;
     if (w.ht.green && !tee) return null;
     return { green: !w.ht.green, tee, ready: !!w.fix && w.fix.acc <= SH.POOR_GPS_M };
   }
   function bannerHtml(d) {
     const h = d.holes[d.hole], out = [];
+    if (P.mapStatus(d)?.state === 'failed') out.push(`<div class="cv-marks" id="cvMapFail"><div class="row"><button type="button" class="btn sec" data-cvmapretry>${esc(T.mapRetry)}</button></div><p class="small muted">${esc(P.mapStatus(d).msg)}</p></div>`);
     if (offer && !(TR.on(d) && h.done)) out.push(`<div class="cv-next" id="cvNext"><button type="button" class="btn cv-big" data-cvnext="${offer}">${esc(T.nextAsk(offer))}</button><button type="button" class="btn sec" data-cvnextno>${esc(T.nextNo)}</button></div>`);
     if (markable && !TR.marking()) {
       const btn = (k, label) => `<button type="button" class="btn sec" data-cvmark="${k}"${markable.ready ? '' : ' disabled'}>${esc(label)}</button>`;
@@ -395,6 +398,7 @@ export function registerCourse(c, P) {
       if (b.hasAttribute('data-cvcard')) { open('card'); return; }
       if (b.dataset.cvnext) { FEEL.play('tap'); goHole(Number(b.dataset.cvnext)); return; }
       if (b.hasAttribute('data-cvnextno')) { const o = P.holeOrder(dh); c.ui.pl_next_off = `${dh.id}|${o[o.indexOf(dh.hole) + 1]}`; c.saveUi(); offer = null; peek(); if (measure()) drawMap(); return; }
+      if (b.hasAttribute('data-cvmapretry')) { P.retryMap(); return; }
       if (b.dataset.cvmark) { if (!b.disabled) markHere(b.dataset.cvmark); return; }
       if (b.hasAttribute('data-cvforget')) { forgetMarks(); return; }
       if (b.hasAttribute('data-cvplays')) { c.ui.pl_plays_open = !c.ui.pl_plays_open; c.saveUi(); peek(); return; }
