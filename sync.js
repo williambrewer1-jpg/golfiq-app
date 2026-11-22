@@ -17,7 +17,8 @@ async function getRaw(cfg, path) {
 
 export async function syncFromGitHub(state, progress = () => {}) {
   const cfg = state.sync || {};
-  if (!cfg.owner || !cfg.repo || !cfg.token) throw new Error('Set up cloud sync in Settings first');
+  if (!cfg.owner || !cfg.repo) throw new Error('Set up Garmin sync in Settings → Garmin sync first');
+  if (!cfg.token) throw new Error('No GitHub token saved – add your fine-grained token in Settings → Garmin sync');
   progress('Reading index…');
   const idx = await getRaw(cfg, 'index.json');
   const want = idx.rounds || {}, local = state.rawmeta || {};

@@ -267,7 +267,7 @@ function pageHome() {
     <p style="margin:6px 0 0"><a class="btn sec" href="#rounds" data-openround="${esc(last.round_id)}">Open round</a>${needs ? `<a class="btn" href="#rounds" data-openround="${esc(last.round_id)}" data-tab="review">Review – ${needs} hole${needs > 1 ? 's' : ''} to check</a>` : ''}</p></div>` : ''}
   <div class="quick more"><a class="btn sec" href="#practice" data-practice="focus">Where to improve ›</a><a class="btn sec" href="#stats" data-stats="scoring">All stats ›</a></div>
   ${th.length ? `<details class="card"><summary>Swing thoughts (${th.length})</summary><div class="thoughts" style="margin-top:10px">${th.map((x, i) => `<div class="thought"><span>${i + 1}</span><p>${esc(x)}</p></div>`).join('')}</div></details>` : ''}
-  ${sc.owner ? `<div class="card syncline"><span class="small">Garmin sync · last ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleDateString() : 'never')}</span><button class="btn sec sm" id="syncNow">Sync now</button><span id="syncMsg" class="small"></span></div>` : ''}`;
+  ${sc.owner ? `<div class="card syncline"><span class="small">Garmin sync · last ${esc(sc.last_sync ? new Date(sc.last_sync).toLocaleDateString() : 'never')}</span><button class="btn sec sm" id="syncNow">Sync now</button><span id="syncMsg" class="small">${sc.token ? '' : ' <b>No token saved</b> – <a href="#settings" data-sttab="sync">add your GitHub token</a> to sync.'}</span></div>` : ''}`;
 }
 
 function killersTrend(ds) {
@@ -945,6 +945,7 @@ function wire(page) {
   // links that open a round, a stats tab or a practice tab
   $$('[data-openround]').forEach((a) => a.addEventListener('click', () => { ui.rd_open = a.dataset.openround; ui.rd_tab = a.dataset.tab || 'card'; saveUi(); }));
   $$('[data-stats]').forEach((a) => a.addEventListener('click', () => { ui.sx_tab = a.dataset.stats; saveUi(); }));
+  $$('[data-sttab]').forEach((a) => a.addEventListener('click', () => { ui.st_tab = a.dataset.sttab; saveUi(); }));
   $$('[data-practice]').forEach((a) => a.addEventListener('click', () => { ui.pr_tab = a.dataset.practice; saveUi(); }));
   GUIDED?.wire(); PROG?.tiles();
   on('#syncNow', 'click', async () => {
