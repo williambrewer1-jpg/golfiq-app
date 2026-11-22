@@ -856,6 +856,23 @@ function render() {
   $$('.seg.scroll, .seg.tabs').forEach((g) => { const b = $('button.on', g); if (b) g.scrollLeft = b.offsetLeft - (g.clientWidth - b.offsetWidth) / 2; });
 }
 function rerender() { const y = scrollY; render(); scrollTo(0, y); }
+// Pull new Garmin rounds from the data repo on open / return to the app, so they don't wait for a tap on "Sync now".
+// Skipped mid-round (the Play page) so a refresh never disturbs score entry, and at most every 30 minutes.
+const AUTO_SYNC_MS = 30 * 60 * 1000;
+let autoSyncing = false, autoSyncTried = 0;   // the in-memory stamp also stops a failing sync (expired token) retrying on every return to the app
+async function autoSync() {
+  const sc = state?.sync || {};
+  if (autoSyncing || !navigator.onLine || !sc.owner || !sc.repo || !sc.token) return;
+  if ((location.hash.slice(1) || 'home').split('?')[0] === 'play') return;
+  if (sc.last_sync && Date.now() - Date.parse(sc.last_sync) < AUTO_SYNC_MS) return;
+  if (Date.now() - autoSyncTried < AUTO_SYNC_MS) return;
+  autoSyncing = true; autoSyncTried = Date.now();
+  try {
+    const r = await syncFromGitHub(state);
+    if (r.new || r.updated) { rebuild(); rerender(); toast(`Garmin sync: ${r.new} new round${r.new === 1 ? '' : 's'}${r.updated ? `, ${r.updated} updated` : ''}`); }
+  } catch (e) { toast(`Garmin sync failed: ${e.message}`, 6000); }
+  finally { autoSyncing = false; }
+}
 
 function wire(page) {
   $$('[data-seg]').forEach((g) => g.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; ui[g.dataset.seg] = b.dataset.v; saveUi(); rerender(); }));
@@ -1083,5 +1100,7 @@ addEventListener('hashchange', () => { $('#sheet').classList.remove('open'); if 
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
   PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
   render();
+  autoSync();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoSync(); });
   window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; }, get progress() { return PROG; } };
 })();
