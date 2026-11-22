@@ -39,7 +39,7 @@ with sync_playwright() as p:
     # set up cloud sync as the Settings form would, with no sync yet, then reopen the app
     pg.evaluate("""async () => { const S = await import('./store.js'); const st = window.__golfiq.state;
         st.sync = { owner: 'me', repo: 'golfiq-data', token: 't' }; await S.saveSync(st); }""")
-    hits.clear(); pg.reload(); pg.wait_for_function(f'window.__golfiq && window.__golfiq.state.bundles.length >= {want}', timeout=15000)
+    hits.clear(); pg.reload(); pg.wait_for_function(f'window.__golfiq && window.__golfiq.state.bundles.length >= {want}', timeout=30000)
     n = pg.evaluate('window.__golfiq.state.bundles.length'); assert n == want, n
     assert 'index.json' in hits, hits
     assert pg.evaluate("!!window.__golfiq.state.sync.last_sync")

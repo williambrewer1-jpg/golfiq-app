@@ -7,7 +7,7 @@ export const T = {
   partial_shot_ratio: 0.6, gps_max_shot_m: 400.0, gps_min_shot_m: 1.0,
   min_shots_club_stats: 8, min_shots_club_reliable: 20, min_shots_dispersion: 10,
   min_shots_dispersion_90: 20, min_drives_for_aim_line: 3, duplicate_window_minutes: 20,
-  putts_default_suspect_holes: 9, stableford_allowance: 0.95, sg_min_coverage: 0.30,
+  putts_default_suspect_holes: 9, stableford_allowance: 0.95, sg_min_coverage: 0.30, pin_snap_m: 0.5,
 };
 const M_PER_YD = 0.9144, M_PER_FT = 0.3048;
 
@@ -525,6 +525,13 @@ function buildShots(shots, holes, clubs) {
   for (const g of groups.values()) g.forEach((s, i) => {
     if (s.end_to_pin === null && s.end_lat === null && i + 1 < g.length) s.end_to_pin = g[i + 1].start_to_pin;
   });
+  // Putts aren't GPS-tracked, so for the last full shot on a hole Garmin often stores the pin itself as where the ball finished.
+  // Read literally that is a stiff shot and a 0 ft first putt; treat it as "finish unknown" unless the shot was actually holed (0 putts).
+  for (const g of groups.values()) {
+    const sw = g.filter((s) => s.start_lie !== 'Green' && !['PUTT', 'PENALTY'].includes(String(s.shot_type_garmin ?? '').toUpperCase()));
+    const last = sw[sw.length - 1], h = last ? hmap.get(holeKey(last.round_id, last.hole)) || {} : {};
+    if (last && isNum(last.end_to_pin) && last.end_to_pin < T.pin_snap_m && h.putts !== 0) { last.end_at_pin_marker = true; last.end_to_pin = null; }
+  }
   for (const g of groups.values()) g.forEach((s, i) => {
     const gt = String(s.shot_type_garmin ?? '').toUpperCase(), lie = s.start_lie ?? '';
     const isTee = lie === 'Tee' || gt === 'TEE' || (i === 0 && s.shot_order === 1 && lie === '');
@@ -544,7 +551,7 @@ function buildShots(shots, holes, clubs) {
     s.lateral_m = null; s.long_short_m = null; s.lateral_ref = null;
   });
   for (const s of shots) {
-    if (['approach', 'around_green'].includes(s.category) && s.start_lat !== null && s.end_lat !== null && s.pin_lat !== null) {
+    if (['approach', 'around_green'].includes(s.category) && !s.end_at_pin_marker && s.start_lat !== null && s.end_lat !== null && s.pin_lat !== null) {
       const b = bearing(s.start_lat, s.start_lon, s.pin_lat, s.pin_lon);
       const [al, cr] = alongCross(s.start_lat, s.start_lon, s.end_lat, s.end_lon, b);
       s.lateral_m = cr; s.long_short_m = al - s.start_to_pin; s.lateral_ref = 'pin';
@@ -575,6 +582,7 @@ function buildShots(shots, holes, clubs) {
 }
 
 function holeChain(holes, shots) {
+  const prox = proximityModel(shots);
   const swings = groupBy(shots.filter((s) => !['putt', 'penalty'].includes(s.category)), (s) => holeKey(s.round_id, s.hole));
   const pens = groupBy(shots.filter((s) => s.category === 'penalty'), (s) => holeKey(s.round_id, s.hole));
   for (const h of holes) {
@@ -585,10 +593,24 @@ function holeChain(holes, shots) {
     h.chain_complete = h.swings_missing === 0 && h.putts_eff !== null && h.pin_lat !== null;
     const last = sw.length ? [...sw].sort((a, b) => a.shot_order - b.shot_order)[sw.length - 1] : null;
     const estOk = h.chain_complete && last && last.on_green_end === 1 && h.putts_eff > 0;
-    h.first_putt_est_m = estOk ? last.end_to_pin : null;
+    const snapped = estOk && last.end_at_pin_marker;
+    h.first_putt_est_m = !estOk ? null : snapped ? prox(last.start_to_pin) : last.end_to_pin;
+    if (!isNum(h.first_putt_est_m)) h.first_putt_est_m = null;
     h.first_putt_eff_m = h.first_putt_m !== null ? h.first_putt_m : h.first_putt_est_m;
-    h.first_putt_source = h.first_putt_m !== null ? 'user' : estOk ? 'estimated (GPS to pin marker)' : null;
+    h.first_putt_source = h.first_putt_m !== null ? 'user' : h.first_putt_est_m === null ? null : snapped ? 'estimated (your typical proximity – Garmin put the ball on the pin)' : 'estimated (GPS to pin marker)';
   }
+}
+// Your median finish distance from the pin, for shots that found the green from a similar distance (GPS finishes only).
+// Used for the first putt when Garmin stored the pin as the ball's finish. Thin bands lean on your overall median.
+const PROX_EDGES = [0, 27.4, 90, 140, Infinity];
+function proximityModel(shots) {
+  const ok = shots.filter((s) => s.on_green_end === 1 && !s.end_at_pin_marker && isNum(s.end_to_pin) && isNum(s.start_to_pin));
+  const all = median(ok.map((s) => s.end_to_pin)), K = 5;
+  const bands = PROX_EDGES.slice(0, -1).map((lo, i) => {
+    const g = ok.filter((s) => s.start_to_pin > lo && s.start_to_pin <= PROX_EDGES[i + 1]).map((s) => s.end_to_pin);
+    return !g.length ? all : isNum(all) ? (median(g) * g.length + all * K) / (g.length + K) : median(g);
+  });
+  return (d) => { if (!isNum(d)) return all; const i = PROX_EDGES.findIndex((lo, k) => d > lo && d <= PROX_EDGES[k + 1]); return bands[i < 0 ? 0 : i] ?? all; };
 }
 
 function roundMetrics(rounds, holes, shots) {
@@ -1021,8 +1043,10 @@ export function personalModel(ref) {
 }
 const personalExpected = (m, lie, d, et) => (!isNum(d) || !isNum(et) ? null : et + (m.get(`${lie}|${band(lie, d)}`) ?? m.get(`${lie}|`) ?? m.get('|') ?? 0));
 export function strokesGained(ds, tour, baseline = 'personal', personalFrom = null) {
-  const st = sgStates(ds), n = ds.holes.length, nc = ds.holes.filter((h) => h.chain_complete).length;
-  const coverage = { holes: n, complete_holes: nc, coverage: n ? nc / n : 0 };
+  // coverage counts only rounds you shot-tracked (swings and putts recorded): scorecard-only rounds can't hold strokes gained at all
+  const tracked = new Set(ds.holes.filter((h) => h.putts_eff !== null && h.swings_tracked > 0).map((h) => h.round_id));
+  const th = ds.holes.filter((h) => tracked.has(h.round_id)), st = sgStates(ds), n = th.length, nc = th.filter((h) => h.chain_complete).length;
+  const coverage = { holes: n, all_holes: ds.holes.length, tracked_rounds: tracked.size, complete_holes: nc, coverage: n ? nc / n : 0 };
   if (!st.length) return { states: st, byRound: [], coverage, name: String(baseline) };
   st.forEach((x) => { x.E_tour = x.kind === 'holed' ? 0 : tour.expected(x.lie, x.dist_m); });
   let name;
@@ -1062,6 +1086,97 @@ export function expectedModel(ds, tour) {
 }
 export function sgSummary(res) {
   return [...SG_CATS, 'unattributed', 'total'].map((c) => ({ category: c, sg_per_round: mean(res.byRound.map((r) => r[`${c}_per18`])) }));
+}
+
+// ------------------------------------------------------------------ strokes gained breakdown
+// Where the strokes go: SG split by start distance, lie, tee result and miss direction. Run it on a PGA Tour result
+// (strokesGained(ds, tour, 'tour')): the personal baseline is fitted per lie and distance band, so splitting it by
+// distance would read close to zero everywhere. Against tour every row is negative - compare rows with each other.
+const SGB_BANDS = {
+  Approach: { yd: [30, 75, 100, 125, 150, 175, 200, 250], m: [27, 70, 90, 115, 140, 160, 185, 230] },
+  'Around the green': { yd: [0, 10, 20], m: [0, 9, 18], top: { yd: 30, m: 27 } },
+  Putting: { yd: [0, 3, 6, 10, 20, 40], m: [0, 1, 2, 3, 6, 12] },        // putting bands are in ft when the app is in yards
+  tee: { yd: [0, 330, 400, 450], m: [0, 300, 365, 410] },               // hole length from the tee, par 4s and 5s
+};
+const sgBandUnit = (cat, unit) => (cat === 'Putting' ? (unit === 'yd' ? 'ft' : 'm') : unit === 'yd' ? 'yd' : 'm');
+function sgBander(cat, unit) {
+  const key = unit === 'yd' ? 'yd' : 'm', u = sgBandUnit(cat, unit), e = SGB_BANDS[cat][key], top = SGB_BANDS[cat].top?.[key], f = unitFactor(u);
+  return { unit: u, labels: e.map((lo, i) => (i === 0 && lo > 0 ? `under ${e[1]} ${u}` : i + 1 < e.length ? `${lo}–${e[i + 1]} ${u}` : top ? `${lo}–${top} ${u}` : `${lo}+ ${u}`)),
+    index: (d) => { if (!isNum(d)) return -1; let i = 0; for (let k = 0; k < e.length; k++) if (d >= e[k] * f - 1e-9) i = k; return i; } };   // the first band takes everything below it
+}
+export const missDirection = (s) => (!isNum(s?.lateral_m) || !isNum(s?.long_short_m) ? null
+  : Math.abs(s.long_short_m) >= Math.abs(s.lateral_m) ? (s.long_short_m < 0 ? 'Short' : 'Long') : (s.lateral_m < 0 ? 'Left' : 'Right'));
+const LIE_NAME = { tee: 'Tee (par 3)', fairway: 'Fairway', rough: 'Rough', sand: 'Sand', recovery: 'Recovery', green: 'Green' };
+const FINISH = (sh, x, next) => (x.pen > 0 || sh?.ends_in_penalty ? 'Penalty' : ({ Fairway: 'Fairway', Fringe: 'Fairway', Rough: 'Rough', Sand: 'Sand', Recovery: 'Trees / recovery', Green: 'Green' })[sh?.end_lie ?? next?.start_lie] || 'Not recorded');
+export function sgBreakdown(res, ds, unit = 'yd') {
+  const holes18 = res.coverage?.complete_holes || 0, k18 = holes18 ? 18 / holes18 : null;
+  const shot = new Map(ds.shots.map((s) => [s.shot_key, s])), nextOf = new Map();
+  for (const g of groupBy(ds.shots, (s) => holeKey(s.round_id, s.hole)).values()) { const o = [...g].sort((a, b) => a.shot_order - b.shot_order); o.forEach((v, i) => nextOf.set(v.shot_key, o[i + 1])); }
+  const hole = new Map(ds.holes.map((h) => [holeKey(h.round_id, h.hole), h]));
+  const rows = res.states.filter((x) => x.kind !== 'holed' && isNum(x.sg)).map((x) => ({ ...x, s: x.shot_key ? shot.get(x.shot_key) : null, h: hole.get(holeKey(x.round_id, x.hole)) }));
+  const cell = (label, g, extra = {}) => ({ label, n: g.length, sg_per_shot: g.length ? mean(g.map((x) => x.sg)) : null,
+    sg_total: sum(g.map((x) => x.sg)), sg_per18: k18 !== null && g.length ? sum(g.map((x) => x.sg)) * k18 : null, ...extra });
+  const share = (g, all) => (all.length ? 100 * g.length / all.length : null);
+  const banded = (cat, g, extra) => {
+    const B = sgBander(cat, unit), by = groupBy(g.filter((x) => B.index(x.dist_m) >= 0), (x) => B.index(x.dist_m));
+    return { unit: B.unit, rows: B.labels.map((label, i) => cell(label, by.get(i) || [], extra ? extra(by.get(i) || []) : {})).filter((r) => r.n) };
+  };
+  const shotsOf = (g) => g.map((x) => x.s).filter(Boolean);
+  // a miss direction only means something when the green was in reach: drop lay-ups and par-5 seconds, i.e. shots
+  // that started further out than ~15% past your median full-swing distance with that club (200 yd if the club is unknown)
+  const reach = new Map([...groupBy(ds.shots.filter((v) => v.full_swing && isNum(v.dist_m) && v.club_id), (v) => v.club_id)].map(([c, g]) => [c, median(g.map((v) => v.dist_m))]));
+  const goingAt = (v) => isNum(v?.start_to_pin) && v.start_to_pin <= (reach.has(v.club_id) ? 1.15 * reach.get(v.club_id) : 200 * M_PER_YD);
+  const approachExtra = (g) => {
+    const all = shotsOf(g), s = all.filter(goingAt), ls = s.map((v) => v.long_short_m).filter(isNum), lat = s.map((v) => v.lateral_m).filter(isNum);
+    const miss = s.filter((v) => v.on_green_end === 0).map(missDirection).filter(Boolean), cnt = (d) => miss.filter((m) => m === d).length;
+    const top = miss.length >= 3 ? ['Short', 'Long', 'Left', 'Right'].sort((a, b) => cnt(b) - cnt(a))[0] : null;
+    return { green_pct: pct(all.map((v) => v.on_green_end)), proximity_m: median(all.map((v) => v.end_to_pin).filter(isNum)), going_at: s.length,
+      mean_long_short_m: ls.length >= 3 ? mean(ls) : null, mean_lateral_m: lat.length >= 3 ? mean(lat) : null,
+      missed: miss.length, top_miss: top, top_miss_pct: top ? 100 * cnt(top) / miss.length : null };
+  };
+  const out = { holes: holes18, shots: rows.length, baseline: res.name };
+
+  // approach: by distance, by lie, by miss direction
+  const ap = rows.filter((x) => x.category === 'Approach');
+  out.approach = { ...banded('Approach', ap, approachExtra), all: cell('All approaches', ap, approachExtra(ap)),
+    by_lie: [...groupBy(ap, (x) => x.lie)].map(([lie, g]) => cell(LIE_NAME[lie] || lie, g, approachExtra(g))).sort((a, b) => b.n - a.n) };
+  const apGo = ap.filter((x) => goingAt(x.s)), apHit = apGo.filter((x) => x.s?.on_green_end === 1), apMiss = apGo.filter((x) => x.s?.on_green_end === 0 && missDirection(x.s));
+  out.approach.miss = { going_at: apGo.length, missed: apMiss.length, hit: cell('Hit the green', apHit),
+    dirs: ['Short', 'Long', 'Left', 'Right'].map((d) => { const g = apMiss.filter((x) => missDirection(x.s) === d); return cell(d, g, { direction: d, count: g.length, pct: share(g, apMiss) }); }) };
+
+  // around the green: by distance and lie
+  const ag = rows.filter((x) => x.category === 'Around the green');
+  const agExtra = (g) => { const s = shotsOf(g); return { green_pct: pct(s.map((v) => v.on_green_end)), proximity_m: median(s.map((v) => v.end_to_pin).filter(isNum)) }; };
+  out.around = { ...banded('Around the green', ag, agExtra), all: cell('All short-game shots', ag, agExtra(ag)),
+    by_lie: [...groupBy(ag, (x) => (x.lie === 'tee' ? 'fairway' : x.lie))].map(([lie, g]) => cell(LIE_NAME[lie] || lie, g, agExtra(g))).sort((a, b) => b.n - a.n) };
+
+  // putting: by first-putt distance
+  const puAll = rows.filter((x) => x.category === 'Putting'), pu = puAll.filter((x) => !String(x.dist_flag).includes('typical proximity'));
+  const puExtra = (g) => ({ putts: mean(g.map((x) => x.remaining)), one_putt_pct: g.length ? 100 * g.filter((x) => x.remaining === 1).length / g.length : null,
+    three_putt_pct: g.length ? 100 * g.filter((x) => x.remaining >= 3).length / g.length : null });
+  out.putting = { ...banded('Putting', pu, puExtra), all: cell('All holes', puAll, puExtra(puAll)), measured: pu.length, imputed: puAll.length - pu.length };
+
+  // off the tee: result (Garmin's fairway hit / left / right), where it finished, club, hole length
+  const te = rows.filter((x) => x.category === 'Off the tee');
+  const teExtra = (g) => ({ dist_m: median(shotsOf(g).map((v) => v.dist_m).filter(isNum)), pen_pct: g.length ? 100 * g.filter((x) => x.pen > 0 || x.s?.ends_in_penalty).length / g.length : null });
+  const RES = { HIT: 'Fairway', LEFT: 'Missed left', RIGHT: 'Missed right', SHORT: 'Short', LONG: 'Long', MISS: 'Missed' };
+  out.tee = { all: cell('All tee shots', te, teExtra(te)),
+    result: Object.values(RES).map((label) => { const g = te.filter((x) => RES[x.h?.fairway] === label); return cell(label, g, { ...teExtra(g), pct: share(g, te.filter((x) => RES[x.h?.fairway])) }); }).filter((r) => r.n),
+    finish: ['Fairway', 'Rough', 'Sand', 'Trees / recovery', 'Penalty', 'Green', 'Not recorded'].map((label) => { const g = te.filter((x) => FINISH(x.s, x, nextOf.get(x.shot_key)) === label); return cell(label, g, { pct: share(g, te) }); }).filter((r) => r.n),
+    by_club: [...groupBy(te, (x) => x.club || 'Unassigned')].map(([club, g]) => cell(club, g, { ...teExtra(g), fw_pct: pct(g.map((x) => x.h?.fw_hit).filter(isNum)) })).sort((a, b) => b.n - a.n),
+    by_length: (() => { const B = sgBander('tee', unit), par4 = te.filter((x) => x.h?.par === 4), by = groupBy(par4.filter((x) => B.index(x.dist_m) >= 0), (x) => B.index(x.dist_m));
+      const r = B.labels.map((label, i) => cell(`Par 4 · ${i === 0 ? `under ${label.split('–')[1]}` : label}`, by.get(i) || [], teExtra(by.get(i) || []))).filter((c) => c.n);
+      const p5 = te.filter((x) => x.h?.par >= 5); if (p5.length) r.push(cell('Par 5', p5, teExtra(p5))); return r; })() };
+  const lat = shotsOf(te).filter((v) => isNum(v.lateral_m)).map((v) => v.lateral_m);
+  out.tee.lateral = lat.length >= T.min_shots_dispersion ? { n: lat.length, mean_m: mean(lat), sd_m: std(lat), left_pct: 100 * lat.filter((v) => v < 0).length / lat.length } : null;
+  const lr = (d) => out.tee.result.find((r) => r.label === d);
+  out.tee.side_cost = lr('Missed left') && lr('Missed right') && lr('Fairway') ? { left: lr('Missed left').sg_per_shot - lr('Fairway').sg_per_shot, right: lr('Missed right').sg_per_shot - lr('Fairway').sg_per_shot } : null;
+
+  // the biggest leaks: the distance bands / tee results losing the most per round (at least 6 shots behind each)
+  const cand = [...out.approach.rows.map((r) => ({ ...r, area: 'Approach' })), ...out.around.rows.map((r) => ({ ...r, area: 'Around the green' })),
+    ...out.putting.rows.map((r) => ({ ...r, area: 'Putting' })), ...out.tee.result.filter((r) => r.label !== 'Fairway').map((r) => ({ ...r, area: 'Off the tee' }))];
+  out.leaks = cand.filter((r) => r.n >= 6 && isNum(r.sg_per18)).sort((a, b) => a.sg_per18 - b.sg_per18).slice(0, 3);
+  return out;
 }
 
 // ------------------------------------------------------------------ coaching
