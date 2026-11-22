@@ -455,8 +455,8 @@ function pageSG() {
   if (!ds.rounds.length) return noMatch;
   const base = segVal('sg_base', 'personal'), res = A.strokesGained(ds, TOUR, base, DS), cov = res.coverage;
   const head = `${filterSummary(ds)}${seg('sg_base', [['personal', 'Personal baseline'], ['tour', 'PGA Tour (reference)']], 'personal')}
-  <div class="kpis">${kpi('Complete holes', cov.complete_holes, null, true, 0)}${kpi('Coverage', 100 * cov.coverage, null, true, 0, '%')}${kpi('Holes missing swings', ds.holes.filter((h) => h.swings_missing > 0).length, null, false, 0)}${kpi('Holes missing putts', ds.holes.filter((h) => h.putts_eff === null).length, null, false, 0)}</div>`;
-  if (cov.coverage < A.T.sg_min_coverage) return head + `<div class="err">Only ${Math.round(cov.coverage * 100)}% of holes have a complete shot chain (score = tracked swings + putts + penalties, putts recorded, pin known). Strokes gained needs ≥${A.T.sg_min_coverage * 100}% and is <b>not available</b> for this selection. Add the shots AutoShot missed (usually chips) in Rounds → a round → Review.</div>`;
+  <div class="kpis">${kpi('Complete holes', cov.complete_holes, null, true, 0)}${kpi('Coverage (tracked rounds)', 100 * cov.coverage, null, true, 0, '%')}${kpi('Holes missing swings', ds.holes.filter((h) => h.swings_missing > 0).length, null, false, 0)}${kpi('Holes missing putts', ds.holes.filter((h) => h.putts_eff === null).length, null, false, 0)}</div>`;
+  if (cov.coverage < A.T.sg_min_coverage) return head + `<div class="err">Only ${Math.round(cov.coverage * 100)}% of holes in your ${cov.tracked_rounds} shot-tracked round${cov.tracked_rounds === 1 ? '' : 's'} have a complete shot chain (score = tracked swings + putts + penalties, putts recorded, pin known). Strokes gained needs ≥${A.T.sg_min_coverage * 100}% and is <b>not available</b> for this selection. Add the shots AutoShot missed (usually chips) in Rounds → a round → Review.</div>`;
   const sm = A.sgSummary(res), est = A.mean(res.states.filter((x) => x.kind === 'green').map((x) => (x.putt_dist_estimated ? 1 : 0))) || 0;
   const cats = A.SG_CATS, br = res.byRound;
   const roll = cats.map((c, i) => { const v = br.map((r) => r[`${c}_per18`]); return { x: br.map((r) => r.date), y: v.map((_, j) => (j >= 4 ? A.mean(v.slice(Math.max(0, j - 9), j + 1)) : null)), name: c, mode: 'lines', line: { color: COLORS[i] } }; });
@@ -467,7 +467,54 @@ function pageSG() {
   ${note(`Measured: lies and positions from Garmin GPS (straight line to pin). Estimated: ${Math.round(est * 100)}% of putting states use a GPS-estimated first-putt distance. 'unattributed' = penalties recorded on a hole but not against a shot.`)}</div>
   <div class="card"><h2>Rolling 10-round trend</h2>${CHT.sparks({ series: cats.map((cname, ci) => ({ name: cname, tone: ci % 2 ? 'gold' : 'accent', pts: roll[ci].y.map((y, k) => ({ x: Date.parse(roll[ci].x[k]), y, t: roll[ci].x[k] })) })), digits: 2 })}
   ${table([...br].reverse(), [['date', 'Date'], ['complete_holes', 'Holes', n0], ...cats.map((c) => [`${c}_per18`, c.replace('Around the green', 'ARG').replace('Off the tee', 'OTT'), (v) => sgn(v)]), ['total_per18', 'Total', (v) => sgn(v)]])}</div>
+  ${sgWhere(ds, base === 'tour' ? res : A.strokesGained(ds, TOUR, 'tour', DS))}
   <div class="card"><h2>By club</h2>${table(byClub, [['club', 'Club'], ['category', 'Category'], ['shots', 'n', n0], ['sg_per_shot', 'SG/shot', (v) => sgn(v, 3)], ['sg_total', 'Total', (v) => sgn(v)]], { empty: 'Needs ≥5 SG-eligible shots per club.' })}</div>`;
+}
+
+// "Where the strokes go": SG split by distance, lie, tee result and miss direction - always against the PGA Tour baseline
+// (the personal baseline is fitted per distance band, so it would read ~0 in every row). Rows are compared with each other.
+const SGB_TABS = [['sum', 'Summary'], ['tee', 'Off the tee'], ['app', 'Approach'], ['arg', 'Short game'], ['putt', 'Putting']];
+const depthTxt = (v) => (A.isNum(v) ? (Math.abs(cv(v)) < 1 ? 'pin high' : `${D(Math.abs(v))} ${v < 0 ? 'short' : 'long'}`) : '–');
+const lineTxt = (v) => (A.isNum(v) ? (Math.abs(cv(v)) < 1 ? 'on line' : `${D(Math.abs(v))} ${v < 0 ? 'left' : 'right'}`) : '–');
+const sgShot = (v) => sgn(v, 2), sg18 = (v) => sgn(v, 1);
+const sgBars = (rows, aria, labelW = 96) => CHT.hbars({ items: rows.filter((r) => A.isNum(r.sg_per_shot)).map((r) => ({ label: r.label, value: r.sg_per_shot, sub: `n ${r.n}`,
+  note: `${r.label}: ${sgn(r.sg_per_shot)} per shot over ${r.n} shot${r.n === 1 ? '' : 's'} (${sg18(r.sg_per18)} per 18 holes)` })), diverging: true, digits: 2, labelW, aria });
+const thin = (rows) => (rows.some((r) => r.n < 6) ? note('Rows with fewer than 6 shots are shown but can swing a lot – treat them as a hint, not a verdict.') : '');
+function sgWhere(ds, res) {
+  if (!res.states.length) return '';
+  const b = A.sgBreakdown(res, ds, UNIT), t = segVal('sgb_tab', 'sum');
+  const head = `<div class="card"><h2>Where the strokes go</h2><p class="small muted" style="margin:0 0 6px">Strokes gained against a PGA Tour player, split by distance, lie and miss. Every row is negative for an amateur – the rows losing most are where practice pays.</p>${seg('sgb_tab', SGB_TABS, 'sum', 'scroll tabs')}`;
+  const T = b.tee, AP = b.approach, AG = b.around, PU = b.putting;
+  const body = {
+    sum: () => `${b.leaks.length ? `<h3>Biggest leaks per round</h3><ol class="leaks">${b.leaks.map((l) => `<li><b>${esc(l.area)} · ${esc(l.label)}</b> <span class="num">${sg18(l.sg_per18)}</span> <span class="small muted">per 18 · ${l.n} shots · ${sgShot(l.sg_per_shot)} each</span></li>`).join('')}</ol>` : '<p class="small muted">Needs at least 6 shots in a distance band or tee result.</p>'}
+      ${sgBars([T.all, AP.all, AG.all, { ...PU.all, label: 'Putting (per hole)' }].map((r, i) => ({ ...r, label: ['Off the tee', 'Approach', 'Short game', 'Putting / hole'][i] })), 'Strokes gained per shot by area', 104)}
+      ${T.side_cost ? `<p class="small">Off the tee, a miss <b>right</b> costs <b>${n2(-T.side_cost.right)}</b> strokes more than the fairway, a miss <b>left</b> <b>${n2(-T.side_cost.left)}</b>.</p>` : ''}
+      ${AP.miss.missed >= 5 ? (() => { const top = [...AP.miss.dirs].sort((x, y) => y.count - x.count)[0]; return `<p class="small">When you go at the green and miss, ${Math.round(top.pct)}% of misses are <b>${top.direction.toLowerCase()}</b>.</p>`; })() : ''}
+      ${note(`${b.holes} complete holes. ${PU.imputed ? `${PU.imputed} first putts use your typical proximity because Garmin stored the pin as the ball's finish.` : ''}`)}`,
+    tee: () => `${CHT.fairway({ hit: T.result.find((r) => r.label === 'Fairway')?.pct, left: T.result.find((r) => r.label === 'Missed left')?.pct, right: T.result.find((r) => r.label === 'Missed right')?.pct, holes: T.result.reduce((n, r) => n + r.n, 0) })}
+      <h3>By result</h3>${sgBars(T.result, 'Tee strokes gained by fairway result')}
+      ${table(T.result, [['label', 'Result'], ['n', 'n', n0], ['pct', 'Share', p0], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18], ['dist_m', 'Dist', (v) => D(v)]])}
+      ${T.side_cost ? `<p class="small">Cost vs the fairway: left <b>${sgShot(T.side_cost.left)}</b>, right <b>${sgShot(T.side_cost.right)}</b> per tee shot.</p>` : ''}
+      ${T.lateral ? `<p class="small">Average start line: ${lineTxt(T.lateral.mean_m)} of your usual line, spread ±${D(T.lateral.sd_m)} (${T.lateral.n} drives on holes you've played 3+ times).</p>` : ''}
+      <h3>Where it finished</h3>${table(T.finish, [['label', 'Finish'], ['n', 'n', n0], ['pct', 'Share', p0], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18]])}
+      <h3>By club</h3>${table(T.by_club, [['label', 'Club'], ['n', 'n', n0], ['fw_pct', 'FW', p0], ['dist_m', 'Dist', (v) => D(v)], ['sg_per_shot', 'SG/shot', sgShot]])}
+      <h3>By hole length</h3>${table(T.by_length, [['label', 'Holes'], ['n', 'n', n0], ['dist_m', 'Tee shot', (v) => D(v)], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18]])}
+      ${thin([...T.result, ...T.by_club])}${note("Left/right comes from Garmin's fairway result on the scorecard; finish lie from Garmin's course map.")}`,
+    app: () => `<h3>By distance to the pin</h3>${sgBars(AP.rows, 'Approach strokes gained per shot by distance')}
+      ${table(AP.rows, [['label', 'From'], ['n', 'n', n0], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18], ['green_pct', 'Green', p0], ['proximity_m', 'Prox', (v) => D(v)], ['mean_long_short_m', 'Avg depth', depthTxt], ['mean_lateral_m', 'Avg line', lineTxt], ['top_miss', 'Main miss', (v, r) => (v ? `${v} ${Math.round(r.top_miss_pct)}%` : '–')]])}
+      <h3>By lie</h3>${table(AP.by_lie, [['label', 'Lie'], ['n', 'n', n0], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18], ['green_pct', 'Green', p0], ['proximity_m', 'Prox', (v) => D(v)]])}
+      ${AP.miss.missed ? `<h3>Misses when going at the green</h3>${CHT.green({ dirs: AP.miss.dirs })}
+      ${table([AP.miss.hit, ...AP.miss.dirs.filter((d) => d.n)], [['label', 'Finish'], ['n', 'n', n0], ['pct', 'Of misses', p0], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18]])}` : ''}
+      ${thin(AP.rows)}${note('Depth and line are measured along the line from where you hit to the pin (GPS). Misses, depth and line only count shots where the green was in reach of the club you hit – lay-ups and par-5 seconds are left out. "Prox" is the median finish distance from the pin.')}`,
+    arg: () => `<h3>By distance</h3>${sgBars(AG.rows, 'Short-game strokes gained per shot by distance')}
+      ${table(AG.rows, [['label', 'From'], ['n', 'n', n0], ['sg_per_shot', 'SG/shot', sgShot], ['sg_per18', 'Per 18', sg18], ['green_pct', 'On green', p0], ['proximity_m', 'Prox', (v) => D(v)]])}
+      <h3>By lie</h3>${table(AG.by_lie, [['label', 'Lie'], ['n', 'n', n0], ['sg_per_shot', 'SG/shot', sgShot], ['green_pct', 'On green', p0], ['proximity_m', 'Prox', (v) => D(v)]])}
+      ${thin(AG.rows)}${note(`Shots starting within ${D(A.T.around_green_max_m)} of the pin. Chips that AutoShot missed leave the hole out of strokes gained – add them in Rounds → a round → Review.`)}`,
+    putt: () => `<h3>By first-putt length</h3>${sgBars(PU.rows, 'Putting strokes gained per hole by first-putt length')}
+      ${table(PU.rows, [['label', 'First putt'], ['n', 'Holes', n0], ['sg_per_shot', 'SG/hole', sgShot], ['putts', 'Putts', n2], ['one_putt_pct', '1-putt', p0], ['three_putt_pct', '3-putt', p0]], { empty: 'No holes with a GPS first-putt distance yet.' })}
+      ${thin(PU.rows)}${note(`First-putt length is GPS from where your approach finished to the pin marker, so short putts are only roughly placed. ${PU.measured} holes have it; ${PU.imputed} are left out of this split because Garmin stored the pin as the finish (they still count in the putting total). Enter the real length in Review for sharper numbers.`)}`,
+  }[t] || (() => '');
+  return `${head}${body()}</div>`;
 }
 
 function killersCard(rid) {
@@ -856,6 +903,23 @@ function render() {
   $$('.seg.scroll, .seg.tabs').forEach((g) => { const b = $('button.on', g); if (b) g.scrollLeft = b.offsetLeft - (g.clientWidth - b.offsetWidth) / 2; });
 }
 function rerender() { const y = scrollY; render(); scrollTo(0, y); }
+// Pull new Garmin rounds from the data repo on open / return to the app, so they don't wait for a tap on "Sync now".
+// Skipped mid-round (the Play page) so a refresh never disturbs score entry, and at most every 30 minutes.
+const AUTO_SYNC_MS = 30 * 60 * 1000;
+let autoSyncing = false, autoSyncTried = 0;   // the in-memory stamp also stops a failing sync (expired token) retrying on every return to the app
+async function autoSync() {
+  const sc = state?.sync || {};
+  if (autoSyncing || !navigator.onLine || !sc.owner || !sc.repo || !sc.token) return;
+  if ((location.hash.slice(1) || 'home').split('?')[0] === 'play') return;
+  if (sc.last_sync && Date.now() - Date.parse(sc.last_sync) < AUTO_SYNC_MS) return;
+  if (Date.now() - autoSyncTried < AUTO_SYNC_MS) return;
+  autoSyncing = true; autoSyncTried = Date.now();
+  try {
+    const r = await syncFromGitHub(state);
+    if (r.new || r.updated) { rebuild(); rerender(); toast(`Garmin sync: ${r.new} new round${r.new === 1 ? '' : 's'}${r.updated ? `, ${r.updated} updated` : ''}`); }
+  } catch (e) { toast(`Garmin sync failed: ${e.message}`, 6000); }
+  finally { autoSyncing = false; }
+}
 
 function wire(page) {
   $$('[data-seg]').forEach((g) => g.addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; ui[g.dataset.seg] = b.dataset.v; saveUi(); rerender(); }));
@@ -1083,5 +1147,7 @@ addEventListener('hashchange', () => { $('#sheet').classList.remove('open'); if 
   for (const k of ['practice']) { PAGES[k] = EXTRA.pages[k]; RENDER[k] = EXTRA.render[k]; }
   PAGES.play = ['Play', 'flag']; RENDER.play = pagePlayHub; EXTRA.noData.push('home');
   render();
+  autoSync();
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoSync(); });
   window.__golfiq = { get state() { return state; }, get ds() { return DS; }, A, get extra() { return EXTRA; }, get guided() { return GUIDED; }, get compete() { return COMP; }, get progress() { return PROG; } };
 })();
