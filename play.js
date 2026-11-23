@@ -87,7 +87,7 @@ export function registerPlay(c) {
     const recent = fix && Date.now() - fix.t <= NEAR_FIX_MAX_MS;
     const pos = recent ? [fix.lat, fix.lon] : await new Promise((res, rej) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude]), (e) => rej(new Error(e.code === 1 ? 'Location permission declined – allow it for this site in Settings → Safari → Location' : 'No location yet – try again in a moment')), { enableHighAccuracy: false, timeout: 15000, maximumAge: 0 }) : rej(new Error('No location service')));
     say('Looking for golf courses…');
-    const json = await F.overpass(F.nearbyQuery(pos[0], pos[1])).catch((e) => { throw new Error(`OpenStreetMap is busy (${e.fails?.join(', ') || e.message}) – try again in a minute`); });
+    const json = await F.overpass(F.nearbyQuery(pos[0], pos[1]), { onTry: (i, n) => { if (i) say(`Looking for golf courses… the map server is slow, also asking server ${i + 1} of ${n}`); } }).catch((e) => { throw new Error(`OpenStreetMap is busy (${e.fails?.join(', ') || e.message}) – try again in a minute`); });
     c.state.osm.__nearby = { at: new Date().toISOString(), lat: pos[0], lon: pos[1], list: F.parseNearby(json, pos[0], pos[1]) };
     await S.saveOsm(c.state);
   }

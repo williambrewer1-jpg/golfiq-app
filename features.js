@@ -220,22 +220,39 @@ export const overpassQuery = (b) => { const bb = b.map((x) => x.toFixed(5)).join
 // The public OpenStreetMap query servers, tried in this order, once each. Since mid-2026 the main one often refuses
 // requests (406 or 429) under load, and bans clients that keep retrying, so a busy server is never asked twice in one
 // download: the next one is tried instead. Only the query (a box around the course) is sent.
-export const OVERPASS_HOSTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
-export const OVERPASS_WAIT_MS = 30000;                // give up on one server after this long and try the next
-export async function overpass(query, { fetchFn = globalThis.fetch, hosts = OVERPASS_HOSTS, waitMs = OVERPASS_WAIT_MS } = {}) {
-  const fails = [];
-  for (const host of hosts) {
-    const ctl = typeof AbortController === 'function' ? new AbortController() : null, timer = ctl ? setTimeout(() => ctl.abort(), waitMs) : null;
-    try {
-      const r = await fetchFn(host, { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl?.signal });
-      if (!r.ok) { fails.push(r.status); continue; }
-      const json = await r.json();
-      if (!json || !Array.isArray(json.elements)) { fails.push('bad reply'); continue; }
-      return json;
-    } catch (e) { fails.push(e?.name === 'AbortError' ? 'timeout' : 'offline'); }
-    finally { if (timer) clearTimeout(timer); }
-  }
-  const err = new Error(`the map server is busy (${fails.join(', ')})`); err.busy = true; err.fails = fails; throw err;
+export const OVERPASS_HOSTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+export const OVERPASS_WAIT_MS = 25000;               // give up on one server after this long
+export const OVERPASS_STAGGER_MS = 6000;             // a server that has not answered by now: ask the next one as well, and take whichever answers first
+// onTry(i, n): told when server i of n is asked, so the page can say so.
+export function overpass(query, { fetchFn = globalThis.fetch, hosts = OVERPASS_HOSTS, waitMs = OVERPASS_WAIT_MS, staggerMs = OVERPASS_STAGGER_MS, onTry } = {}) {
+  return new Promise((resolve, reject) => {
+    const fails = new Array(hosts.length).fill(null), ctls = [];
+    let next = 0, open = 0, done = false, stagger = null;
+    const finish = (fn, v) => { if (done) return; done = true; clearTimeout(stagger); ctls.forEach((c) => c?.abort()); fn(v); };
+    const failed = (i, why) => {
+      fails[i] = why; open--;
+      if (done) return;
+      if (next < hosts.length) launch();
+      else if (!open) { const e = new Error(`the map server is busy (${fails.join(', ')})`); e.busy = true; e.fails = fails; finish(reject, e); }
+    };
+    const launch = () => {
+      const i = next++; open++; clearTimeout(stagger);
+      const ctl = typeof AbortController === 'function' ? new AbortController() : null; ctls[i] = ctl;
+      const timer = setTimeout(() => ctl?.abort(), waitMs);
+      onTry?.(i, hosts.length);
+      Promise.resolve().then(() => fetchFn(hosts[i], { method: 'POST', body: 'data=' + encodeURIComponent(query), signal: ctl?.signal }))
+        .then(async (r) => {
+          if (!r.ok) return failed(i, r.status);
+          const json = await r.json();
+          if (!json || !Array.isArray(json.elements)) return failed(i, 'bad reply');
+          finish(resolve, json);
+        })
+        .catch((e) => failed(i, e?.name === 'AbortError' ? 'timeout' : 'offline'))
+        .finally(() => clearTimeout(timer));
+      if (next < hosts.length) stagger = setTimeout(() => { if (!done && next < hosts.length) launch(); }, staggerMs);
+    };
+    launch();
+  });
 }
 const r6 = (v) => Math.round(v * 1e6) / 1e6;
 function osmKind(t = {}) {
@@ -534,12 +551,19 @@ export function estimatedPattern(base, latRatio, n = 120) {
 }
 
 // ------------------------------------------------------------------ golf courses near you (OpenStreetMap, worldwide incl. UK & Australia)
-export const nearbyQuery = (lat, lon, radiusM = 40000) => `[out:json][timeout:25];(way["leisure"="golf_course"](around:${Math.round(radiusM)},${lat.toFixed(5)},${lon.toFixed(5)});relation["leisure"="golf_course"](around:${Math.round(radiusM)},${lat.toFixed(5)},${lon.toFixed(5)}););out tags center bb;`;
+// A box rather than a circle: the busy public servers answer a box far faster. Courses in the corners are dropped in parseNearby.
+export const NEARBY_RADIUS_M = 40000;
+export function nearbyBox(lat, lon, radiusM = NEARBY_RADIUS_M) {
+  const dLat = radiusM / 111320, dLon = radiusM / (111320 * Math.max(0.05, Math.cos(lat * Math.PI / 180)));
+  return [lat - dLat, lon - dLon, lat + dLat, lon + dLon];
+}
+export const nearbyQuery = (lat, lon, radiusM = NEARBY_RADIUS_M) => { const b = nearbyBox(lat, lon, radiusM).map((v) => v.toFixed(5)).join(',');
+  return `[out:json][timeout:20];(way["leisure"="golf_course"](${b});relation["leisure"="golf_course"](${b}););out tags center bb;`; };
 export function parseNearby(json, lat, lon) {
   const seen = new Map();
   for (const e of json?.elements || []) {
     const name = (e.tags?.name || '').trim(), c = e.center || (isNum(e.lat) ? { lat: e.lat, lon: e.lon } : null);
-    if (!name || !c) continue;
+    if (!name || !c || A.haversine(lat, lon, c.lat, c.lon) > NEARBY_RADIUS_M) continue;
     const b = e.bounds ? [e.bounds.minlat, e.bounds.minlon, e.bounds.maxlat, e.bounds.maxlon] : null;
     const row = { id: `osm-${e.type}-${e.id}`, name, lat: c.lat, lon: c.lon, bbox: b, dist_m: A.haversine(lat, lon, c.lat, c.lon), holes: parseInt(e.tags['golf:course:holes'] || e.tags.holes, 10) || null, par: parseInt(e.tags.par, 10) || null };
     const k = name.toLowerCase(), prev = seen.get(k);

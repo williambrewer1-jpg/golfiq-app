@@ -79,7 +79,7 @@ def route_services(page, weather=True, outline=True):
             k = url.split('latitude=')[1].split('&')[0].count(',') + 1
             return route.fulfill(status=200, content_type='application/json', body=json.dumps({'elevation': [20.0] * k}))
         return route.fulfill(status=200, content_type='application/json', body=json.dumps(WEATHER))
-    for host in ('overpass-api.de', 'overpass.kumi.systems', 'overpass.private.coffee'): page.route(f'**/{host}/**', overpass)
+    for host in ('overpass-api.de', 'overpass.private.coffee', 'maps.mail.ru'): page.route(f'**/{host}/**', overpass)
     page.route('**/api.open-meteo.com/**', meteo)
     page.route('**/server.arcgisonline.com/**', lambda r: r.abort())
     page.route('**/cdn.jsdelivr.net/**', lambda r: r.abort())

@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cv_harness import *  # noqa: F401,F403
 import fake_course as FC
 
-HOSTS = ['overpass-api.de', 'overpass.kumi.systems', 'overpass.private.coffee']
+HOSTS = ['overpass-api.de', 'overpass.private.coffee', 'maps.mail.ru']
 
 def setup(b, w=390, h=844):
     """A page whose map servers answer by a script: plan[host] = list of 'ok' | status code | 'hold' for successive outline requests."""
@@ -45,7 +45,7 @@ with sync_playwright() as p:
     plan['overpass-api.de'] = [406]
     begin(pg); pg.wait_for_timeout(1500)
     check('main server refuses (406): the map still downloads from a mirror', S(pg)['live'], S(pg))
-    check('each server asked at most once, in order', log == ['overpass-api.de', 'overpass.kumi.systems'], log)
+    check('each server asked at most once, in order', log == ['overpass-api.de', 'overpass.private.coffee'], log)
     check('hole 1 is drawn', pg.query_selector('#hm') is not None and S(pg)['empty'] is None)
     check('no script errors (406)', not errs, errs[:3]); ctx.close()
 
@@ -64,7 +64,7 @@ with sync_playwright() as p:
 
     # every server busy: one clear line, Try again, then it works (320 x 568)
     ctx, pg, errs, log, held, plan = setup(b, 320, 568)
-    for h in HOSTS: plan[h] = [406, 'ok'] if h == 'overpass-api.de' else [429, 'ok'] if h == 'overpass.kumi.systems' else [504, 'ok']
+    for h in HOSTS: plan[h] = [406, 'ok'] if h == 'overpass-api.de' else [429, 'ok'] if h == 'overpass.private.coffee' else [504, 'ok']
     begin(pg); pg.wait_for_timeout(1500)
     s = S(pg)
     check('all busy: "Course map unavailable – the map server is busy."', s['empty'] and 'Course map unavailable' in s['empty'], s)
