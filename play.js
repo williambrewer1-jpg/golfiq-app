@@ -10,6 +10,8 @@ import { registerFriends } from './friends.js';
 import { registerCourse, CV_AUTO_OPEN } from './course.js';
 import * as SH from './shots.js';
 
+export const NEAR_FIX_MAX_MS = 2 * 60 * 1000;   // courses near you: a position older than this is looked up again
+
 export function registerPlay(c) {
   const { A, S, $, $$, esc, fmt, note, plot, seg, segVal, select, toast, COLORS } = c;
   const J = () => c.state.journal, D = () => J().draft;
@@ -58,8 +60,8 @@ export function registerPlay(c) {
     const last = known.find((x) => x.id === sel)?.row, nb = nearby();
     const opts = [...known.map((x) => [x.id, `${x.name}${x.dist_m !== null ? ` · ${km(x.dist_m)}` : ''}`]), ...near.map((x) => [x.id, `${x.name} · ${km(x.dist_m)}`]), ['new', 'New course…']];
     return `<div class="card"><h2>Start a round</h2><p class="small">Keep score as you play – strokes, putts, fairways and penalties – with live distances and your shot patterns on the map. It saves as a normal round, so every page of BreakingPar works without a Garmin watch.</p>
-      <div class="nearby"><div class="rv-h"><b>Courses near you</b><button type="button" class="btn sec sm" id="plNear">${nb ? 'Refresh' : 'Find courses near me'}</button></div>
-        <span id="plNearMsg" class="small muted">${nb ? `${nb.list.length} golf courses within 40 km · ${esc(String(nb.at).slice(0, 10))}` : 'Uses your location and OpenStreetMap – works across the UK, Australia and most of the world.'}</span>
+      <div class="nearby"><div class="rv-h"><b>Courses near you</b><button type="button" class="btn sec sm" id="plNear"${nearJob.busy ? ' disabled' : ''}>${nearJob.busy ? 'Searching…' : nb ? 'Refresh' : 'Find courses near me'}</button></div>
+        <span id="plNearMsg" class="small muted" aria-live="polite">${esc(nearJob.msg || (nb ? nearLine(nb) : 'Uses your location and OpenStreetMap – works across the UK, Australia and most of the world.'))}</span>
         ${near.length || known.some((k) => k.dist_m !== null) ? `<div class="nlist">${all.filter((x) => x.dist_m !== null).sort((a, b) => a.dist_m - b.dist_m).slice(0, 6).map((x) => `<button type="button" class="nrow ${x.id === sel ? 'on' : ''}" data-pickcourse="${esc(x.id)}"><b>${esc(x.name)}</b><span>${km(x.dist_m)}${x.row ? ' · played before' : ''}</span></button>`).join('')}</div>` : ''}</div>
       <form id="plStart">${select('pl_course', opts, sel, 'Course')}
       ${sel === 'new' ? '<label class="f">Course name</label><input name="name" required style="width:100%">' : ''}
@@ -72,10 +74,18 @@ export function registerPlay(c) {
       <p><button class="btn">Start round</button></p></form>
       ${note('Rating and slope are on the scorecard; they are needed for your handicap and Stableford. Courses near you come from OpenStreetMap, which has names and outlines but not ratings or stroke indexes – add those once from the scorecard. If you also track this round on a Garmin watch, the synced Garmin round replaces this one automatically.')}</div>`;
   }
+  // The search for courses near you survives a redraw of the page: { busy, msg } (msg replaces the usual line until the next search)
+  let nearJob = { busy: false, msg: '' };
+  const nearLine = (nb) => {
+    const at = new Date(nb.at), today = at.toDateString() === new Date().toDateString();
+    return `${nb.list.length} golf course${nb.list.length === 1 ? '' : 's'} within 40 km · updated ${today ? at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : String(nb.at).slice(0, 10)}`;
+  };
   async function findNearby(msgEl) {
-    const say = (t) => { if (msgEl) msgEl.textContent = t; };
+    const say = (t) => { nearJob.msg = t; const el = $('#plNearMsg') || msgEl; if (el) el.textContent = t; };
     say('Finding your location…');
-    const pos = fix ? [fix.lat, fix.lon] : await new Promise((res, rej) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude]), (e) => rej(new Error(e.code === 1 ? 'Location permission declined' : 'No location yet')), { enableHighAccuracy: false, timeout: 15000, maximumAge: 600000 }) : rej(new Error('No location service')));
+    // a fresh position: a fix kept from an earlier round may be somewhere else entirely
+    const recent = fix && Date.now() - fix.t <= NEAR_FIX_MAX_MS;
+    const pos = recent ? [fix.lat, fix.lon] : await new Promise((res, rej) => navigator.geolocation ? navigator.geolocation.getCurrentPosition((p) => res([p.coords.latitude, p.coords.longitude]), (e) => rej(new Error(e.code === 1 ? 'Location permission declined – allow it for this site in Settings → Safari → Location' : 'No location yet – try again in a moment')), { enableHighAccuracy: false, timeout: 15000, maximumAge: 0 }) : rej(new Error('No location service')));
     say('Looking for golf courses…');
     const json = await F.overpass(F.nearbyQuery(pos[0], pos[1])).catch((e) => { throw new Error(`OpenStreetMap is busy (${e.fails?.join(', ') || e.message}) – try again in a minute`); });
     c.state.osm.__nearby = { at: new Date().toISOString(), lat: pos[0], lon: pos[1], list: F.parseNearby(json, pos[0], pos[1]) };
@@ -511,10 +521,16 @@ export function registerPlay(c) {
     $('#plStart')?.addEventListener('submit', start);
     const upd = () => { const fm = $('#plStart'), el = $('#plPred'); if (!fm || !el) return; const f = new FormData(fm); el.textContent = predText(predictFor($('[data-sel=pl_course]')?.value, { rating: f.get('rating'), slope: f.get('slope'), n: f.get('n'), first: f.get('first') })); };
     $('#plStart')?.addEventListener('input', upd); $('#plStart')?.addEventListener('change', upd);
-    $('#plNear')?.addEventListener('click', async (e) => { e.target.disabled = true; try { await findNearby($('#plNearMsg')); c.ui.pl_course = null; c.saveUi(); c.rerender(); } catch (err) { $('#plNearMsg').textContent = err.message; e.target.disabled = false; } });
+    $('#plNear')?.addEventListener('click', async () => {
+      if (nearJob.busy) return;
+      nearJob = { busy: true, msg: '' }; const btn = $('#plNear'); if (btn) { btn.disabled = true; btn.textContent = 'Searching…'; }
+      try { await findNearby($('#plNearMsg')); nearJob = { busy: false, msg: '' }; c.ui.pl_course = null; c.saveUi(); toast(`Courses near you updated – ${nearby().list.length} found`); }
+      catch (err) { nearJob = { busy: false, msg: err.message }; }
+      if ((location.hash.slice(1) || '') === 'play' && !D()) c.rerender();
+    });
     $$('[data-pickcourse]').forEach((b) => b.addEventListener('click', () => { c.ui.pl_course = b.dataset.pickcourse; c.saveUi(); c.rerender(); }));
     // first visit with location already allowed: look up nearby courses straight away
-    if ($('#plNear') && !nearby() && !autoNear && navigator.permissions?.query) { autoNear = true; navigator.permissions.query({ name: 'geolocation' }).then((p) => { if (p.state === 'granted') findNearby($('#plNearMsg')).then(() => c.rerender()).catch(() => {}); }).catch(() => {}); }
+    if ($('#plNear') && !nearby() && !autoNear && navigator.permissions?.query) { autoNear = true; navigator.permissions.query({ name: 'geolocation' }).then((p) => { if (p.state === 'granted') { nearJob.busy = true; findNearby($('#plNearMsg')).then(() => { nearJob = { busy: false, msg: '' }; }, () => { nearJob = { busy: false, msg: '' }; }).then(() => { if ((location.hash.slice(1) || '') === 'play' && !D()) c.rerender(); }); } }).catch(() => {}); }
     FR.wireJoin();
     backfillTracked().catch(() => { backfilled = false; });
     if (!d) return;
