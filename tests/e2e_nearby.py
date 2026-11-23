@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cv_harness import *  # noqa: F401,F403
 import fake_course as FC
 
-HOSTS = ['overpass-api.de', 'overpass.kumi.systems', 'overpass.private.coffee']
+HOSTS = ['overpass-api.de', 'overpass.private.coffee', 'maps.mail.ru']
 
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -37,6 +37,8 @@ with sync_playwright() as p:
         pg.click('#plNear'); pg.wait_for_timeout(500)
         check(f'{tag}: Refresh shows "Searching…" and cannot be tapped twice', btn() == 'Searching…' and pg.is_disabled('#plNear'), btn())
         check(f'{tag}: and says what it is doing', 'Looking for golf courses' in msg(), msg())
+        pg.wait_for_timeout(6200)
+        check(f'{tag}: still slow after 6 s: says it is also asking the next server', 'also asking server 2 of 3' in msg(), msg())
         pg.evaluate("() => { document.querySelector('#plNear').dataset.seen = '1'; location.hash = '#home'; }"); pg.wait_for_timeout(300); pg.evaluate("() => { location.hash = '#play'; }"); pg.wait_for_selector('#plNear'); pg.wait_for_timeout(300)
         check(f'{tag}: (the page was drawn again)', pg.evaluate("() => !document.querySelector('#plNear').dataset.seen"))
         check(f'{tag}: a redraw of the page keeps the working state', btn() == 'Searching…' and 'Looking for golf courses' in msg(), (btn(), msg()))
@@ -49,7 +51,8 @@ with sync_playwright() as p:
         # Refresh after moving: the search is made from where you are now
         mode['v'] = 'ok'; ctx.set_geolocation({'latitude': -27.45, 'longitude': 153.03, 'accuracy': 20})
         pg.click('#plNear'); pg.wait_for_timeout(1500)
-        check(f'{tag}: Refresh searches around your new position', asked and '-27.45000,153.03000' in asked[-1], asked[-1][-160:] if asked else None)
+        box = f'{-27.45 - 40000 / 111320:.5f},'
+        check(f'{tag}: Refresh searches around your new position', asked and box in asked[-1] and '-30.' not in asked[-1], asked[-1][-160:] if asked else None)
 
         # every server busy: a clear line and the button works again
         mode['v'] = 'busy'; pg.click('#plNear'); pg.wait_for_timeout(1500)
