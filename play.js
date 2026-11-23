@@ -91,22 +91,33 @@ export function registerPlay(c) {
     c.state.osm.__nearby = { at: new Date().toISOString(), lat: pos[0], lon: pos[1], list: F.parseNearby(json, pos[0], pos[1]) };
     await S.saveOsm(c.state);
   }
-  // Download the outline (fairways, greens, trees, hole lines with pars) for a course picked from the map
-  async function fetchOutline(id) {
-    const n = (nearby()?.list || []).find((x) => x.id === id); if (!n) return null;
-    const b = n.bbox || [n.lat - 0.012, n.lon - 0.012, n.lat + 0.012, n.lon + 0.012], pad = 0.002;
-    const json = await F.overpass(F.overpassQuery([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]));
-    c.state.osm[id] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), name: n.name, features: F.parseOverpass(json) };
+  // The area to download a course's map for: the round's own box (saved when it started), the course from the map, or your
+  // Garmin shots there. Null when nothing says where the course is.
+  function courseBox(id, d = null) {
+    if (d?.course_box) return d.course_box;
+    const n = (nearby()?.list || []).find((x) => x.id === id);
+    if (n) { const b = n.bbox || [n.lat - 0.012, n.lon - 0.012, n.lat + 0.012, n.lon + 0.012], pad = 0.002; return [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad]; }
+    return id ? F.courseBBox(c.DS, id) : null;
+  }
+  // Download the outline (fairways, greens, trees, hole lines with pars) for a course
+  async function fetchOutline(id, d = null) {
+    const b = courseBox(id, d); if (!b) throw new Error('not sure where this course is');
+    const json = await F.overpass(F.overpassQuery(b));
+    c.state.osm[id] = { v: F.OSM_VERSION, fetched_at: new Date().toISOString(), name: d?.course_name || c.state.osm[id]?.name, features: F.parseOverpass(json) };
     await S.saveOsm(c.state); return c.state.osm[id];
   }
   // The course map for a round being downloaded right now, or the last download that failed: { id, state: 'loading'|'failed', msg }.
   // Not saved – a reload simply offers to try again.
   let mapDl = null;
   const mapStatus = (d) => (d && mapDl && mapDl.id === d.course_id && !c.state.osm[d.course_id]?.features?.length ? mapDl : null);
+  const mapTried = new Set();                                   // courses whose map was asked for in this visit, so it is not asked for on every redraw
+  // Can this round's course map be downloaded (and is it missing)? Used by the Course view for its "Download course map" button.
+  const mapMissing = (d) => !!d?.course_id && !c.state.osm[d.course_id] && !!courseBox(d.course_id, d);
+  function ensureMap(d) { if (mapMissing(d) && !mapTried.has(d.course_id) && !mapStatus(d)) loadOutline(d.course_id); }
   async function loadOutline(cid) {
-    mapDl = { id: cid, state: 'loading' }; if (CV.active()) CV.redraw();
+    mapTried.add(cid); mapDl = { id: cid, state: 'loading' }; setTimeout(() => { if (CV.active()) CV.redraw(); }, 0);
     try {
-      const o = await fetchOutline(cid), d = J().draft, pars = F.osmPars(o?.features); mapDl = null;
+      const o = await fetchOutline(cid, J().draft?.course_id === cid ? J().draft : null), d = J().draft, pars = F.osmPars(o?.features); mapDl = null;
       if (d && d.course_id === cid) { for (const [h, p] of Object.entries(pars)) if (!d.holes[h].strokes) d.holes[h].par = p; await saveDraft(); }
       toast(o?.features?.length ? `Course outline loaded${Object.keys(pars).length ? ` – pars for ${Object.keys(pars).length} holes` : ''}` : 'This course is not mapped in OpenStreetMap yet'); c.rerender();
     } catch (err) { mapDl = { id: cid, state: 'failed', msg: err.message }; toast(`Playing without the outline: ${err.message}`); c.rerender(); }
@@ -120,15 +131,14 @@ export function registerPlay(c) {
     if (ex && !c.state.osm[cid]) { const m = Object.entries(c.state.osm).find(([k, v]) => k.startsWith('osm-') && v?.name && norm(v.name) === norm(ex.course_name)); if (m) c.state.osm[cid] = m[1]; }
     J().draft = { id: `m${Date.now()}`, start: localNow(), course_id: ex || osmPick ? cid : null, course_name: ex ? ex.course_name : osmPick ? osmPick.name : String(f.get('name')).trim(), courseGlobalId: ex && cid.startsWith('garmin-') ? cid.slice(7) : null,
       tee: f.get('tee') || null, rating: c.numOrNull(f.get('rating')), slope: c.numOrNull(f.get('slope')), n: Number(f.get('n')), first: Number(f.get('first')), hole: Number(f.get('first')), holes, side: FR.readStart(f), challenge: CH.byKey(f.get('chal')) ? f.get('chal') : null, track: f.get('track') === 'on' };
+    J().draft.course_box = osmPick || ex ? courseBox(cid) : null;
     c.ui.pl_track = J().draft.track; c.saveUi();
     // the prediction is saved when the round starts, so it cannot shift later (plan 10.1)
     const pr = predictFor(cid, { rating: f.get('rating'), slope: f.get('slope'), n: f.get('n'), first: f.get('first') });
     if (pr) (J().predictions = J().predictions || []).push({ round_id: `garmin-${J().draft.id}`, predicted: pr.predicted, lo: pr.lo, hi: pr.hi, made_at: new Date().toISOString(), n: pr.holes });
     await saveDraft(); c.rerender();
     if (J().draft.side?.wantLive && c.state.cloud?.group) $('#liveStart')?.click();
-    if (osmPick && !c.state.osm[cid]?.features?.length) {
-      await loadOutline(cid);
-    }
+    ensureMap(J().draft);
   }
 
   // ------------------------------------------------------------ GPS
@@ -286,7 +296,7 @@ export function registerPlay(c) {
       <div id="plRec">${recHtml(live, m)}</div>
       ${feats.some((f) => f.kind === 'fairway' || f.kind === 'green') ? `<details class="strat" id="plStrat"><summary>Compare strategies from here</summary><div id="plStratBody" class="small muted">Working it out…</div></details>` : ''}
       ${note(`Shaded shape = where your shots with the club have finished (inner: half of them, dashed: 90%; a dashed inner line means estimated from your other clubs), hit from ${usingTee ? 'the tee' : 'where you are'} along the white line; dots are your last ${Math.min(m.pt?.pts.length || 0, 60)}. "Within ±10 ${U}" = share of your stock shots with that club finishing that close to the aim distance. Trouble = bunker, water or trees on the mapped outline. Plays-like adds the height difference (terrain model, ~30–90 m grid, so small bumps don't show), wind and temperature now (Open-Meteo) and altitude, using caddie rules of thumb: 1 m up = 1 m longer, about +1% per mph into the wind and −0.5% per mph downwind, ~0.12% per °C from 21°C, 1.16% per 1000 ft of altitude. Garmin records total distance (carry + roll), so carrying a hazard can only be estimated. Phone GPS is good to a few ${U === 'yd' ? 'yards' : 'metres'} – check your competition's rules on distance devices.`)}
-      ${stale ? `<p class="small" style="margin-top:8px">${d.course_id ? `<button class="btn sec sm" type="button" data-osm="${esc(d.course_id)}">Refresh course outline</button>` : '<button class="btn sec sm" type="button" id="plOsmHere">Refresh course outline</button>'} <span data-osmmsg id="plOsmMsg"></span> adds trees and hole lines.</p>` : osmHint(d, pos)}</div>`;
+      ${stale ? `<p class="small" style="margin-top:8px">${d.course_id && courseBox(d.course_id, d) ? `<button class="btn sec sm" type="button" data-plmap>Refresh course outline</button>` : '<button class="btn sec sm" type="button" id="plOsmHere">Refresh course outline</button>'} <span data-osmmsg id="plOsmMsg"></span> adds trees and hole lines.</p>` : osmHint(d, pos)}</div>`;
   }
   const compass = (deg) => ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
   let wxBusy = false, elevBusy = new Set();
@@ -330,7 +340,7 @@ export function registerPlay(c) {
   function osmHint(d, pos) {
     const have = osmEntry(d);
     if (have?.features?.length) return '';
-    if (d.course_id) return `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" data-osm="${esc(d.course_id)}">Download course outline</button> <span data-osmmsg></span> to draw the hole and get front/back and trouble percentages.</p>`;
+    if (d.course_id && courseBox(d.course_id, d)) return `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" data-plmap>${mapStatus(d)?.state === 'loading' ? 'Downloading…' : 'Download course outline'}</button> <span data-osmmsg>${esc(mapStatus(d)?.state === 'failed' ? `Course map unavailable – ${mapStatus(d).msg}` : '')}</span> to draw the hole and get front/back and trouble percentages.</p>`;
     return pos ? `<p class="small" style="margin-top:10px"><button class="btn sec sm" type="button" id="plOsmHere">Download course outline around me</button> <span id="plOsmMsg"></span></p>` : '';
   }
   // redraw only what the aim point changes (no full page render, so dragging stays smooth)
@@ -541,9 +551,11 @@ export function registerPlay(c) {
     wireScore($('#plScore'), d, { re, go, end: () => $('#plFinish').scrollIntoView({ behavior: 'smooth' }) });
     wireMap();
     $('#plOsmHere')?.addEventListener('click', osmHere);
+    $$('[data-plmap]').forEach((b) => b.addEventListener('click', () => { const dd = D(); if (dd?.course_id && mapStatus(dd)?.state !== 'loading') { b.disabled = true; b.textContent = 'Downloading…'; loadOutline(dd.course_id); } }));
   }
   CV = registerCourse(c, {
-    fix: () => fix, gpsErr: () => gpsErr, mapStatus, retryMap: () => { const d = D(); if (d?.course_id?.startsWith('osm-') && mapStatus(d)?.state !== 'loading') loadOutline(d.course_id); }, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
+    fix: () => fix, gpsErr: () => gpsErr, mapStatus, retryMap: () => { const d = D(); if (d?.course_id && courseBox(d.course_id, d) && mapStatus(d)?.state !== 'loading') loadOutline(d.course_id); },
+    mapMissing, ensureMap, D, saveDraft, model, recHtml, conditions, defaultAim, playClubs, featsFor, osmEntry, osmHint, weatherNow, fetchElev,
     strategyHtml, stratPick, labelOf, reach: reachM, wedgeRows, setLive: (L) => { live = L; }, setDragging: (v) => { dragging = v; }, compass,
     scoreEntryHtml, scoreSummaryHtml, challengeHtml, paceHtml, scoreTotals, toParText, holeOrder, wireScore, groupHtml: (d) => FR.groupCard(d) + (J().joined ? FR.joinCard() : ''), wireGroup: (d, re) => FR.wireGroup(d, re), osmHere,
   });

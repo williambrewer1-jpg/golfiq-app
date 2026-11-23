@@ -14,7 +14,9 @@ export const CV_AUTO_OPEN = true;               // opens by itself whenever a ro
 export const GPS_REDRAW_MS = 1000;              // live updates at most once a second
 export const GPS_GOOD_M = 10;                   // GPS dot: good at 10 m or better
 export const FAR_AWAY_M = 1500;                 // further than this from the hole: preview from the tee
-export const ON_TEE_M = 25;                     // within this of the tee counts as on the tee
+export const ON_TEE_M = 25;
+export const GREEN_ONLY_M = 60;
+export const COMPACT_PEEK_H = 700;               // screens shorter than this (an iPhone SE is 568) drop detail lines from the peek when a banner shows                  // the green on its own: this much around it                     // within this of the tee counts as on the tee
 export const VIEW_MARGIN_PX = 24;               // redraw the map when you walk this close to the edge of the clear area
 export const HANDLE_GRAB_PX = 44;               // a press this close to the handle (or the aim ring) drags the aim
 export const TAP_SLOP_PX = 10;                  // movement under this is a tap, not a drag
@@ -65,16 +67,31 @@ export function registerCourse(c, P) {
     const pos = usingBall ? ball : usingTee ? ht.tee : gpsPos;
     let green = ht.green;
     if (!green && pos && feats.length) { const alts = F.nearestGreens(pos[0], pos[1], feats); if (alts.length) green = alts[0].pin; }
-    return { fix, known, feats, gpsPos, ht, farAway, usingTee, usingBall, pos, green };
+    // far away (or no GPS) and this hole's tee is not known: nothing to measure from, so the map shows the green on its own
+    const noTee = usingTee && !usingBall && !ht.tee;
+    return { fix, known, feats, gpsPos, ht, farAway, usingTee, usingBall, pos, green, noTee };
+  }
+  // Is the golfer at this course? Any known green, tee, mark or the course's own area within reach counts. With nothing known
+  // about where the course is, assume yes (a brand-new course is exactly when marks are needed).
+  function atCourse(d, w) {
+    if (!w.gpsPos) return false;
+    const pts = [];
+    for (const k of Object.values(w.known || {})) { if (k.pin) pts.push(k.pin); if (k.tee) pts.push(k.tee); }
+    for (const m of Object.values(marks(d))) { if (m.green) pts.push(m.green); if (m.tee) pts.push(m.tee); }
+    for (const f of w.feats) if (f.pts?.length) pts.push(f.pts[0]);
+    const b = d.course_box; if (b) pts.push([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]);
+    return !pts.length || pts.some((p) => A.haversine(w.gpsPos[0], w.gpsPos[1], p[0], p[1]) <= FAR_AWAY_M);
   }
   // what is missing, in one short line
-  function missingLine(w) {
+  function missingLine(w, d = P.D()) {
     const bits = [], err = P.gpsErr();
     if (!w.fix) bits.push(/declined/i.test(err) ? T.missing.declined : T.missing.gps);
-    else if (w.farAway) bits.push(T.missing.far((A.haversine(w.gpsPos[0], w.gpsPos[1], ...(w.ht.green || w.ht.tee)) / 1000).toFixed(1)));
+    else if (w.farAway) bits.push((w.noTee ? T.missing.farNoTee : T.missing.far)((A.haversine(w.gpsPos[0], w.gpsPos[1], ...(w.ht.green || w.ht.tee)) / 1000).toFixed(1)));
     if (w.usingBall) bits.push(FEEL.COPY.track.fromBall);
     else if (!w.fix && w.pos) bits.push(T.missing.tee);
-    if (!w.feats.some((f) => f.kind !== 'hole')) bits.push(T.missing.map);
+    else if (!w.fix && w.noTee && w.ht.green) bits.push(T.missing.greenOnly);
+    if (P.mapStatus(d)?.state === 'loading') bits.push(T.missing.mapLoading);
+    else if (!w.feats.some((f) => f.kind !== 'hole')) bits.push(T.missing.map);
     else if (L && !L.grid && !L.wx) bits.push(T.missing.terrain);
     const s = bits.slice(0, 2).join(' · ');
     return s ? s[0].toUpperCase() + s.slice(1) : '';
@@ -145,10 +162,12 @@ export function registerCourse(c, P) {
   function drawMap() {
     const d = P.D(), root = $('#cvRoot'), box = $('#cvMap'); if (!d || !root || !box) return;
     const w = where(d);
+    P.ensureMap(d);                                       // a course with no map yet: download it once (any course, not only ones picked from the map)
     if (!w.pos || !w.green) {
       L = null; M = null; V = null; P.setLive(null);
       const ms = P.mapStatus(d);
-      box.innerHTML = `<div class="cv-empty"><p>${esc(!w.pos ? T.noPos : ms?.state === 'loading' ? T.mapLoading : ms?.state === 'failed' ? T.mapFailed : T.missing.green)}</p></div>`;
+      if (!w.pos && w.ht.green && !UV) { box.innerHTML = greenOnlyHtml(d, w); chrome(w); return; }
+      box.innerHTML = `<div class="cv-empty"><p>${esc(ms?.state === 'loading' ? T.mapLoading : !w.pos ? (w.fix ? T.noTeeHere : T.noPos) : ms?.state === 'failed' ? T.mapFailed : T.missing.green)}</p></div>`;
       chrome(w); return;
     }
     const saved = d.aim?.[d.hole], onTee = w.usingTee || (w.ht.tee && A.haversine(w.pos[0], w.pos[1], w.ht.tee[0], w.ht.tee[1]) < ON_TEE_M);
@@ -169,6 +188,16 @@ export function registerCourse(c, P) {
     chrome(w);
   }
 
+  // The green on its own, north up, when there is nowhere known to measure from (far away and the tee of this hole is not
+  // known yet). Nothing to aim or measure, so no moving layer.
+  function greenOnlyHtml(d, w) {
+    const g = w.ht.green, root = $('#cvRoot'), W = root?.clientWidth || innerWidth, H = root?.clientHeight || innerHeight;
+    const r = GREEN_ONLY_M, pts = [F.destination(g[0], g[1], 0, r), F.destination(g[0], g[1], 90, r), F.destination(g[0], g[1], 180, r), F.destination(g[0], g[1], 270, r)];
+    const fr = HM.makeFrame(F.destination(g[0], g[1], 180, r), g, pts, W, H, { inset: { t: insets.t, b: insets.b + BOTTOM_CLEAR_PX, l: insets.l, r: 0 }, maxK: MAP_MAX_K });
+    const hasMap = w.feats.some((f) => f.kind !== 'hole'), style = c.ui.pl_style === 'sat' || !hasMap ? 'sat' : 'map';
+    const stat = HM.staticSvg(fr, { feats: w.feats, style, tileList: style === 'sat' ? HM.tiles(fr, g[0]) : null, green: g, tee: null, line: w.ht.line, pos: null, unit: U(), cv: c.cv, noPos: true });
+    return HM.svg(fr, stat, '', style).replace('class="holemap', 'class="holemap cv-svg') + `<span class="hmcredit">${style === 'sat' ? 'Imagery © Esri' : '© OpenStreetMap'}</span><p class="cv-onlygreen">${esc(T.greenOnly)}</p>`;
+  }
   function frameFor() {
     if (UV && UV.hole === L.hole && UV.usingTee === L.usingTee) return UV.fr;
     UV = null;
@@ -210,19 +239,21 @@ export function registerCourse(c, P) {
   }
   // Mark this green / tee (plan 4.5): offered only for what is not known. The tee only before the hole has been started.
   function markOffer(d, w) {
-    if (P.mapStatus(d)) return null;                     // still downloading, or the map server was busy: the map may know this hole
+    if (P.mapStatus(d) || P.mapMissing(d)) return null;   // the map may know this hole: download it first
+    if (w.farAway || !atCourse(d, w)) return null;       // only on the course itself – never mark your house as the 1st tee
     const h = d.holes[d.hole], tee = !w.ht.tee && !(h.strokes > 0) && !h.shots?.length;
     if (w.ht.green && !tee) return null;
     return { green: !w.ht.green, tee, ready: !!w.fix && w.fix.acc <= SH.POOR_GPS_M };
   }
   function bannerHtml(d) {
     const h = d.holes[d.hole], out = [];
+    if (P.mapMissing(d) && !P.mapStatus(d)) out.push(`<div class="cv-marks" id="cvMapGet"><div class="row"><button type="button" class="btn sec" data-cvmapretry>${esc(T.mapGet)}</button></div></div>`);
     if (P.mapStatus(d)?.state === 'failed') out.push(`<div class="cv-marks" id="cvMapFail"><div class="row"><button type="button" class="btn sec" data-cvmapretry>${esc(T.mapRetry)}</button></div><p class="small muted">${esc(P.mapStatus(d).msg)}</p></div>`);
     if (offer && !(TR.on(d) && h.done)) out.push(`<div class="cv-next" id="cvNext"><button type="button" class="btn cv-big" data-cvnext="${offer}">${esc(T.nextAsk(offer))}</button><button type="button" class="btn sec" data-cvnextno>${esc(T.nextNo)}</button></div>`);
     if (markable && !TR.marking()) {
       const btn = (k, label) => `<button type="button" class="btn sec" data-cvmark="${k}"${markable.ready ? '' : ' disabled'}>${esc(label)}</button>`;
       out.push(`<div class="cv-marks" id="cvMarks"><div class="row">${markable.green ? btn('green', T.markGreen) : ''}${markable.tee ? btn('tee', T.markTee) : ''}</div>
-        <p class="small muted">${esc(markable.ready ? T.markNote : T.markWait(`${yd(SH.POOR_GPS_M)} ${U()}`))}</p></div>`);
+        ${markable.ready && innerHeight < COMPACT_PEEK_H ? '' : `<p class="small muted">${esc(markable.ready ? T.markNote : T.markWait(`${yd(SH.POOR_GPS_M)} ${U()}`))}</p>`}</div>`);
     }
     return out.join('');
   }
@@ -245,15 +276,17 @@ export function registerCourse(c, P) {
     const parts = pl?.parts, bits = !parts ? [] : [Math.abs(parts.elev) >= 0.9 ? `${parts.elev > 0 ? 'uphill' : 'downhill'} ${sg(parts.elev)}` : null, Math.abs(parts.wind) >= 0.9 ? `wind ${sg(parts.wind)}` : null,
       Math.abs(parts.temp) >= 0.9 ? `${Math.round(L.wx?.temp_c)}°C ${sg(parts.temp)}` : null, Math.abs(parts.alt) >= 0.9 ? `altitude ${sg(parts.alt)}` : null].filter(Boolean);
     const sc = h.strokes > 0 ? T.scoreHole(h.strokes, P.toParText(h.strokes - h.par)) : T.score;
+    // a banner (next hole, marks, map) on a short phone: leave out the detail lines (they are in the Club tab) so the map keeps its room
+    const banner = bannerHtml(d), compact = !!banner && innerHeight < COMPACT_PEEK_H;
     const info = `<div class="cv-prow">
         <button type="button" class="cv-club" data-cvpeekclub aria-label="${esc(T.pickClub)}"><b>${esc(M?.club?.name || T.noClub)}</b><span>▾</span></button>
         <div class="cv-pnum">${M ? `<b>${yd(aimD)}</b><span>${esc(U())} to aim</span>` : ''}</div>${!plays && rangeText() ? `<span class="cv-range">${esc(rangeText())}</span>` : ''}</div>
       ${plays ? `<div class="cv-prow2"><button type="button" class="cv-plays" data-cvplays>${esc(plays)}</button>${rangeText() ? `<span class="cv-range">${esc(rangeText())}</span>` : ''}</div>` : ''}
-      ${M?.out ? outcomeHtml() : M ? `<p class="cv-sure">${esc(sureText() || tr)}</p>` : ''}
-      ${missHtml()}
+      ${compact ? '' : M?.out ? outcomeHtml() : M ? `<p class="cv-sure">${esc(sureText() || tr)}</p>` : ''}
+      ${compact ? '' : missHtml()}
       ${c.ui.pl_plays_open && bits.length ? `<p class="cv-why">${esc(bits.join(' · '))}${L?.wx ? ` · wind ${Math.round(L.wx.wind_kmh)} km/h from ${P.compass(L.wx.wind_from)}` : ''}</p>` : ''}`;
     el.dataset.track = TR.on(d) ? 'on' : '';
-    el.innerHTML = bannerHtml(d) + (TR.peek(info) ?? info + `<div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`);
+    el.innerHTML = banner + (TR.peek(info) ?? info + `<div class="cv-pbtns"><button type="button" class="btn cv-big" data-cvscore>${esc(sc)}</button><button type="button" class="btn sec cv-card-btn" data-cvcard><small>${esc(T.tabs.card)}</small>${esc(cardSub(d))}</button></div>`);
   }
   const cardSub = (d) => { const t = P.scoreTotals(d); return t.played.length ? T.thruShort(P.toParText(t.toPar), t.played.length) : T.noHoles; };
   const sg = (v) => `${v > 0 ? '+' : '−'}${yd(Math.abs(v))}`;
@@ -398,7 +431,7 @@ export function registerCourse(c, P) {
       if (b.hasAttribute('data-cvcard')) { open('card'); return; }
       if (b.dataset.cvnext) { FEEL.play('tap'); goHole(Number(b.dataset.cvnext)); return; }
       if (b.hasAttribute('data-cvnextno')) { const o = P.holeOrder(dh); c.ui.pl_next_off = `${dh.id}|${o[o.indexOf(dh.hole) + 1]}`; c.saveUi(); offer = null; peek(); if (measure()) drawMap(); return; }
-      if (b.hasAttribute('data-cvmapretry')) { P.retryMap(); return; }
+      if (b.hasAttribute('data-cvmapretry') || b.hasAttribute('data-plmap')) { b.disabled = true; P.retryMap(); return; }
       if (b.dataset.cvmark) { if (!b.disabled) markHere(b.dataset.cvmark); return; }
       if (b.hasAttribute('data-cvforget')) { forgetMarks(); return; }
       if (b.hasAttribute('data-cvplays')) { c.ui.pl_plays_open = !c.ui.pl_plays_open; c.saveUi(); peek(); return; }
